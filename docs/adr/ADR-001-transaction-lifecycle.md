@@ -29,10 +29,10 @@ decorative — the mid-flight-revocation and counter-race tests depend on it.
   version, policy digest, and counters; the pre-lock evaluation is discarded.
 - Verdict composition is monotone: rules produce the verdict without signals, then signals may only move
   it toward `escalate` / `stop`. There is no code path from a signal to `allow` (gate invariant).
-- **Ordering inside the lock:** validate → build the op list → append + fsync WAL → apply ops to memory →
-  materialize chain files (+fsync) → release → respond. In-memory state is never mutated before the WAL
-  fsync returns. If `apply()` throws after durability, the process **aborts**; replay on restart is the
-  repair, never a partially applied state.
+- **Ordering inside the lock:** build the op list → dry-run `apply()` on a cloned state → append + fsync
+  WAL → publish the validated clone → materialize chain files (+fsync) → release → respond. Live state
+  is never mutated before the WAL fsync returns. If materialization fails after durability, the writer
+  is poisoned; replay on restart repairs the projection before service resumes.
 - **Single writer enforced:** at startup the service creates `records/{world_id}/.writer.lock` with
   `fs.open(..., 'wx')` (atomic on Windows) holding pid + boot id. If it exists, the service refuses to
   start and prints the manual-clear instruction. A second authorization-service process is a
@@ -44,20 +44,26 @@ One append-only JSONL file per world, `records/{world_id}/wal.jsonl` — the `wa
 opened once in append mode and held open for the process lifetime. Line 0 is a genesis header
 (`wal_version`, world id, created-at). Each process start appends a **run header** carrying `run_id`,
 `boot_id`, `policy_version`, `policy_content_digest`, and the full evaluator build digest that
-ADR-007's short `evaluator_build_id` abbreviates. One line = one **transaction**, so a whole action's
-mutations land or none do.
+ADR-007's short `evaluator_build_id` abbreviates. WAL v2 operations carry the complete immutable artifact
+being created (not only its id), so replay from genesis reconstructs all authority state and record
+projections. One line = one **transaction**, so a whole action's mutations land or none do.
 
 ```json
 {"seq":412,"world_id":"w-demo","ts":"2026-08-01T09:14:22.418Z","txn":"commit_verify",
  "run_id":"run-2026-08-01-02",
  "actor":{"credential":"proc:services_host","claimed_role":null},
  "ops":[
-   {"op":"nonce.consume","id":"nce_7f3a"},
-   {"op":"reservation.settle","id":"rsv_2c91","counter":"amount","delta":2500000},
-   {"op":"ruling.consume","id":"rul_88ad"},
-   {"op":"commitment.bind","id":"cmt_4b10","effect_id":"eff_4b10",
-    "idempotency_key":"9f2c…e1","token_expires_at":"2026-08-01T09:14:27.418Z"},
-   {"op":"record.append","chain":"action","entry_id":"rec_1044","payload":{"event":"commitment"}}
+   {"op":"nonce.consume","nonce_id":"nce_7f3a"},
+   {"op":"reservation.settle","reservation_id":"rsv_amount_2c91"},
+   {"op":"reservation.settle","reservation_id":"rsv_actions_4410"},
+   {"op":"ruling.consume","ruling_id":"rul_88ad"},
+   {"op":"commitment.bind","commitment":{"world_id":"w-demo","commitment_id":"cmt_4b10",
+    "ruling_id":"rul_88ad","frozen_proposal_hash":"…","effect_id":"eff_4b10",
+    "effect_request_digest":"…","idempotency_key":"…","service":"filing",
+    "action_class":"grant-filing","bound_at":"2026-08-01T09:14:22.418Z",
+    "token_expires_at":"2026-08-01T09:14:27.418Z","services_host_boot_id":"svc_boot_2",
+    "state":"bound","outcome":null,"recovery_owner_role":"principal"}},
+   {"op":"record.action.append","entry":{"world_id":"w-demo","entry_id":"rec_1044","…":"…"}}
  ],
  "prev_hash":"5ee9…","entry_hash":"a41c…"}
 ```
@@ -154,8 +160,8 @@ Positive deltas count from **reservation** (in-flight attempts count); negative 
 
 `commit-verify` has exactly **two** outcomes: a commit token, or a deny. It is a verification, not a
 re-adjudication — escalating there would mean escalating an action that is already in flight. In one
-transaction it re-validates the binding tuple and the counters, consumes the nonce, settles the
-reservation, marks the ruling `consumed`, creates the `bound` commitment, seals the pre-effect
+transaction it re-validates the binding tuple, exact effect intent, and counters; consumes the nonce;
+settles every reservation; marks the ruling `consumed`; creates the `bound` commitment; seals the pre-effect
 `commitment` record event, and mints the token.
 
 - **Idempotency key** = hex SHA-256 over canonical `{world_id, ruling_id, nonce}`. One ruling ⇒ one nonce
@@ -163,9 +169,10 @@ reservation, marks the ruling `consumed`, creates the `bound` commitment, seals 
   it is filename-safe on Windows (64 lowercase hex chars, no separators, no reserved names).
 - **Mandate binding** is re-verified here, not assumed: an HMAC that is `invalid` **or** `unverifiable`
   (unknown key id, ADR-007) is defective authority → deny.
-- **Token** = `{world_id, effect_id, ruling_id, idempotency_key, service, action_class, expires_at}` plus
-  an ADR-007 MAC block `{alg, key_id, value}` under the `commit-token` domain. The executing service
-  verifies MAC and TTL locally and uses it once. Single use is
+- **Token** = `{world_id, effect_id, ruling_id, frozen_proposal_hash, effect_request_digest,
+  idempotency_key, service, action_class, expires_at}` plus an ADR-007 MAC block
+  `{alg, key_id, value}` under the `commit-token` domain. The executing service recomputes the exact
+  effect-intent digest, verifies MAC and TTL locally, and uses the token once. Single use is
   guaranteed upstream — the nonce is consumable exactly once — and again downstream, since a duplicate
   `effect_outcome` for an `effect_id` is rejected.
 - **One local transaction on the service side:** the effect payload *is* the ledger record. The service

@@ -1,0 +1,169 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+/** Replay-complete transactional state artifacts. */
+import { z } from 'zod';
+
+import { classToken, hexDigest, id, integer, modelId, role, timestamp, worldId } from './common.js';
+import { disposition, interventionContract } from './intervention.js';
+import { counterName, gateRuling } from './ruling.js';
+
+export const NONCE_STATES = ['issued', 'consumed', 'expired'] as const;
+export const nonceState = z.enum(NONCE_STATES);
+export const nonceRecord = z
+  .object({
+    world_id: worldId,
+    nonce_id: id,
+    ruling_id: id,
+    expires_at: timestamp,
+    state: nonceState,
+  })
+  .strict();
+export type NonceRecord = z.infer<typeof nonceRecord>;
+
+export const RESERVATION_STATES = [
+  'reserved',
+  'settled',
+  'held_for_reconciliation',
+  'released',
+] as const;
+export const reservationState = z.enum(RESERVATION_STATES);
+export const reservationRecord = z
+  .object({
+    world_id: worldId,
+    reservation_id: id,
+    ruling_id: id,
+    mandate_id: id,
+    mandate_version: integer.min(1),
+    counter: counterName,
+    delta: integer,
+    reserved_at: timestamp,
+    expires_at: timestamp,
+    state_changed_at: timestamp,
+    state: reservationState,
+  })
+  .strict()
+  .superRefine((record, ctx) => {
+    if (record.reserved_at > record.expires_at) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['expires_at'], message: 'reservation expires before issue' });
+    }
+    if (record.state === 'reserved' && record.state_changed_at !== record.reserved_at) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['state_changed_at'],
+        message: 'a fresh reservation changes state when it is reserved',
+      });
+    }
+  });
+export type ReservationRecord = z.infer<typeof reservationRecord>;
+
+export const COMMITMENT_STATES = ['bound', 'discharged', 'unknown', 'reconciled'] as const;
+export const commitmentState = z.enum(COMMITMENT_STATES);
+export const commitmentRecord = z
+  .object({
+    world_id: worldId,
+    commitment_id: id,
+    ruling_id: id,
+    frozen_proposal_hash: hexDigest,
+    effect_id: id,
+    effect_request_digest: hexDigest,
+    idempotency_key: hexDigest,
+    service: id,
+    action_class: classToken,
+    bound_at: timestamp,
+    token_expires_at: timestamp,
+    services_host_boot_id: id,
+    state: commitmentState,
+    outcome: z.enum(['success', 'failed', 'unknown-reconciliation-required']).nullable(),
+    recovery_owner_role: role.nullable(),
+  })
+  .strict();
+export type CommitmentRecord = z.infer<typeof commitmentRecord>;
+
+export const ESCALATION_STATES = ['open', 'disposed', 'timed_out', 'cancelled'] as const;
+export const escalationState = z.enum(ESCALATION_STATES);
+export const escalationRecord = z
+  .object({
+    world_id: worldId,
+    escalation_id: id,
+    ruling_id: id,
+    frozen_proposal_hash: hexDigest,
+    contract: interventionContract,
+    opened_at: timestamp,
+    expires_at: timestamp,
+    state: escalationState,
+    terminal_disposition: disposition.nullable(),
+    successor_ruling_id: id.nullable(),
+  })
+  .strict();
+export type EscalationRecord = z.infer<typeof escalationRecord>;
+
+export const effectRecord = z
+  .object({
+    world_id: worldId,
+    effect_id: id,
+    commitment_id: id,
+    idempotency_key: hexDigest,
+    effect_request_digest: hexDigest,
+    outcome: z.enum(['success', 'failed', 'unknown-reconciliation-required']),
+    recorded_at: timestamp,
+    detail: z.string().optional(),
+  })
+  .strict();
+export type EffectRecord = z.infer<typeof effectRecord>;
+
+export const policyActivation = z
+  .object({
+    world_id: worldId,
+    policy_version: z.string().min(1),
+    policy_content_digest: hexDigest,
+    evaluator_build_id: z.string().min(1),
+    activated_at: timestamp,
+  })
+  .strict();
+export type PolicyActivation = z.infer<typeof policyActivation>;
+
+export const PATTERN_EVENTS = ['escalation', 'timeout', 'override'] as const;
+export const patternEvent = z
+  .object({
+    world_id: worldId,
+    event_id: id,
+    mandate_id: id,
+    escalation_id: id,
+    kind: z.enum(PATTERN_EVENTS),
+    at: timestamp,
+  })
+  .strict();
+export type PatternEvent = z.infer<typeof patternEvent>;
+
+export const modelSelectionRecord = z
+  .object({
+    world_id: worldId,
+    selection_id: id,
+    case_id: id,
+    requested_id: modelId,
+    served_id: modelId,
+    card_id: z.string().min(1),
+    card_version: integer.min(1),
+    card_digest: hexDigest,
+    selected_at: timestamp,
+  })
+  .strict();
+export type ModelSelectionRecord = z.infer<typeof modelSelectionRecord>;
+
+export const REVIEW_STATES = ['open', 'resolved', 'cancelled'] as const;
+export const reviewObligation = z
+  .object({
+    world_id: worldId,
+    obligation_id: id,
+    case_id: id,
+    source_entry_id: id,
+    route: z.string().min(1),
+    recovery_owner_role: role,
+    opened_at: timestamp,
+    state: z.enum(REVIEW_STATES),
+    resolved_at: timestamp.nullable(),
+  })
+  .strict();
+export type ReviewObligation = z.infer<typeof reviewObligation>;
+
+/** Stored copy used to connect a ruling id to its complete immutable ruling. */
+export const issuedRulingRecord = gateRuling;

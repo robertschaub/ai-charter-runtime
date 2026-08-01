@@ -31,6 +31,7 @@ export type CanonicalizationErrorCode =
   | 'lone-surrogate'
   | 'function'
   | 'symbol'
+  | 'non-json-property'
   | 'cycle';
 
 export class CanonicalizationError extends Error {
@@ -126,6 +127,20 @@ function serialize(value: unknown, path: string, stack: Set<object>): string {
       if (prototype !== Array.prototype) {
         throw new CanonicalizationError('class-instance', path, 'array subclasses are outside the subset');
       }
+      for (const key of Reflect.ownKeys(value)) {
+        if (typeof key === 'symbol') {
+          throw new CanonicalizationError('symbol', path, 'symbol-keyed properties are outside the subset');
+        }
+        if (key === 'length') continue;
+        const index = Number(key);
+        if (!Number.isSafeInteger(index) || index < 0 || String(index) !== key || index >= value.length) {
+          throw new CanonicalizationError('non-json-property', path, `array property ${key} is outside the subset`);
+        }
+        const descriptor = Object.getOwnPropertyDescriptor(value, key);
+        if (descriptor === undefined || !('value' in descriptor)) {
+          throw new CanonicalizationError('non-json-property', `${path}/${key}`, 'accessor properties are outside the subset');
+        }
+      }
       const parts: string[] = [];
       for (let i = 0; i < value.length; i += 1) {
         parts.push(serialize(value[i], `${path}/${i}`, stack));
@@ -138,6 +153,19 @@ function serialize(value: unknown, path: string, stack: Set<object>): string {
     }
 
     const record = value as Record<string, unknown>;
+    for (const key of Reflect.ownKeys(record)) {
+      if (typeof key === 'symbol') {
+        throw new CanonicalizationError('symbol', path, 'symbol-keyed properties are outside the subset');
+      }
+      const descriptor = Object.getOwnPropertyDescriptor(record, key);
+      if (descriptor === undefined || !descriptor.enumerable || !('value' in descriptor)) {
+        throw new CanonicalizationError(
+          'non-json-property',
+          `${path}/${escapePathSegment(key)}`,
+          'non-enumerable and accessor properties are outside the subset',
+        );
+      }
+    }
     // Own enumerable string keys only; JCS sorts them by UTF-16 code unit, which is
     // exactly JavaScript's default string sort.
     const keys = Object.keys(record).sort();

@@ -1,116 +1,163 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-/**
- * Write-ahead log — ADR-001 §2.
- *
- * One append-only JSONL file per world. Line 0 is a genesis header; each process start
- * appends a run header; every other line is one **transaction**, so a whole action's
- * mutations land or none do.
- *
- * "Op vocabulary is closed and versioned. `apply(state, op)` is the *only* mutation path
- * in the service, which is what makes replay faithful by construction." The union below
- * is that closed vocabulary, derived from the §3 state machines, the §5 counters, the §7
- * disposition map, and the §8 sweeper. `seq`, `prev_hash` and `entry_hash` are assigned by
- * the chain writer, so they are not part of the authored transaction body.
- */
+/** Replay-complete write-ahead-log contracts — ADR-001 §§2, 9. */
 import { z } from 'zod';
 
-import { classToken, credentialLabel, hexDigest, id, integer, minorUnits, role, timestamp, worldId } from './common.js';
-import { counterName } from './ruling.js';
+import { credentialLabel, hexDigest, id, integer, role, timestamp, worldId } from './common.js';
 import { disposition } from './intervention.js';
-import { recordEvent } from './record.js';
+import { mandate } from './mandate.js';
+import { frozenProposal } from './proposal.js';
+import { accessChainEntry, recordEntry } from './record.js';
+import { gateRuling } from './ruling.js';
+import {
+  commitmentRecord,
+  effectRecord,
+  escalationRecord,
+  modelSelectionRecord,
+  nonceRecord,
+  patternEvent,
+  policyActivation,
+  reservationRecord,
+  reviewObligation,
+} from './state.js';
+import { storeItem } from './store.js';
+
+const transitionReason = z.string().min(1);
 
 export const walOp = z.discriminatedUnion('op', [
-  // nonce: issued -> consumed | expired
-  z.object({ op: z.literal('nonce.issue'), id, expires_at: timestamp }),
-  z.object({ op: z.literal('nonce.consume'), id }),
-  z.object({ op: z.literal('nonce.expire'), id }),
+  z.object({ op: z.literal('proposal.freeze'), proposal: frozenProposal }).strict(),
 
-  // reservation: reserved -> settled -> held_for_reconciliation -> settled | released
-  z.object({ op: z.literal('reservation.reserve'), id, counter: counterName, delta: minorUnits }),
-  z.object({ op: z.literal('reservation.settle'), id, counter: counterName, delta: minorUnits }),
-  z.object({ op: z.literal('reservation.release'), id, reason: classToken }),
-  z.object({ op: z.literal('reservation.hold_for_reconciliation'), id }),
-  z.object({ op: z.literal('reservation.reconcile'), id, resolution: z.enum(['settled', 'released']) }),
+  z.object({ op: z.literal('nonce.issue'), nonce: nonceRecord }).strict(),
+  z.object({ op: z.literal('nonce.consume'), nonce_id: id }).strict(),
+  z.object({ op: z.literal('nonce.expire'), nonce_id: id }).strict(),
 
-  // ruling: issued -> consumed | invalidated | expired
-  z.object({ op: z.literal('ruling.issue'), id, nonce: id }),
-  z.object({ op: z.literal('ruling.consume'), id }),
-  z.object({ op: z.literal('ruling.invalidate'), id, reason: classToken }),
-  z.object({ op: z.literal('ruling.expire'), id }),
+  z.object({ op: z.literal('reservation.reserve'), reservation: reservationRecord }).strict(),
+  z.object({ op: z.literal('reservation.settle'), reservation_id: id }).strict(),
+  z.object({ op: z.literal('reservation.release'), reservation_id: id, reason: transitionReason }).strict(),
+  z.object({ op: z.literal('reservation.hold_for_reconciliation'), reservation_id: id }).strict(),
+  z
+    .object({
+      op: z.literal('reservation.reconcile'),
+      reservation_id: id,
+      resolution: z.enum(['settled', 'released']),
+    })
+    .strict(),
 
-  // commitment: bound -> discharged | unknown -> reconciled
-  z.object({
-    op: z.literal('commitment.bind'),
-    id,
-    effect_id: id,
-    idempotency_key: hexDigest,
-    token_expires_at: timestamp,
-  }),
-  z.object({ op: z.literal('commitment.discharge'), id, outcome: z.enum(['success', 'failed']) }),
-  z.object({ op: z.literal('commitment.mark_unknown'), id }),
-  z.object({ op: z.literal('commitment.reconcile'), id, resolution: z.enum(['success', 'failed', 'routed']) }),
+  z.object({ op: z.literal('ruling.issue'), ruling: gateRuling }).strict(),
+  z.object({ op: z.literal('ruling.consume'), ruling_id: id }).strict(),
+  z.object({ op: z.literal('ruling.invalidate'), ruling_id: id, reason: transitionReason }).strict(),
+  z.object({ op: z.literal('ruling.expire'), ruling_id: id }).strict(),
+  z.object({ op: z.literal('ruling.link_successor'), ruling_id: id, successor_ruling_id: id }).strict(),
 
-  // escalation: open -> disposed | timed_out | cancelled
-  z.object({ op: z.literal('escalation.open'), id, eligible_role: role, response_bound_ms: integer.min(1) }),
-  z.object({ op: z.literal('escalation.dispose'), id, disposition }),
-  z.object({ op: z.literal('escalation.timeout'), id, applied_default: disposition }),
-  z.object({ op: z.literal('escalation.cancel'), id }),
+  z.object({ op: z.literal('commitment.bind'), commitment: commitmentRecord }).strict(),
+  z
+    .object({
+      op: z.literal('commitment.discharge'),
+      commitment_id: id,
+      outcome: z.enum(['success', 'failed']),
+    })
+    .strict(),
+  z
+    .object({
+      op: z.literal('commitment.mark_unknown'),
+      commitment_id: id,
+      recovery_owner_role: role,
+    })
+    .strict(),
+  z
+    .object({
+      op: z.literal('commitment.reconcile'),
+      commitment_id: id,
+      resolution: z.enum(['success', 'failed', 'routed']),
+    })
+    .strict(),
 
-  // idempotency key: unused -> recorded (terminal)
-  z.object({ op: z.literal('idempotency.record'), key: hexDigest, effect_id: id }),
+  z.object({ op: z.literal('escalation.open'), escalation: escalationRecord }).strict(),
+  z.object({ op: z.literal('escalation.dispose'), escalation_id: id, disposition }).strict(),
+  z.object({ op: z.literal('escalation.timeout'), escalation_id: id, applied_default: disposition }).strict(),
+  z.object({ op: z.literal('escalation.cancel'), escalation_id: id }).strict(),
 
-  // mandate + policy changes, which drive ADR-001 §4's eager invalidation sweep
-  z.object({ op: z.literal('mandate.grant'), id, version: integer.min(1) }),
-  z.object({ op: z.literal('mandate.amend'), id, version: integer.min(1) }),
-  z.object({ op: z.literal('mandate.revoke'), id }),
-  z.object({ op: z.literal('policy.reload'), policy_version: z.string().min(1), policy_content_digest: hexDigest }),
+  z.object({ op: z.literal('effect.record'), effect: effectRecord }).strict(),
 
-  // record append (the action and access chains are materialized from these)
-  z.object({
-    op: z.literal('record.append'),
-    chain: z.enum(['action', 'access']),
-    entry_id: id,
-    payload: recordEvent,
-  }),
+  z.object({ op: z.literal('mandate.grant'), mandate }).strict(),
+  z.object({ op: z.literal('mandate.amend'), mandate }).strict(),
+  z
+    .object({
+      op: z.literal('mandate.revoke'),
+      mandate_id: id,
+      version: integer.min(1),
+      revoked_at: timestamp,
+    })
+    .strict(),
+  z
+    .object({
+      op: z.literal('mandate.expire'),
+      mandate_id: id,
+      version: integer.min(1),
+      expired_at: timestamp,
+    })
+    .strict(),
+  z.object({ op: z.literal('policy.reload'), policy: policyActivation }).strict(),
+
+  z.object({ op: z.literal('store.put'), item: storeItem }).strict(),
+  z.object({ op: z.literal('store.remove'), item_id: id, reason: transitionReason }).strict(),
+  z.object({ op: z.literal('pattern.record'), event: patternEvent }).strict(),
+  z.object({ op: z.literal('model.select'), selection: modelSelectionRecord }).strict(),
+  z.object({ op: z.literal('review.open'), obligation: reviewObligation }).strict(),
+  z
+    .object({
+      op: z.literal('review.resolve'),
+      obligation_id: id,
+      resolution: z.enum(['resolved', 'cancelled']),
+      resolved_at: timestamp,
+    })
+    .strict(),
+
+  z.object({ op: z.literal('record.action.append'), entry: recordEntry }).strict(),
+  z.object({ op: z.literal('record.access.append'), entry: accessChainEntry }).strict(),
 ]);
 
 export type WalOp = z.infer<typeof walOp>;
 
-/** Line 0 of every WAL. */
-export const walGenesisHeader = z.object({
-  wal_version: integer.min(1),
-  world_id: worldId,
-  created_at: timestamp,
-});
+export const walGenesisHeader = z
+  .object({
+    kind: z.literal('genesis'),
+    wal_version: z.literal(2),
+    world_id: worldId,
+    created_at: timestamp,
+  })
+  .strict();
 
-/** Appended at every process start (ADR-001 §2). */
-export const walRunHeader = z.object({
-  world_id: worldId,
-  ts: timestamp,
-  run_id: id,
-  boot_id: id,
-  policy_version: z.string().min(1),
-  policy_content_digest: hexDigest,
-  /** The full digest that ADR-007's short `evaluator_build_id` abbreviates. */
-  evaluator_build_digest: hexDigest,
-});
+export const walRunHeader = z
+  .object({
+    kind: z.literal('run'),
+    world_id: worldId,
+    ts: timestamp,
+    run_id: id,
+    boot_id: id,
+    policy_version: z.string().min(1),
+    policy_content_digest: hexDigest,
+    evaluator_build_digest: hexDigest,
+  })
+  .strict();
 
-export const walTransaction = z.object({
-  world_id: worldId,
-  /** Non-decreasing; a backwards clock jump is rejected (ADR-001 §2 clock guard). */
-  ts: timestamp,
-  txn: z.string().regex(/^[a-z][a-z0-9_]*$/, 'expected a lowercase transaction name'),
-  run_id: id,
-  actor: z.object({
-    credential: credentialLabel,
-    claimed_role: role.nullable(),
-  }),
-  ops: z.array(walOp).min(1),
-});
+export const walTransaction = z
+  .object({
+    kind: z.literal('transaction'),
+    world_id: worldId,
+    ts: timestamp,
+    txn: z.string().regex(/^[a-z][a-z0-9_]*$/, 'expected a lowercase transaction name'),
+    run_id: id,
+    actor: z
+      .object({
+        credential: credentialLabel,
+        claimed_role: role.nullable(),
+      })
+      .strict(),
+    ops: z.array(walOp).min(1),
+  })
+  .strict();
 
 export type WalTransaction = z.infer<typeof walTransaction>;
 
-/** Any line of a WAL file, before the chain writer adds `seq` / `prev_hash` / `entry_hash`. */
-export const walLine = z.union([walTransaction, walRunHeader, walGenesisHeader]);
-
+export const walLine = z.discriminatedUnion('kind', [walGenesisHeader, walRunHeader, walTransaction]);
 export type WalLine = z.infer<typeof walLine>;

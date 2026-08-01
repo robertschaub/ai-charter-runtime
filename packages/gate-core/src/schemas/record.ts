@@ -33,10 +33,12 @@ export const commitmentEvent = z.object({
   ruling_id: id,
   effect_id: id,
   idempotency_key: hexDigest,
+  frozen_proposal_hash: hexDigest,
+  effect_request_digest: hexDigest,
   service: id,
   bound_at: timestamp,
   token_expires_at: timestamp,
-});
+}).strict();
 
 export const effectOutcomeEvent = z.object({
   event: z.literal('effect_outcome'),
@@ -46,7 +48,7 @@ export const effectOutcomeEvent = z.object({
   /** Criterion 7's named recovery owner, for the `unknown` case (ADR-001 §8). */
   recovery_owner_role: role.nullable(),
   detail: z.string().optional(),
-});
+}).strict();
 
 /** ADR-001 §6: a retry with the same key returns the recorded outcome, never re-executes. */
 export const retryServedEvent = z.object({
@@ -55,7 +57,7 @@ export const retryServedEvent = z.object({
   idempotency_key: hexDigest,
   served_at: timestamp,
   recorded_outcome: effectOutcomeValue,
-});
+}).strict();
 
 /** ADR-001 §7: every arrival after the first is a recorded no-op. */
 export const lateDispositionIgnoredEvent = z.object({
@@ -65,7 +67,7 @@ export const lateDispositionIgnoredEvent = z.object({
   authenticated_actor: credentialLabel,
   terminal_state: z.enum(['disposed', 'timed_out', 'cancelled']),
   at: timestamp,
-});
+}).strict();
 
 /** ADR-004 §8 — the four dialogue payloads, plus the general escalation events. */
 export const humanInterventionEvent = z.object({
@@ -76,57 +78,71 @@ export const humanInterventionEvent = z.object({
       kind: z.literal('escalation_raised'),
       contract: interventionContract,
       reason: z.string(),
-    }),
+    }).strict(),
     z.object({
       kind: z.literal('disposition_recorded'),
       disposition,
       responder_role: role,
       at: timestamp,
-    }),
+    }).strict(),
     z.object({
       kind: z.literal('dialogue_trigger_raised'),
       contract: interventionContract,
       standing_class: standingClass,
       question_text: z.string().min(1),
-    }),
+    }).strict(),
     z.object({
       kind: z.literal('dialogue_response_recorded'),
       disposition,
       responder_role: role,
       evidence_ref: z
-        .object({ kind: z.string(), id: z.string(), retrieved_at: timestamp })
+        .object({
+          kind: z.literal('registry_record'),
+          id: z.string().min(1),
+          retrieved_at: timestamp,
+          resolved_at: timestamp,
+          content_digest: hexDigest,
+        })
+        .strict()
         .nullable(),
       /** The answer text is testimony; only its digest rides in the event. */
       answer_digest: hexDigest.nullable(),
-    }),
+    }).strict(),
     z.object({
       kind: z.literal('dialogue_response_refused'),
       reason_code: z.enum(['evidence_required', 'wrong_role', 'disposition_not_permitted']),
       at: timestamp,
-    }),
+    }).strict(),
     z.object({
       kind: z.literal('dialogue_timeout'),
       applied_default: disposition,
       at: timestamp,
-    }),
+    }).strict(),
+    z.object({
+      kind: z.literal('escalation_timeout'),
+      applied_default: disposition,
+      at: timestamp,
+    }).strict(),
   ]),
-});
+}).strict();
 
 /** ADR-003: every anchor attempt appends one event to the access-log chain. */
 export const anchorEvent = z.object({
   event: z.literal('anchor'),
+  world_id: worldId,
   checkpoint_id: id,
   composite_digest: hexDigest,
   remote_sha: z.string().min(1),
   at: timestamp,
-});
+}).strict();
 
 export const anchorFailedEvent = z.object({
   event: z.literal('anchor_failed'),
+  world_id: worldId,
   checkpoint_id: id,
   error_class: z.string().min(1),
   at: timestamp,
-});
+}).strict();
 
 export const recordEvent = z.discriminatedUnion('event', [
   commitmentEvent,
@@ -139,6 +155,17 @@ export const recordEvent = z.discriminatedUnion('event', [
 ]);
 
 export type RecordEvent = z.infer<typeof recordEvent>;
+
+export const commitmentAndEffectEvent = z.discriminatedUnion('event', [
+  commitmentEvent,
+  effectOutcomeEvent,
+  retryServedEvent,
+]);
+
+export const interventionRecordEvent = z.discriminatedUnion('event', [
+  humanInterventionEvent,
+  lateDispositionIgnoredEvent,
+]);
 
 /**
  * The split-custody field list. `prev_hash` and `entry_hash` are assigned by the chain
@@ -158,21 +185,24 @@ export const recordEntry = z.object({
   admissibility_decision: z.object({
     ruling_id: id,
     verdict: z.enum(['allow', 'deny', 'escalate']),
-  }),
+  }).strict(),
   policy_model_version: z.object({
     policy_version: z.string().min(1),
     policy_content_digest: hexDigest,
     evaluator_build_id: z.string().min(1),
-  }),
-  commitment_and_effect: recordEvent.nullable(),
-  human_intervention_event: recordEvent.nullable(),
+    acting_model_requested_id: z.string().min(1),
+    acting_model_served_id: z.string().min(1),
+  }).strict(),
+  commitment_and_effect: commitmentAndEffectEvent.nullable(),
+  human_intervention_event: interventionRecordEvent.nullable(),
   challenge_and_remedy: z
     .object({
       route: z.string(),
       opened_at: timestamp,
     })
+    .strict()
     .nullable(),
-});
+}).strict();
 
 export type RecordEntry = z.infer<typeof recordEntry>;
 
@@ -188,6 +218,8 @@ export const accessEntry = z.object({
   http_status: integer.min(100).max(599),
   /** ADR-003 step 6: verification records the lengths it read. */
   read_lengths: z.record(z.string(), integer.min(0)).optional(),
-});
+}).strict();
+
+export const accessChainEntry = z.union([accessEntry, anchorEvent, anchorFailedEvent]);
 
 export type AccessEntry = z.infer<typeof accessEntry>;

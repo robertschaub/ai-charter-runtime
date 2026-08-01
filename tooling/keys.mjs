@@ -90,9 +90,9 @@ function writeLines(file, lines) {
   fs.writeFileSync(file, text, { encoding: 'utf8', mode: 0o600 });
 }
 
-function writeJson(file, value) {
+function writeJson(file, value, mode) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
-  fs.writeFileSync(file, `${JSON.stringify(value, null, 2)}\n`, 'utf8');
+  fs.writeFileSync(file, `${JSON.stringify(value, null, 2)}\n`, { encoding: 'utf8', ...(mode === undefined ? {} : { mode }) });
 }
 
 function readJson(file, fallback) {
@@ -148,7 +148,9 @@ function generate(force) {
   for (const [name, value] of issued) next = upsertVar(next, name, value);
 
   const existingKeyId = readVar(next, 'GATE_HMAC_KEY_ID');
-  const keyId = existingKeyId && !force ? existingKeyId : uniqueKeyId('hmac', keyringKeyIds());
+  const takenKeyIds = keyringKeyIds();
+  if (force && existingKeyId) takenKeyIds.add(existingKeyId);
+  const keyId = existingKeyId && !force ? existingKeyId : uniqueKeyId('hmac', takenKeyIds);
   next = upsertVar(next, 'GATE_HMAC_KEY_ID', keyId);
 
   writeLines(ENV_PATH, next);
@@ -180,7 +182,7 @@ function rotateHmac() {
     // {active} u keyring.
     keyring.keys.push({ key_id: currentId, key: currentKey, retired_at: today() });
     fs.mkdirSync(KEYS_DIR, { recursive: true });
-    writeJson(KEYRING_PATH, keyring);
+    writeJson(KEYRING_PATH, keyring, 0o600);
     console.log(`keys: retired ${currentId} into ${path.relative(ROOT, KEYRING_PATH)}`);
   } else {
     console.log('keys: no active HMAC pair to retire; writing a fresh one');

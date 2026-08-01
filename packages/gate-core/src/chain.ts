@@ -22,6 +22,7 @@ import {
   mkdirSync,
   openSync,
   readFileSync,
+  truncateSync,
   writeSync,
 } from 'node:fs';
 import { dirname } from 'node:path';
@@ -74,7 +75,14 @@ export interface ChainVerifyFailure {
 export type ChainVerifyResult = ChainVerifyOk | ChainVerifyFailure;
 
 export class ChainError extends Error {
-  readonly code: 'torn-tail' | 'malformed-head' | 'reserved-field' | 'unknown-domain';
+  readonly code:
+    | 'torn-tail'
+    | 'malformed-head'
+    | 'reserved-field'
+    | 'unknown-domain'
+    | 'verification-failed'
+    | 'closed'
+    | 'poisoned';
   constructor(code: ChainError['code'], message: string) {
     super(message);
     this.name = 'ChainError';
@@ -83,6 +91,16 @@ export class ChainError extends Error {
 }
 
 const RESERVED_FIELDS = ['seq', 'prev_hash', 'entry_hash'] as const;
+
+function writeAllSync(fd: number, text: string): void {
+  const bytes = Buffer.from(text, 'utf8');
+  let offset = 0;
+  while (offset < bytes.length) {
+    const written = writeSync(fd, bytes, offset, bytes.length - offset, null);
+    if (written <= 0) throw new Error('chain: write made no progress');
+    offset += written;
+  }
+}
 
 function isPlainRecord(value: unknown): value is Record<string, unknown> {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
@@ -94,6 +112,23 @@ function assertChainDomain(domainTag: ChainDomainTag): void {
   if (!isChainDomainTag(domainTag)) {
     throw new ChainError('unknown-domain', `chain: ${String(domainTag)} is not a chain domain tag`);
   }
+}
+
+function buildEntryLine(
+  head: ChainHead,
+  domainTag: ChainDomainTag,
+  entry: Record<string, unknown>,
+): AppendedEntry {
+  if (!isPlainRecord(entry)) throw new TypeError('appendEntry: entry must be a plain object');
+  for (const field of RESERVED_FIELDS) {
+    if (Object.prototype.hasOwnProperty.call(entry, field)) {
+      throw new ChainError('reserved-field', `appendEntry: ${field} is assigned by the chain, not the caller`);
+    }
+  }
+  const body: Record<string, unknown> = { ...entry, seq: head.length, prev_hash: head.head_hash };
+  const entryHash = digestFor(domainTag, body);
+  const line = `${canonicalize({ ...body, entry_hash: entryHash })}\n`;
+  return { seq: head.length, prev_hash: head.head_hash, entry_hash: entryHash, line };
 }
 
 /** Split file text into lines, reporting whether the final line was terminated. */
@@ -145,30 +180,77 @@ export function appendEntry(
   entry: Record<string, unknown>,
 ): AppendedEntry {
   assertChainDomain(domainTag);
-  if (!isPlainRecord(entry)) {
-    throw new TypeError('appendEntry: entry must be a plain object');
-  }
-  for (const field of RESERVED_FIELDS) {
-    if (Object.prototype.hasOwnProperty.call(entry, field)) {
-      throw new ChainError('reserved-field', `appendEntry: ${field} is assigned by the chain, not the caller`);
-    }
-  }
-
   const head = readHead(file);
-  const body: Record<string, unknown> = { ...entry, seq: head.length, prev_hash: head.head_hash };
-  const entryHash = digestFor(domainTag, body);
-  const line = `${canonicalize({ ...body, entry_hash: entryHash })}\n`;
+  const appended = buildEntryLine(head, domainTag, entry);
 
   mkdirSync(dirname(file), { recursive: true });
   const fd = openSync(file, 'a');
   try {
-    writeSync(fd, line, null, 'utf8');
+    writeAllSync(fd, appended.line);
     fsyncSync(fd);
   } finally {
     closeSync(fd);
   }
 
-  return { seq: head.length, prev_hash: head.head_hash, entry_hash: entryHash, line };
+  return appended;
+}
+
+/**
+ * Open-once writer used by the M2 WAL. The caller owns serialization; this class keeps the
+ * verified head in memory so appending N transactions is O(N), not O(N²).
+ */
+export class DurableChainWriter {
+  readonly #file: string;
+  readonly #domainTag: ChainDomainTag;
+  readonly #fd: number;
+  #head: ChainHead;
+  #closed = false;
+  #poisoned = false;
+
+  constructor(file: string, domainTag: ChainDomainTag) {
+    assertChainDomain(domainTag);
+    const verified = verifyChain(file, domainTag);
+    if (!verified.ok) {
+      throw new ChainError(
+        verified.torn_tail ? 'torn-tail' : 'verification-failed',
+        `chain: ${file} failed verification at ${verified.index} (${verified.reason})`,
+      );
+    }
+    mkdirSync(dirname(file), { recursive: true });
+    this.#file = file;
+    this.#domainTag = domainTag;
+    this.#head = { length: verified.length, head_hash: verified.head_hash };
+    this.#fd = openSync(file, 'a');
+  }
+
+  get head(): ChainHead {
+    return { ...this.#head };
+  }
+
+  append(entry: Record<string, unknown>): AppendedEntry {
+    if (this.#closed) throw new ChainError('closed', `chain: writer for ${this.#file} is closed`);
+    if (this.#poisoned) {
+      throw new ChainError('poisoned', `chain: writer for ${this.#file} requires recovery after a failed append`);
+    }
+    const appended = buildEntryLine(this.#head, this.#domainTag, entry);
+    try {
+      writeAllSync(this.#fd, appended.line);
+      fsyncSync(this.#fd);
+    } catch (error) {
+      // A failed write or fsync has an unknowable durable prefix. Never append again on
+      // this descriptor; startup verification/repair is the only safe continuation.
+      this.#poisoned = true;
+      throw error;
+    }
+    this.#head = { length: appended.seq + 1, head_hash: appended.entry_hash };
+    return appended;
+  }
+
+  close(): void {
+    if (this.#closed) return;
+    this.#closed = true;
+    closeSync(this.#fd);
+  }
 }
 
 /**
@@ -202,6 +284,11 @@ export function verifyChain(file: string, domainTag: ChainDomainTag): ChainVerif
       good_bytes: goodBytes,
     });
 
+    // A JSONL transaction is complete only after its newline. Even when the bytes before
+    // the missing newline happen to form valid JSON, a crash may have stopped at that
+    // exact boundary; admitting it would make verifyChain and readHead disagree.
+    if (isFinalLine && !terminated) return fail('parse');
+
     let parsed: unknown;
     try {
       parsed = JSON.parse(line);
@@ -209,6 +296,12 @@ export function verifyChain(file: string, domainTag: ChainDomainTag): ChainVerif
       return fail('parse');
     }
     if (!isPlainRecord(parsed)) return fail('parse');
+
+    try {
+      if (canonicalize(parsed) !== line) return fail('parse');
+    } catch {
+      return fail('parse');
+    }
 
     const { entry_hash: entryHash, ...body } = parsed;
     if (!isHexDigest(entryHash)) return fail('parse');
@@ -233,4 +326,24 @@ export function verifyChain(file: string, domainTag: ChainDomainTag): ChainVerif
   }
 
   return { ok: true, length: lines.length, head_hash: prevHash };
+}
+
+/** Truncate only a verifier-confirmed torn tail; any earlier damage fails closed. */
+export function repairTornTail(file: string, domainTag: ChainDomainTag): ChainHead & { repaired: boolean } {
+  const result = verifyChain(file, domainTag);
+  if (result.ok) return { repaired: false, length: result.length, head_hash: result.head_hash };
+  if (!result.torn_tail) {
+    throw new ChainError(
+      'verification-failed',
+      `chain: ${file} failed verification at ${result.index} (${result.reason}); refusing repair`,
+    );
+  }
+  truncateSync(file, result.good_bytes);
+  const fd = openSync(file, 'r+');
+  try {
+    fsyncSync(fd);
+  } finally {
+    closeSync(fd);
+  }
+  return { repaired: true, length: result.good_length, head_hash: result.good_head_hash };
 }

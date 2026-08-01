@@ -45,6 +45,7 @@ export const approvedModelEntry = z
      */
     re_confirmation_required: z.boolean().optional(),
   })
+  .strict()
   .superRefine((entry, ctx) => {
     for (const role of entry.roles) {
       if (entry.data_classes[role] === undefined) {
@@ -74,7 +75,7 @@ export const authorityHop = z.object({
   delegator: id,
   delegate: id,
   subdelegation_scope: z.array(z.string()),
-});
+}).strict();
 
 export const MANDATE_STATES = ['active', 'suspended', 'expired', 'revoked'] as const;
 export const mandateState = z.enum(MANDATE_STATES);
@@ -86,15 +87,16 @@ export const mandateLimits = z.object({
   notification_volume: integer.min(0).optional(),
   geographic: z.array(z.string()).optional(),
   time_window: validityWindow,
-});
+}).strict();
 
 /** Spec §5: a substitution that widens the envelope is defective authority, not a hop. */
 export const substitutionRules = z.object({
   model_substitution: z.enum(['not-permitted', 'approved-set-only']),
   service_substitution: z.enum(['not-permitted', 'named-services-only']),
-});
+}).strict();
 
-export const mandate = z.object({
+export const mandate = z
+  .object({
   /** ADR-002 §6: every stored object carries `world_id` as its first field. */
   world_id: worldId,
   mandate_id: id,
@@ -107,16 +109,16 @@ export const mandate = z.object({
    */
   ordering_rule: classToken,
 
-  principal: z.object({ id, display_name: z.string().optional() }),
-  authorized_agent: z.object({ id, display_name: z.string().optional() }),
+  principal: z.object({ id, display_name: z.string().optional() }).strict(),
+  authorized_agent: z.object({ id, display_name: z.string().optional() }).strict(),
   authority_chain: z.array(authorityHop),
 
   action_class: classToken,
   connected_service: id,
   target: z.object({
-    recipient: z.string(),
-    resource: z.string(),
-  }),
+    recipient: z.string().min(1),
+    resource: z.string().min(1),
+  }).strict(),
 
   permitted_data_fields: z.array(z.string()),
   disclosure_destinations: z.array(z.string()),
@@ -128,7 +130,7 @@ export const mandate = z.object({
   issued_at: timestamp,
   expires_at: timestamp,
   revocation_endpoint: z.string().min(1),
-  replay_protection: z.object({ scheme: z.literal('per-ruling-nonce') }),
+  replay_protection: z.object({ scheme: z.literal('per-ruling-nonce') }).strict(),
 
   substitution_rules: substitutionRules,
   risk_class: classToken,
@@ -142,7 +144,52 @@ export const mandate = z.object({
    * `mandate-binding`, so every amendment is re-bound. An `invalid` **or**
    * `unverifiable` binding is defective authority — deny.
    */
-  binding: macBlock,
-});
+    binding: macBlock,
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    const modelKeys = value.approved_models.map((entry) => `${entry.card_id}\u0000${entry.requested_id}`);
+    if (new Set(modelKeys).size !== modelKeys.length) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['approved_models'],
+        message: 'approved model entries must be unique by card and requested id',
+      });
+    }
+    if (!value.approved_models.some((entry) => entry.roles.includes('acting'))) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['approved_models'],
+        message: 'a mandate must approve at least one acting model',
+      });
+    }
+    if (value.issued_at > value.expires_at) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['expires_at'],
+        message: 'mandate expiry must not precede issuance',
+      });
+    }
+    const hops = [...value.authority_chain].sort((left, right) => left.hop - right.hop);
+    for (let index = 0; index < hops.length; index += 1) {
+      const hop = hops[index];
+      if (hop?.hop !== index) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['authority_chain'],
+          message: 'authority-chain hop numbers must be contiguous from zero',
+        });
+        break;
+      }
+      const previous = hops[index - 1];
+      if (previous !== undefined && previous.delegate !== hop.delegator) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['authority_chain', index, 'delegator'],
+          message: 'each authority hop must continue from the previous delegate',
+        });
+      }
+    }
+  });
 
 export type Mandate = z.infer<typeof mandate>;

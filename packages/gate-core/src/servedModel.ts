@@ -35,6 +35,11 @@ function escapeForRegExp(literal: string): string {
   return literal.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
+/** `^<escaped requested>$` — the exact-id policy's documentary pattern. */
+export function exactRequestedPattern(requestedId: string): RegExp {
+  return new RegExp(`^${escapeForRegExp(requestedId)}$`);
+}
+
 /** `^<escaped requested>-\d{4}-\d{2}-\d{2}$` — the dated-snapshot form of an alias. */
 export function datedSnapshotPattern(requestedId: string): RegExp {
   return new RegExp(`^${escapeForRegExp(requestedId)}-\\d{4}-\\d{2}-\\d{2}$`);

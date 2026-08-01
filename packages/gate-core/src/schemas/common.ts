@@ -12,8 +12,8 @@ import { z } from 'zod';
 
 import { HEX64 } from '../hash.js';
 
-/** ADR-007: every number in a contract is an integer. */
-export const integer = z.number().int();
+/** ADR-007: every number in a contract is a safely representable integer. */
+export const integer = z.number().int().safe('expected an integer inside the JavaScript safe range');
 
 /** Amounts and ceilings, in minor units (Rappen). Never a float. */
 export const minorUnits = integer;
@@ -24,11 +24,23 @@ export const confidencePct = integer.min(0).max(100);
 
 /** RFC 3339 UTC with millisecond precision, e.g. `2026-08-01T09:32:14.512Z`. */
 export const RFC3339_MS = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
-export const timestamp = z.string().regex(RFC3339_MS, 'expected RFC 3339 UTC with milliseconds');
+export const timestamp = z
+  .string()
+  .regex(RFC3339_MS, 'expected RFC 3339 UTC with milliseconds')
+  .refine((value) => {
+    const epoch = Date.parse(value);
+    return Number.isFinite(epoch) && new Date(epoch).toISOString() === value;
+  }, 'expected a real RFC 3339 UTC instant');
 
 /** Calendar date, the form ADR-006's card fields use (`valid_from`, `date`, `as_of`). */
 export const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
-export const isoDate = z.string().regex(ISO_DATE, 'expected an ISO calendar date');
+export const isoDate = z
+  .string()
+  .regex(ISO_DATE, 'expected an ISO calendar date')
+  .refine((value) => {
+    const epoch = Date.parse(`${value}T00:00:00.000Z`);
+    return Number.isFinite(epoch) && new Date(epoch).toISOString().slice(0, 10) === value;
+  }, 'expected a real ISO calendar date');
 
 /** ADR-007: digests are lowercase hex, unprefixed (pattern shared with `hash.ts`). */
 export const hexDigest = z.string().regex(HEX64, 'expected 64 lowercase hex characters');
@@ -86,26 +98,32 @@ export const role = z.enum(ROLES);
 export const claimedActor = z.object({
   role: role.nullable(),
   session: id.optional(),
-});
+}).strict();
 
 /** A time window, evaluated lazily at decision time (ADR-001 §8). */
-export const validityWindow = z.object({
-  not_before: timestamp,
-  not_after: timestamp,
-});
+export const validityWindow = z
+  .object({
+    not_before: timestamp,
+    not_after: timestamp,
+  })
+  .strict()
+  .refine((window) => window.not_before <= window.not_after, {
+    path: ['not_after'],
+    message: 'not_after must not precede not_before',
+  });
 
 /** ADR-007: an artifact verified on its own names its `alg` explicitly. */
 export const macBlock = z.object({
   alg: z.literal('hmac-sha256'),
   key_id: id,
   value: base64,
-});
+}).strict();
 
 export const signatureBlock = z.object({
   alg: z.literal('ed25519'),
   key_id: id,
   signature: base64,
-});
+}).strict();
 
 /** Values that survive ADR-007 canonicalization: no floats, no dates, no class instances. */
 export const jsonScalar = z.union([z.string(), integer, z.boolean(), z.null()]);

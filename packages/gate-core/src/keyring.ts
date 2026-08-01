@@ -36,7 +36,7 @@ export interface KeyringOptions {
 }
 
 export class KeyringError extends Error {
-  readonly code: 'malformed-keyring' | 'malformed-active-key' | 'no-active-key';
+  readonly code: 'malformed-keyring' | 'malformed-active-key' | 'duplicate-key-id' | 'no-active-key';
   constructor(code: KeyringError['code'], message: string) {
     super(message);
     this.name = 'KeyringError';
@@ -130,8 +130,8 @@ export class Keyring {
 }
 
 /**
- * Resolve {active env pair} u keyring file. The active key wins a duplicate id, since it
- * is the pair the operator most recently wrote.
+ * Resolve {active env pair} u keyring file. A key id identifies exactly one byte string;
+ * collisions fail closed instead of silently changing the meaning of historical MACs.
  */
 export function loadKeyring(options: KeyringOptions = {}): Keyring {
   const env = options.env ?? process.env;
@@ -140,6 +140,10 @@ export function loadKeyring(options: KeyringOptions = {}): Keyring {
 
   const keys = new Map<string, string>();
   for (const entry of readKeyringFile(keyringPath)) {
+    const existing = keys.get(entry.key_id);
+    if (existing !== undefined) {
+      throw new KeyringError('duplicate-key-id', `keyring: duplicate key id ${entry.key_id}`);
+    }
     keys.set(entry.key_id, entry.key);
   }
 
@@ -152,6 +156,10 @@ export function loadKeyring(options: KeyringOptions = {}): Keyring {
     }
     if (activeKeyId === undefined || activeKeyId === '') {
       throw new KeyringError('malformed-active-key', 'keyring: GATE_HMAC_KEY is set without GATE_HMAC_KEY_ID');
+    }
+    const retired = keys.get(activeKeyId);
+    if (retired !== undefined) {
+      throw new KeyringError('duplicate-key-id', `keyring: active key id ${activeKeyId} is already retired`);
     }
     keys.set(activeKeyId, activeKey);
     resolvedActiveId = activeKeyId;

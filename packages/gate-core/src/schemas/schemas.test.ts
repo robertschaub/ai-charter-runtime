@@ -135,7 +135,12 @@ function validProposal(overrides: Record<string, unknown> = {}): Record<string, 
     material_consequences: ['Public funds committed.'],
     reversibility_class: 'partially-reversible',
     commercial_influence: { applicable: false, note: 'n/a in this scenario' },
-    acting_model: { requested_id: 'swiss-ai/apertus-v1.5-70b', card_id: 'publicai-apertus-v1.5-70b', card_version: 1 },
+    acting_model: {
+      requested_id: 'swiss-ai/apertus-v1.5-70b',
+      served_id: 'swiss-ai/apertus-v1.5-70b',
+      card_id: 'publicai-apertus-v1.5-70b',
+      card_version: 1,
+    },
     mandate_ref: { mandate_id: 'mdt_grant_2026_08', version: 1 },
     proposal_hash: DIGEST,
     ...overrides,
@@ -156,8 +161,9 @@ function validContract(overrides: Record<string, unknown> = {}): Record<string, 
     response_bound_and_default: {
       response_bound_ms: 900_000,
       safe_default: {
+        kind: 'stop-remains',
         disposition: 'abstain',
-        authority_basis: 'No new authority; the Stop remains.',
+        authority_basis: { kind: 'no-new-authority' },
         reversible: true,
       },
     },
@@ -205,15 +211,11 @@ function validRuling(overrides: Record<string, unknown> = {}): Record<string, un
         unmet_tags: ['conf:sensitive'],
       },
       {
-        kind: 'screening_signal',
-        signal: 'unconfirmed_inference_as_fact',
-        confidence_pct: 72,
-        rationale: 'Inference inf_7 is used as a decision basis without confirmation.',
-        model_id: 'gpt-5.5',
-        model_version_reported: 'gpt-5.5-2026-04-23',
+        kind: 'record_entry',
+        entry_id: 'rec_prior_check',
       },
     ],
-    counter_reservation: { id: 'rsv_2c91', counter: 'amount', delta: 2_500_000 },
+    counter_reservations: [{ id: 'rsv_2c91', counter: 'amount', delta: 2_500_000 }],
     issued_at: '2026-08-01T09:14:00.000Z',
     status: 'issued',
     successor_ruling_id: null,
@@ -301,6 +303,8 @@ describe('schemas — accept the shapes the ADRs specify', () => {
       world_id: 'w-demo',
       effect_id: 'eff_4b10',
       ruling_id: 'rul_88ad',
+      frozen_proposal_hash: DIGEST,
+      effect_request_digest: DIGEST,
       idempotency_key: DIGEST,
       service: 'filing',
       action_class: 'grant-filing',
@@ -318,6 +322,8 @@ describe('schemas — accept the shapes the ADRs specify', () => {
         ruling_id: 'rul_88ad',
         effect_id: 'eff_4b10',
         idempotency_key: DIGEST,
+        frozen_proposal_hash: DIGEST,
+        effect_request_digest: DIGEST,
         service: 'filing',
         bound_at: '2026-08-01T09:14:22.418Z',
         token_expires_at: '2026-08-01T09:14:27.418Z',
@@ -361,7 +367,13 @@ describe('schemas — accept the shapes the ADRs specify', () => {
           kind: 'dialogue_response_recorded',
           disposition: 'confirm',
           responder_role: 'case_officer',
-          evidence_ref: { kind: 'registry_record', id: 'reg:CH-0042', retrieved_at: '2026-08-01T09:14:02.000Z' },
+          evidence_ref: {
+            kind: 'registry_record',
+            id: 'reg:CH-0042',
+            retrieved_at: '2026-08-01T09:14:02.000Z',
+            resolved_at: '2026-08-01T09:14:03.000Z',
+            content_digest: DIGEST,
+          },
           answer_digest: DIGEST,
         },
       },
@@ -377,6 +389,7 @@ describe('schemas — accept the shapes the ADRs specify', () => {
       },
       {
         event: 'anchor',
+        world_id: 'w-demo',
         checkpoint_id: 'cp-0007',
         composite_digest: DIGEST,
         remote_sha: '9f3c1a2b7d4e5f60aa11bb22cc33dd44ee55ff66',
@@ -404,6 +417,8 @@ describe('schemas — accept the shapes the ADRs specify', () => {
         policy_version: '2026-08-01.3',
         policy_content_digest: DIGEST,
         evaluator_build_id: 'gate-core@0.0.1+9f3c1a2b7d4e5f60',
+        acting_model_requested_id: 'swiss-ai/apertus-v1.5-70b',
+        acting_model_served_id: 'swiss-ai/apertus-v1.5-70b',
       },
       commitment_and_effect: {
         event: 'commitment',
@@ -411,6 +426,8 @@ describe('schemas — accept the shapes the ADRs specify', () => {
         ruling_id: 'rul_88ad',
         effect_id: 'eff_4b10',
         idempotency_key: DIGEST,
+        frozen_proposal_hash: DIGEST,
+        effect_request_digest: DIGEST,
         service: 'filing',
         bound_at: '2026-08-01T09:14:22.418Z',
         token_expires_at: '2026-08-01T09:14:27.418Z',
@@ -437,19 +454,30 @@ describe('schemas — accept the shapes the ADRs specify', () => {
   it('the policy set, the model card, and the card revocation', () => {
     const policy = policySet.safeParse({
       policy_version: '2026-08-01.3',
+      ordering: 'deny-escalate-allow-then-priority',
+      default_escalation_contract: validContract(),
+      escalation_pattern: {
+        window_ms: 3_600_000,
+        escalation_count: 3,
+        timeout_count: 2,
+        override_count: 2,
+        consequence: 'narrow-pending-reauthorization',
+      },
       rules: [
         {
           id: 'rule_filing_within_ceiling',
+          priority: 10,
           gate: 'commit',
-          matcher: { kind: 'placeholder', note: 'M2 fills in the match language.' },
+          matcher: { kind: 'always' },
           verdict: 'allow',
           ux_class: 'silent',
           reason_template: 'Within the mandate ceiling.',
         },
         {
           id: 'rule_default_escalate',
+          priority: 5,
           gate: 'submit',
-          matcher: { kind: 'placeholder', note: 'Unmatched consequential proposal.' },
+          matcher: { kind: 'always' },
           verdict: 'escalate',
           ux_class: 'stop',
           reason_template: 'No rule matched; failing closed.',
@@ -475,21 +503,22 @@ describe('schemas — accept the shapes the ADRs specify', () => {
 
   it('the WAL transaction with its closed op vocabulary', () => {
     const parsed = walTransaction.safeParse({
+      kind: 'transaction',
       world_id: 'w-demo',
       ts: '2026-08-01T09:14:22.418Z',
       txn: 'commit_verify',
       run_id: 'run-2026-08-01-02',
       actor: { credential: 'proc:services_host', claimed_role: null },
       ops: [
-        { op: 'nonce.consume', id: 'nce_7f3a' },
-        { op: 'reservation.settle', id: 'rsv_2c91', counter: 'amount', delta: 2_500_000 },
-        { op: 'ruling.consume', id: 'rul_88ad' },
         {
-          op: 'commitment.bind',
-          id: 'cmt_4b10',
-          effect_id: 'eff_4b10',
-          idempotency_key: DIGEST,
-          token_expires_at: '2026-08-01T09:14:27.418Z',
+          op: 'policy.reload',
+          policy: {
+            world_id: 'w-demo',
+            policy_version: '2026-08-01.3',
+            policy_content_digest: DIGEST,
+            evaluator_build_id: 'gate-core@0.0.1+9f3c1a2b7d4e5f60',
+            activated_at: '2026-08-01T09:14:22.418Z',
+          },
         },
       ],
     });
@@ -514,7 +543,7 @@ describe('schemas — reject what fails closed', () => {
       ).success,
     ).toBe(false);
     expect(
-      gateRuling.safeParse(validRuling({ counter_reservation: { id: 'rsv_1', counter: 'amount', delta: 1.5 } }))
+      gateRuling.safeParse(validRuling({ counter_reservations: [{ id: 'rsv_1', counter: 'amount', delta: 1.5 }] }))
         .success,
     ).toBe(false);
   });
@@ -602,11 +631,21 @@ describe('schemas — reject what fails closed', () => {
   it('an escalating policy rule without its six contract fields', () => {
     const parsed = policySet.safeParse({
       policy_version: '2026-08-01.3',
+      ordering: 'deny-escalate-allow-then-priority',
+      default_escalation_contract: validContract(),
+      escalation_pattern: {
+        window_ms: 3_600_000,
+        escalation_count: 3,
+        timeout_count: 2,
+        override_count: 2,
+        consequence: 'narrow-pending-reauthorization',
+      },
       rules: [
         {
           id: 'rule_default_escalate',
+          priority: 1,
           gate: 'submit',
-          matcher: { kind: 'placeholder', note: 'x' },
+          matcher: { kind: 'always' },
           verdict: 'escalate',
           ux_class: 'stop',
           reason_template: 'No rule matched.',
@@ -631,6 +670,26 @@ describe('schemas — reject what fails closed', () => {
     }
   });
 
+  it('an unsafe timeout fallback or a mixed disposition family', () => {
+    const unsafe = validContract();
+    unsafe['response_bound_and_default'] = {
+      response_bound_ms: 900_000,
+      safe_default: {
+        kind: 'stop-remains',
+        disposition: 'allow-within-scope',
+        authority_basis: { kind: 'no-new-authority' },
+        reversible: true,
+      },
+    };
+    expect(interventionContract.safeParse(unsafe).success).toBe(false);
+    expect(
+      interventionContract.safeParse({
+        ...validContract(),
+        permitted_dispositions: ['confirm', 'deny', 'abstain'],
+      }).success,
+    ).toBe(false);
+  });
+
   it('a card whose pinning mode contradicts its lane resolution policy', () => {
     const card = validCard();
     const model = { ...(card['model'] as Record<string, unknown>), pinning_mode: 'exact' };
@@ -639,6 +698,7 @@ describe('schemas — reject what fails closed', () => {
 
   it('an op outside the closed WAL vocabulary', () => {
     const parsed = walTransaction.safeParse({
+      kind: 'transaction',
       world_id: 'w-demo',
       ts: '2026-08-01T09:14:22.418Z',
       txn: 'commit_verify',
@@ -652,9 +712,18 @@ describe('schemas — reject what fails closed', () => {
   it('a confidence outside 0-100 and a non-integer confidence', () => {
     for (const value of [101, -1, 72.5]) {
       const ruling = validRuling();
-      const refs = [...(ruling['evidence_refs'] as Record<string, unknown>[])];
-      refs[1] = { ...(refs[1] as Record<string, unknown>), confidence_pct: value };
-      expect(gateRuling.safeParse({ ...ruling, evidence_refs: refs }).success, String(value)).toBe(false);
+      const signal = {
+        kind: 'screening_signal',
+        signal: 'unconfirmed_inference_as_fact',
+        confidence_pct: value,
+        rationale: 'Inference inf_7 is used as a decision basis without confirmation.',
+        model_id: 'gpt-5.5',
+        model_version_reported: 'gpt-5.5-2026-04-23',
+      };
+      expect(
+        gateRuling.safeParse({ ...ruling, verdict: 'escalate', ux_class: 'stop', evidence_refs: [signal] }).success,
+        String(value),
+      ).toBe(false);
     }
   });
 });

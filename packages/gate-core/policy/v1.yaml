@@ -1,0 +1,167 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Derived from Our AI Charter by Robert Schaub, CC BY 4.0.
+policy_version: 2026-08-01.1
+ordering: deny-escalate-allow-then-priority
+
+default_escalation_contract:
+  trigger_and_state: { trigger: unmatched-consequential, state: open }
+  decision_and_route:
+    eligible_role: principal
+    standing_class: own-permission
+    competence_declared: Principal for the synthetic demo mandate (declared, not verified).
+    independence_declared: Same-operator POC; no independent reviewer exists.
+    substitute_rule: No substitute may expand the mandate.
+  decision_basis_shown: [proposal, mandate, policy]
+  response_bound_and_default:
+    response_bound_ms: 900000
+    safe_default:
+      kind: stop-remains
+      disposition: cancel
+      authority_basis: { kind: no-new-authority }
+      reversible: true
+  permitted_dispositions: [allow-within-scope, deny, narrow-or-modify, seek-review, cancel, route-to-remedy]
+  record_and_feedback:
+    record_events: [escalation_raised, disposition_recorded]
+    feedback_consequence: Increment the escalation-pattern counter.
+
+escalation_pattern:
+  window_ms: 3600000
+  escalation_count: 3
+  timeout_count: 2
+  override_count: 2
+  consequence: narrow-pending-reauthorization
+
+rules:
+  - id: deny-inadmissible-tool-with-fallback
+    priority: 100
+    gate: authorize
+    matcher:
+      kind: field
+      source: context
+      path: [tool_request_class]
+      operator: eq
+      value: inadmissible-with-fallback
+    verdict: deny
+    ux_class: flag
+    reason_template: The requested tool is inadmissible; use the declared safe fallback.
+    tool_request_class: inadmissible-with-fallback
+
+  - id: escalate-new-authority
+    priority: 100
+    gate: authorize
+    matcher:
+      kind: field
+      source: context
+      path: [tool_request_class]
+      operator: eq
+      value: new-tool-privilege-recipient-purpose
+    verdict: escalate
+    ux_class: stop
+    reason_template: The request needs authority the current mandate does not contain.
+    tool_request_class: new-tool-privilege-recipient-purpose
+    intervention_contract:
+      trigger_and_state: { trigger: new-authority, state: open }
+      decision_and_route:
+        eligible_role: principal
+        standing_class: own-permission
+        competence_declared: Principal for the synthetic demo mandate (declared, not verified).
+        independence_declared: Same-operator POC; no independent reviewer exists.
+        substitute_rule: A grant requires a separate mandate amendment.
+      decision_basis_shown: [requested-tool, current-mandate]
+      response_bound_and_default:
+        response_bound_ms: 900000
+        safe_default:
+          kind: stop-remains
+          disposition: cancel
+          authority_basis: { kind: no-new-authority }
+          reversible: true
+      permitted_dispositions: [deny, seek-review, cancel, route-to-remedy]
+      record_and_feedback:
+        record_events: [escalation_raised, disposition_recorded]
+        feedback_consequence: Record the separate authorization obligation.
+
+  - id: escalate-submit-signal
+    priority: 90
+    gate: submit
+    matcher:
+      kind: any
+      matchers:
+        - { kind: signal, signal: injection_suspicion, min_confidence_pct: 1 }
+        - { kind: signal, signal: evidence_conflict, min_confidence_pct: 1 }
+        - { kind: signal, signal: unconfirmed_inference_as_fact, min_confidence_pct: 1 }
+        - { kind: signal, signal: scope_drift, min_confidence_pct: 1 }
+    verdict: escalate
+    ux_class: stop
+    reason_template: A screening signal requires human review.
+    intervention_contract:
+      trigger_and_state: { trigger: screening-signal, state: open }
+      decision_and_route:
+        eligible_role: case_officer
+        standing_class: own-interpretation
+        competence_declared: Assigned case officer (declared, not verified).
+        independence_declared: Not independently verified in this POC.
+        substitute_rule: The principal may take the decision over without expanding authority.
+      decision_basis_shown: [screening-signal, suspect-item]
+      response_bound_and_default:
+        response_bound_ms: 900000
+        safe_default:
+          kind: stop-remains
+          disposition: cancel
+          authority_basis: { kind: no-new-authority }
+          reversible: true
+      permitted_dispositions: [deny, narrow-or-modify, seek-review, cancel, route-to-remedy]
+      record_and_feedback:
+        record_events: [escalation_raised, disposition_recorded]
+        feedback_consequence: Increment the escalation-pattern counter.
+
+  - id: escalate-notification-volume
+    priority: 80
+    gate: commit
+    matcher: { kind: counter, counter: notification_volume, operator: would-exceed }
+    verdict: escalate
+    ux_class: stop
+    reason_template: The notification batch would cross the mandate volume ceiling.
+    intervention_contract:
+      trigger_and_state: { trigger: aggregate-ceiling, state: open }
+      decision_and_route:
+        eligible_role: principal
+        standing_class: own-permission
+        competence_declared: Principal for the synthetic demo mandate (declared, not verified).
+        independence_declared: Same-operator POC; no independent reviewer exists.
+        substitute_rule: No substitute may raise the ceiling.
+      decision_basis_shown: [notification-volume, mandate-ceiling]
+      response_bound_and_default:
+        response_bound_ms: 900000
+        safe_default:
+          kind: stop-remains
+          disposition: cancel
+          authority_basis: { kind: no-new-authority }
+          reversible: true
+      permitted_dispositions: [deny, narrow-or-modify, seek-review, cancel, route-to-remedy]
+      record_and_feedback:
+        record_events: [escalation_raised, disposition_recorded]
+        feedback_consequence: Narrow the envelope after a recurring pattern.
+
+  - id: allow-registry-read
+    priority: 20
+    gate: submit
+    matcher: { kind: field, source: mandate, path: [action_class], operator: eq, value: registry-read }
+    verdict: allow
+    ux_class: silent
+    reason_template: Registry retrieval is inside the current mandate.
+
+  - id: allow-grant-filing
+    priority: 20
+    gate: commit
+    matcher: { kind: field, source: mandate, path: [action_class], operator: eq, value: grant-filing }
+    verdict: allow
+    ux_class: silent
+    reason_template: Filing is inside the current mandate and its reserved ceilings.
+
+  - id: allow-notification
+    priority: 10
+    gate: commit
+    matcher: { kind: field, source: mandate, path: [action_class], operator: eq, value: notification }
+    verdict: allow
+    ux_class: silent
+    reason_template: Notification is inside the current mandate and its reserved ceilings.

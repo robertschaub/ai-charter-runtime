@@ -20,12 +20,12 @@ export type Store = (typeof STORES)[number];
 export const provenanceHop = z.object({
   requested: modelId,
   served: modelId,
-});
+}).strict();
 
 export const provenance = z.object({
   derived_from: z.array(id),
   hops: z.array(provenanceHop),
-});
+}).strict();
 
 /** `officer`, `applicant`, or `document:<doc-id>` (ADR-005 §3). */
 export const originActor = z.union([
@@ -46,6 +46,7 @@ export const storeItem = z
     tags: sortedRestrictionTags,
     origin_actor: originActor.optional(),
   })
+  .strict()
   .superRefine((item, ctx) => {
     const required = ORIGIN_ACTOR_STORES.has(item.store);
     if (required && item.origin_actor === undefined) {

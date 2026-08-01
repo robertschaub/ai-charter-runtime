@@ -13,7 +13,7 @@
  */
 import { z } from 'zod';
 
-import { RESOLUTION_POLICIES } from '../servedModel.js';
+import { RESOLUTION_POLICIES, datedSnapshotPattern, exactRequestedPattern } from '../servedModel.js';
 import {
   cardSlug,
   id,
@@ -35,7 +35,7 @@ export function provenanceTriple<T extends z.ZodTypeAny>(value: T) {
     value,
     provenance: provenanceValue,
     date: isoDate,
-  });
+  }).strict();
 }
 
 export const PINNING_MODES = ['alias', 'exact'] as const;
@@ -55,9 +55,9 @@ export const cardResolution = z.object({
     z.object({
       id: modelId,
       first_seen: isoDate,
-    }),
+    }).strict(),
   ),
-});
+}).strict();
 
 export const modelCard = z
   .object({
@@ -72,7 +72,7 @@ export const modelCard = z
       requested_id: modelId,
       pinning_mode: pinningMode,
       resolution: cardResolution,
-    }),
+    }).strict(),
 
     operator: provenanceTriple(z.string().min(1)),
     endpoint: provenanceTriple(z.string().min(1)),
@@ -83,14 +83,14 @@ export const modelCard = z
       tools: provenanceTriple(z.boolean()),
       response_format: provenanceTriple(z.array(z.string())),
       token_parameter: provenanceTriple(z.string().min(1)),
-    }),
+    }).strict(),
 
     evidence_status: z.object({
       as_of: isoDate,
       source: z.string().min(1),
       /** What was *not* checked, and why — the check-surface guard. */
-      not_checked: z.array(z.object({ item: z.string().min(1), why: z.string().min(1) })),
-    }),
+      not_checked: z.array(z.object({ item: z.string().min(1), why: z.string().min(1) }).strict()),
+    }).strict(),
 
     known_limits: z.array(provenanceTriple(z.string().min(1))),
 
@@ -99,6 +99,7 @@ export const modelCard = z
 
     signature: signatureBlock,
   })
+  .strict()
   .superRefine((card, ctx) => {
     const expectedExact = card.model.resolution.policy === 'exact-match-required';
     if (expectedExact !== (card.model.pinning_mode === 'exact')) {
@@ -106,6 +107,33 @@ export const modelCard = z
         code: z.ZodIssueCode.custom,
         path: ['model', 'pinning_mode'],
         message: 'pinning_mode and resolution.policy must agree (ADR-006 §3)',
+      });
+    }
+    const expectedPolicy = card.model.resolution.lane === 'publicai' ? 'exact-match-required' : 'alias-to-dated-snapshot';
+    if (card.model.resolution.policy !== expectedPolicy) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['model', 'resolution', 'policy'],
+        message: `lane ${card.model.resolution.lane} requires ${expectedPolicy}`,
+      });
+    }
+    const expectedPattern =
+      card.model.resolution.policy === 'exact-match-required'
+        ? exactRequestedPattern(card.model.requested_id).source
+        : datedSnapshotPattern(card.model.requested_id).source;
+    if (card.model.resolution.snapshot_pattern !== expectedPattern) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['model', 'resolution', 'snapshot_pattern'],
+        message: 'snapshot_pattern must be the deterministic pattern derived from requested_id and policy',
+      });
+    }
+    const observed = card.model.resolution.observed_snapshots.map((entry) => entry.id);
+    if (new Set(observed).size !== observed.length) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['model', 'resolution', 'observed_snapshots'],
+        message: 'observed snapshot ids must be unique',
       });
     }
   });
@@ -124,7 +152,7 @@ export const cardRevocation = z.object({
   effective_at: timestamp,
   issued_by: z.string().min(1),
   signature: signatureBlock,
-});
+}).strict();
 
 export type CardRevocation = z.infer<typeof cardRevocation>;
 
@@ -138,8 +166,12 @@ export const signingKeyEntry = z.object({
   retired_at: isoDate.optional(),
   /** A revoked key stops every card it signed from verifying (ADR-006 §5). */
   revoked_at: isoDate.optional(),
-});
+}).strict();
 
-export const signingKeys = z.array(signingKeyEntry);
+export const signingKeys = z
+  .array(signingKeyEntry)
+  .refine((entries) => new Set(entries.map((entry) => entry.key_id)).size === entries.length, {
+    message: 'signing key ids must be unique',
+  });
 
 export type SigningKeyEntry = z.infer<typeof signingKeyEntry>;
