@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: CC-BY-4.0 -->
 # M0 probe — decision memo
 
-**Status:** open — fill from `docs/m0-probe-results.json` after running `node tooling/probe.mjs --lane all`.
+**Status:** closed 2026-08-01 — all eight questions answered (wallet metering noted; latency numbers for identical bodies remain cache-suspect). Remaining M0 items are repository-side: GitHub remote + posture.
 
 The spec ([§8](https://robertschaub.github.io/our-ai-charter/wip/runtime-gates-poc-spec/)) flags these discrepancies and unknowns for M0 to settle. Record the observed answer and the decision; the spec's evidence note documented `api.publicai.co` + portal keys + Free 100 req/min (2026-07-27), while LiteLLM's provider doc gave `platform.publicai.co/v1` and the older HF launch route was described at 20 req/min.
 
@@ -9,8 +9,8 @@ The spec ([§8](https://robertschaub.github.io/our-ai-charter/wip/runtime-gates-
 |---|---|---|---|
 | 1 | PublicAI working base URL (`api.publicai.co/v1` vs `platform.publicai.co/v1`) | 2026-08-01: `https://api.publicai.co/v1` → 200, 13 models (first candidate succeeded; the platform URL was not tried) | **`api.publicai.co/v1`** — the evidence note was right |
 | 2 | Exact hosted Apertus model id(s) from `/models` | Both naming families are live: `swiss-ai/apertus-v1.5-70b`, `-v1.5-70b-thinking`, `-v1.5-8b`, `-v1.5-8b-thinking` **plus** legacy `swiss-ai/apertus-70b-instruct`, `-8b-instruct`. The probe's first auto-pick hit the legacy 70b-instruct (picker since fixed to prefer v1.5 non-thinking) | **`swiss-ai/apertus-v1.5-70b`** (non-thinking: the model card says tool calling is unsupported in thinking mode) |
-| 3 | Hosted `tools` support on the Apertus lane | **Blocked, not answered**: 402 "Insufficient wallet balance. Please add credits to your account." | Pending — top up / check the portal's credit allowance, then re-run `--lane publicai` |
-| 4 | Hosted `response_format` (`json_schema` / `json_object`) | **Blocked, not answered**: same 402 | Pending — same re-run; prompted-JSON fallback remains the pre-decided stance |
+| 3 | Hosted `tools` support on the Apertus lane | 2026-08-01 (post top-up): **works** on `swiss-ai/apertus-v1.5-70b` — `tool_calls` emitted (399 ms) | **Native tool calling on both lanes**; prompted fallback demoted to a config option |
+| 4 | Hosted `response_format` (`json_schema` / `json_object`) | 2026-08-01 (post top-up): **both work** — `json_schema` returned a schema-valid allow/deny/escalate verdict (749 ms); `json_object` ✓ (490 ms) | **Native `json_schema` structured output on both lanes** for gate-judge verdicts; prompted-JSON + validation stays as the configured fallback, no longer the default |
 | 5 | Effective rate limits + informative headers | No `x-ratelimit-*` headers on this lane; **`inference-id` header confirmed** (evidence-note prediction); **wallet/credit metering is active** — most calls 402'd, i.e. the "free tier" meters via wallet credits (Lago), matching the evidence note | Budget per-run costs; 402/outage = fail closed (already the design, beat 14) |
 | 6 | Latency envelope | One real completion: 2.7 s (legacy 70B, 4 words out). Three *identical* repeat requests returned 200 in ~200 ms — implausibly fast for a 70B; consistent with **gateway response caching of identical bodies** [hypothesis, unverified] | Re-measure with varied prompts after top-up; treat ~200 ms repeats as suspected cache artifacts, and vary fixture prompts so tests never measure the cache |
 | 7 | Served-model reporting | `model` field present and **exactly equals the requested id** on this lane (`servedMatchesRequested: true`; no alias indirection observed) | Record per call as specified; the alias-aware comparison is needed for the OpenAI lane (ADR-006), not here so far |
