@@ -38,6 +38,9 @@ const LANES = {
       ids.find((id) => /apertus.*70b/i.test(id)) ??
       ids.find((id) => /apertus/i.test(id)),
     headerHints: ['inference-id', 'x-ratelimit-limit', 'x-ratelimit-remaining', 'x-ratelimit-reset', 'retry-after'],
+    tokenParam: 'max_tokens',
+    maxTokens: 64,
+    temperature: 0,
   },
   openai: {
     label: 'OpenAI (GPT)',
@@ -48,8 +51,21 @@ const LANES = {
       return ids.includes(want) ? want : ids.find((id) => id.startsWith('gpt-5')) ?? want;
     },
     headerHints: ['x-ratelimit-limit-requests', 'x-ratelimit-remaining-requests', 'x-ratelimit-limit-tokens', 'retry-after'],
+    tokenParam: 'max_completion_tokens', // gpt-5.x rejects max_tokens (M0 finding)
+    maxTokens: 512, // reasoning tokens count against the cap; tiny caps starve output
+    temperature: undefined, // gpt-5.x reasoning models accept only the default
   },
 };
+
+function chatBody(lane, model, text, extra = {}) {
+  return {
+    model,
+    messages: [{ role: 'user', content: text }],
+    [lane.tokenParam]: lane.maxTokens,
+    ...(lane.temperature !== undefined ? { temperature: lane.temperature } : {}),
+    ...extra,
+  };
+}
 
 // --- http --------------------------------------------------------------
 async function call(baseUrl, key, route, { method = 'GET', body, headerHints = [] } = {}) {
@@ -72,7 +88,6 @@ async function call(baseUrl, key, route, { method = 'GET', body, headerHints = [
   }
 }
 
-const CHAT_BASE = { messages: [{ role: 'user', content: 'Reply with the single word: ready' }], max_tokens: 16, temperature: 0 };
 const PING_TOOL = {
   type: 'function',
   function: {
@@ -117,7 +132,7 @@ async function probeLane(name) {
 
     // 2) plain chat — latency, served-model reporting
     const chat = await call(baseUrl, key, '/chat/completions', {
-      method: 'POST', body: { model, ...CHAT_BASE }, headerHints: lane.headerHints,
+      method: 'POST', body: chatBody(lane, model, 'Reply with the single word: ready'), headerHints: lane.headerHints,
     });
     out.chat = summarize(chat, {
       servedModel: chat.json?.model ?? null,
@@ -128,7 +143,7 @@ async function probeLane(name) {
     // 3) response_format: json_schema, then json_object
     const rfSchema = await call(baseUrl, key, '/chat/completions', {
       method: 'POST',
-      body: { model, ...CHAT_BASE, messages: [{ role: 'user', content: 'Return a gate verdict allowing a test action.' }], response_format: { type: 'json_schema', json_schema: VERDICT_SCHEMA } },
+      body: chatBody(lane, model, 'Return a gate verdict allowing a test action.', { response_format: { type: 'json_schema', json_schema: VERDICT_SCHEMA } }),
       headerHints: lane.headerHints,
     });
     let parsed = null;
@@ -137,7 +152,7 @@ async function probeLane(name) {
 
     const rfObject = await call(baseUrl, key, '/chat/completions', {
       method: 'POST',
-      body: { model, ...CHAT_BASE, messages: [{ role: 'user', content: 'Return JSON: {"decision":"allow","reason":"test"}' }], response_format: { type: 'json_object' } },
+      body: chatBody(lane, model, 'Return JSON: {"decision":"allow","reason":"test"}', { response_format: { type: 'json_object' } }),
       headerHints: lane.headerHints,
     });
     out.responseFormatJsonObject = summarize(rfObject);
@@ -145,7 +160,7 @@ async function probeLane(name) {
     // 4) tools
     const tools = await call(baseUrl, key, '/chat/completions', {
       method: 'POST',
-      body: { model, ...CHAT_BASE, messages: [{ role: 'user', content: 'Call the ping tool with ok=true.' }], tools: [PING_TOOL] },
+      body: chatBody(lane, model, 'Call the ping tool with ok=true.', { tools: [PING_TOOL] }),
       headerHints: lane.headerHints,
     });
     out.tools = summarize(tools, { toolCalled: Boolean(tools.json?.choices?.[0]?.message?.tool_calls?.length) });
@@ -153,7 +168,7 @@ async function probeLane(name) {
     // 5) tiny latency sample (3 sequential small calls)
     const times = [];
     for (let i = 0; i < 3; i++) {
-      const r = await call(baseUrl, key, '/chat/completions', { method: 'POST', body: { model, ...CHAT_BASE } });
+      const r = await call(baseUrl, key, '/chat/completions', { method: 'POST', body: chatBody(lane, model, 'Reply with the single word: ready') });
       if (r.ok) times.push(r.ms);
     }
     out.latencySampleMs = times;

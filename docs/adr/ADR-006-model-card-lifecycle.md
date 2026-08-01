@@ -11,6 +11,7 @@ Cards are the v0 evidence registry: signed Markdown/JSON in git, bound to the pi
 - Signing mechanics (key pair generation, signature format, verification tooling) and key rotation.
 - Ordinary supersession → re-arms Authorize (pinned mandates flagged for principal re-confirmation) vs **security withdrawal → affected mandates fail closed immediately** — the state wiring for both.
 - How mandate entries reference card versions (role-scoped: acting / screening / both).
+- **Alias vs snapshot pinning** (M0 finding, 2026-08-01): OpenAI serves `gpt-5.5-2026-04-23` when `gpt-5.5` is requested. Does a card pin the alias (recording each resolved snapshot per call) or the snapshot (breaking on provider rotation)? Define the alias-aware served-id comparison beat 21 uses: snapshot-of-pinned-alias = benign, recorded; anything else = quarantine.
 
 ## Decision
 TBD at M1.
