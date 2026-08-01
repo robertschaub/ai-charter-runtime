@@ -15,7 +15,7 @@
     "keys": "node tooling/keys.mjs",
     "cards:verify": "tsc -b && node tooling/cards.mjs verify all",
     "typecheck": "tsc -b",
-    "test": "vitest run"
+    "test": "node --test tooling/git-safety-hook.test.cjs && vitest run"
   },
   "devDependencies": {
     "@types/node": "^22.15.0",

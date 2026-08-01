@@ -15,7 +15,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node -e \"const c=JSON.parse(require('fs').readFileSync(0,'utf8')).tool_input?.command||''; const blocked=[/git\\s+reset\\s+--hard/,/git\\s+push\\s+.*--force(?!-with-lease)/,/git\\s+clean\\s+-[a-zA-Z]*f/,/git\\s+checkout\\s+--\\s+\\./]; const hit=blocked.find(r=>r.test(c)); if(hit){console.error('BLOCKED by ai-charter-runtime safety hook: refusing destructive git -- '+c.slice(0,120));process.exit(2)}\""
+            "command": "node \"$(git rev-parse --show-toplevel)/tooling/git-safety-hook.cjs\""
           }
         ]
       }

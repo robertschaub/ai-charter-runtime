@@ -15,7 +15,7 @@ Full license texts are in [`LICENSES/`](LICENSES/). Strategic choice, not legal 
 | `tooling/` | MIT | `MIT` | Probes, scripts, test harness |
 | `fixtures/` | MIT | `MIT` | Synthetic demo data (no ODbL: not a curated database) |
 | Root build/config files (`package.json`, `tsconfig*.json`, `vitest.config.ts`, lockfile) | MIT | `MIT` | Build scaffolding (JSON files carry no header; the map governs) |
-| `docs/`, `README.md`, repo-meta Markdown (`AGENTS.md`, `CLAUDE.md`, `SECURITY.md`), `.github/` | CC BY 4.0 | `CC-BY-4.0` | Documentation and agent/contributor guidance. Deliberate deviation from FactHarbor's CC BY-SA so text moves freely in both directions between this repo and the CC BY 4.0 [our-ai-charter](https://github.com/robertschaub/our-ai-charter) repository |
+| `docs/`, `README.md`, repo-meta guidance (`AGENTS.md`, `CLAUDE.md`, `SECURITY.md`, `.github/`, `.codex/agents/`, `.claude/agents/`) | CC BY 4.0 | `CC-BY-4.0` | Documentation and agent/contributor guidance. Deliberate deviation from FactHarbor's CC BY-SA so text moves freely in both directions between this repo and the CC BY 4.0 [our-ai-charter](https://github.com/robertschaub/our-ai-charter) repository |
 
 ## Rules
 
