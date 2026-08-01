@@ -1,0 +1,14 @@
+{
+  "name": "ai-charter-runtime",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Proof of concept of the Our AI Charter runtime gates (Authorize, Submit, Verify, Commit, Rely) — maintainer sketch, not a certification artifact.",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "probe": "node tooling/probe.mjs --lane all"
+  },
+  "license": "SEE LICENSE IN LICENSE.md"
+}

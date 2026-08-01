@@ -1,0 +1,17 @@
+ai-charter-runtime — proof-of-concept demonstrator of the Our AI Charter
+runtime reference model (five gates: Authorize, Submit, Verify, Commit, Rely).
+
+Copyright (c) 2026 Robert Schaub.
+
+This is a maintainer sketch, NOT an official reference implementation of
+Our AI Charter, and NOT a certification, assurance, or endorsement artifact.
+The repository name uses the initiative's name descriptively. Do not use this
+project or its name to imply that a system is "Charter-certified", assured,
+or endorsed. There is no green light, no trust API, and no "queryable
+certification" here — only per-action authorization records.
+
+Specification and normative sources:
+https://robertschaub.github.io/our-ai-charter/wip/runtime-gates-poc-spec/
+
+Text derived from Our AI Charter documents is used under CC BY 4.0 with
+attribution to Robert Schaub / Our AI Charter.

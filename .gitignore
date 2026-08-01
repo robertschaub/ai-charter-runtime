@@ -1,0 +1,12 @@
+# secrets — never committed
+.env
+.env.local
+*.key
+keys/
+
+# runtime output
+node_modules/
+records/
+dist/
+*.log
+docs/m0-probe-results.json
