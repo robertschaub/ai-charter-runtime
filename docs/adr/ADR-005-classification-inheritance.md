@@ -1,16 +1,83 @@
 <!-- SPDX-License-Identifier: CC-BY-4.0 -->
 # ADR-005 — Classification inheritance (restriction tags)
 
-**Status:** proposed (M1). **Spec:** §5 (model navigation; per-provider projections).
+**Status:** accepted (M1, 2026-08-01). **Spec:** §5 (model navigation; per-provider projections), §4 (structured proposal; screening signal; model card), §7 beats 19–21.
 
 ## Context
-Derived content (summaries, inferences, quotations) inherits the **union of the restriction tags** of its inputs — a set (confidentiality, purpose, recipient), not a scalar level. Projection to a provider is a subset check against the mandate ∩ card permissions for that provider's role.
-
-## Questions to answer
-- The POC tag vocabulary (small, closed set) and its serialization on items in the four stores (said / inferred / confirmed / permitted).
-- Union propagation rules through model output (everything derived in a turn inherits the turn's input union — or finer-grained attribution?).
-- The subset check at Submit re-projection on model switch; what is dropped vs blocked.
-- Interaction with screening projections (minimized inputs still carry tags).
+Derived content inherits the **union of the restriction tags** of its inputs — a set over confidentiality, purpose and recipient, not a scalar level. Projection to a provider is a subset check against the mandate ∩ card permissions for that provider's **role** (acting or screening); membership in the approved-model set authorizes acting, not blanket disclosure.
 
 ## Decision
-TBD at M1.
+
+### 1. Semantics: tags are requirements, permissions are clearances
+A tag on an item is a **requirement the recipient must satisfy**. A provider+role holds a **clearance set**. Disclosure is permitted iff `item.tags ⊆ clearances(provider, role)`. Union therefore only ever tightens — the property the spec needs.
+
+Clearance sets are enumerated **literally** in mandates and cards; the evaluator implements no lattice, no implication, no ordering. A provider cleared for sensitive case material lists all three `conf:` tags explicitly. This keeps the check a pure set operation and makes accidental widening impossible to express.
+
+### 2. Closed vocabulary (POC v1)
+
+| Namespace | Values |
+|---|---|
+| `conf:` | `public`, `case`, `sensitive` |
+| `purpose:` | `grant-assessment` |
+| `recipient:` | `officer`, `applicant`, `provider:<card-slug>` |
+
+Grammar `namespace:value`, lowercase ASCII `[a-z0-9.-]` plus the one `recipient:provider:` sub-namespace, whose slug must name an existing card (ADR-006 slug rule). Validated by a `zod` enum + pattern. **An unknown or malformed tag fails closed**: the item becomes undisclosable everywhere and raises an integrity alarm — it is never ignored.
+
+An item with no `recipient:` tag is receivable by anyone holding its `conf:` and `purpose:` tags. `recipient:officer` therefore keeps officer-only notes out of every model projection (no provider holds that clearance), and `recipient:provider:<slug>` pins an item to one provider.
+
+### 3. Serialization on the four stores
+Every item in `said / inferred / confirmed / permitted` carries a de-duplicated `tags` array, sorted by ADR-007's rule (JavaScript default string sort, i.e. UTF-16 code-unit order — canonicalization preserves array order, so the producer must sort). Item content is hashed, so an unsorted array would be a different digest for the same tag set.
+
+```json
+{
+  "id": "inf_7", "store": "inferred", "turn": "t12",
+  "text": "…",
+  "provenance": { "derived_from": ["said_3", "doc_2"], "hops": [{ "requested": "gpt-5.5", "served": "gpt-5.5-2026-04-23" }] },
+  "tags": ["conf:case", "purpose:grant-assessment"]
+}
+```
+
+Items in `said`, `confirmed`, and `permitted` additionally carry **`origin_actor`** ∈ {`officer`, `applicant`, `document:<doc-id>`} — whose testimony, confirmation, or grant the item is, set at the entry boundary exactly like tags (never from model output). `inferred` items carry none; their standing follows `provenance.derived_from`. ADR-004's `standing_class` derivation reads this field.
+
+Original items get their tags at the **entry boundary**, from source configuration — published criteria `conf:public`; registry reads `conf:case`; applicant-uploaded documents `conf:case` (plus `conf:sensitive` where the fixture marks it); the officer's typed notes per case default. Tags are never taken from model output.
+
+### 4. Union propagation is turn-level
+A *turn* is one model call (request→response) or one tool-output ingestion. Every item created from that turn carries `U = ⋃ tags(items in that turn's projection) ∪ tags imposed by the source`.
+
+**Finer-grained (per-claim, per-sentence) attribution is out of scope for the POC** — and not merely for cost. Narrowing a derived claim's tags below the turn union would have to rest on the model's own account of which input it came from; model output is evidence, never authority (§4), so a model-supplied provenance claim must not be able to *loosen* a restriction. Turn-level union is the only cheap rule that cannot be talked out of a restriction.
+
+Consequence, stated: propagation is **monotone** within a case. Declassification is only ever a human act — a `permit` disposition (ADR-004) or a principal mandate amendment introducing a new item with narrower tags — never something the system derives.
+
+Two rules keep switching workable:
+- Model output is **not** tagged with the producing provider's own `recipient:provider:` tag. Doing so would make every GPT-derived item permanently unsendable to Apertus — a one-way valve that breaks beat 19. Disclosure history is recorded as record events, not as tags; tags carry policy requirements only.
+- **Lemma (no self-lockout):** every item in a projection satisfies `tags ⊆ clearances`, so the union of a projection's tags is itself `⊆ clearances`. A model's own output is therefore always re-sendable to that same model, while a switch to a less-cleared provider may legitimately drop it.
+
+### 5. Projection at Submit and at a model switch
+`clearances(P, role) = mandate.approved_models[P].data_classes ∩ card(P).declared_data_classes[role]` — the mandate governs, the card can narrow but never widen (§4). Projections are recomputed from the four stores on every Submit and every switch, **never cached per provider**, so a mandate amendment or a card update takes effect on the next projection with no invalidation problem. They are gathered before ADR-001's world lock, and the post-lock re-evaluation discards them if the mandate version, policy digest, or card digest moved underneath.
+
+**Dropped vs blocked:**
+- *Conversation-context items* that fail the check are **dropped whole** from the projection. Never truncated mid-item, never summarized down — a partial item is a new derived claim with unknown standing.
+- *Material inputs and derived claims of the frozen proposal itself* cannot be dropped; hollowing out a proposal's basis while still ruling on it is exactly the silent-weakening failure. So: if another approved model **is** cleared for the missing items, Submit **denies with a Flag** naming the unmet tags — the declared safe fallback is staying on (or returning to) the cleared model, so no interruption (§5's deny-with-fallback rule). If **no** approved model is cleared, Submit **escalates → Stop routed to the principal**, since only a mandate amendment can resolve it. This split is this ADR's ruling, mirroring §5's tool-request rule; it is not stated verbatim in the spec.
+
+Every projection records a summary in the ruling's evidence refs (no new record fields):
+
+```json
+{ "kind": "submit_projection", "provider": "openai-gpt-5.5", "role": "acting",
+  "included": 24, "dropped": 3, "dropped_item_ids": ["said_9","inf_4","doc_7"],
+  "unmet_tags": ["conf:sensitive"] }
+```
+
+A switch additionally invalidates all prior rulings by the §4 binding rule (acting-model id is in the binding tuple).
+
+### 6. Screening projections
+Screening carries the same tags and the same check, against the **screening-role** clearance set — permission to screen is not permission to act. Order: minimize first (the suspect input item only, not the case file), then subset-check. If the suspect item is not disclosable to any configured screening provider, no call is made and `screening_skipped: disclosure_restricted` is recorded. Because a signal can only raise and never allow, the deterministic rules simply stand — except where the policy file marks screening as **required** for that action class, in which case the missing check escalates (fail closed).
+
+### 7. Revocation of a `permitted` item
+Revocation removes the item and blocks it from future projections. Items already derived from it keep their (monotone) tags and are **not** retroactively deleted — deletion/retention propagation is already marked *not assessed* in the §7 family-2 coverage table, and this ADR does not quietly upgrade that claim.
+
+## Consequences
+- Projection is a pure, testable set operation with no lattice logic; fixtures can assert exact included/dropped sets per provider.
+- Turn-level union over-restricts by design: a summary of one public and one sensitive input is sensitive. Accepted — the alternative depends on model self-report.
+- Beats 19–21 and the per-provider Submit differences become deterministic given fixture mandates; beat 20 (unapproved model) is unaffected, it stops earlier at the entry boundary.
+- The proposal schema needs `tags` on every material input and derived claim, and the mandate schema needs `data_classes` per approved-model entry per role — both feed ADR-006's card fields.
+- Open for the reviewer: whether `purpose:` needs a second value to make the purpose dimension non-trivial in tests (currently only `grant-assessment`, so the namespace is exercised but never discriminating), and whether the deny-with-Flag vs escalate split in §5 should instead always escalate for auditability.
