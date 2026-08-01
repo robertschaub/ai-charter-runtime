@@ -23,6 +23,8 @@ On any divergence, the specification and its linked Charter source documents pre
 - **Commit-token window (interpretive choice).** Commitment binds at `commit-verify`; a revocation landing in the
   token's short TTL is too late for that action by definition. On the stricter reading of "authority in flight",
   that is a knowing, TTL-bounded divergence — recorded, not hidden.
+- **A terminal `no-effect` reconciliation is append-only.** If later evidence proves an effect occurred, the
+  terminal record is not overwritten; M4 must append a linked correction and route it for review.
 - **Provider-side model substitution is detectable, not preventable**; the served-model id is itself
   provider-supplied evidence.
 - **Screening models fail.** Their signals can only Flag or force Escalate — never allow.

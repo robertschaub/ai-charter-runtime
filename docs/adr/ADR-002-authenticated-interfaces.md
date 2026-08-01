@@ -3,6 +3,8 @@
 
 **Status:** accepted (M1, 2026-08-01). **Spec:** §3 (three processes, demo authentication), §5 (dialogue boundary rules), §6 criterion 4, §10 M1 (world-id seams, config-driven endpoints).
 
+**Amendment (M3 review follow-up, 2026-08-02):** authenticated HTTP adapters, not in-process actor guards, own access-denial evidence because only the adapters can attest the route and verified credential.
+
 ## Context
 
 Three OS processes make "the model proposes, a component outside the model decides, the executing service
@@ -101,6 +103,10 @@ the canonical form is the world-scoped one above.
 Denials are explicit and recorded: unknown or absent credential → 401; valid credential without route
 permission → 403. Both are written to the access-log chain — a rejected authority-changing attempt is
 evidence, so the POC prefers a recorded 403 over an obscuring 404.
+
+The authenticated HTTP adapter emits those entries because it knows the requested route and verified
+credential. Core actor guards are defence in depth and do not fabricate HTTP evidence; M4's adapter
+must append the denial before returning 401/403 without calling the core operation.
 
 ### 4. On-behalf-of is provenance, never authority
 

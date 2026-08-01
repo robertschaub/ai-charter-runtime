@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { CardRegistry } from './cardRegistry.js';
+import { CardRegistry, CardRegistryError } from './cardRegistry.js';
 import { freezeProposal } from './authorizationCore.js';
 
 const CARDS = fileURLToPath(new URL('../../../docs/cards', import.meta.url));
@@ -112,5 +112,17 @@ describe('server-owned model-card registry', () => {
       cardStatus: 'withdrawn',
       integrityAlarm: true,
     });
+  });
+
+  it('rejects a trust root that becomes malformed after startup', () => {
+    const directory = copiedCards();
+    const registry = CardRegistry.load(directory);
+    const requested = proposal('openai-gpt-5.5', 'gpt-5.5', 'gpt-5.5');
+    expect(registry.resolve(requested).cardStatus).toBe('current');
+
+    writeFileSync(join(directory, 'signing-keys.json'), '{}\n');
+
+    expect(() => registry.resolve(requested)).toThrowError(CardRegistryError);
+    expect(() => registry.resolve(requested)).toThrowError('signing-keys.json is not a valid trust root');
   });
 });

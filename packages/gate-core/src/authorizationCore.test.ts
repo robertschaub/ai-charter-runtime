@@ -899,6 +899,69 @@ describe('M2 authorization transactions', () => {
     ).toEqual({ ok: false, defect: 'stale-card' });
   });
 
+  it('converts runtime card-registry failures into recorded fail-closed decisions', async () => {
+    const atRuling = harness();
+    await initialize(atRuling);
+    const rulingCore = new AuthorizationCore({
+      store: atRuling.store,
+      keyring: atRuling.keyring,
+      policy: atRuling.policy,
+      ids: atRuling.ids,
+      resolveAuthorizedAgent: () => 'agent_demo',
+      resolveModelEvidence: () => {
+        throw new Error('synthetic card reload failure');
+      },
+    });
+    const denied = await rulingCore.ruleProposal(ruleInput(proposal(9)));
+    expect(denied.ruling).toMatchObject({ verdict: 'deny', matched_rule_id: 'authority:stale-card' });
+    expect(denied.ruling.reason).toContain('stale-card');
+    expect(
+      atRuling.store
+        .snapshot()
+        .actionRecords.find((entry) => entry.admissibility_decision.ruling_id === denied.ruling.ruling_id)
+        ?.admissibility_decision.verdict,
+    ).toBe('deny');
+
+    const atCommit = harness();
+    await initialize(atCommit);
+    let registryAvailable = true;
+    const commitCore = new AuthorizationCore({
+      store: atCommit.store,
+      keyring: atCommit.keyring,
+      policy: atCommit.policy,
+      ids: atCommit.ids,
+      resolveAuthorizedAgent: () => 'agent_demo',
+      resolveModelEvidence: () => {
+        if (!registryAvailable) throw new Error('synthetic card reload failure');
+        return {
+          servedModelAccepted: true,
+          cardStatus: 'current',
+          cardKeyId: 'card-test',
+          cardDigest: CARD_DIGEST,
+        };
+      },
+    });
+    const frozen = proposal(10);
+    const ruled = await commitCore.ruleProposal(ruleInput(frozen));
+    expect(ruled.ruling.verdict).toBe('allow');
+
+    registryAvailable = false;
+    expect(
+      await commitCore.commitVerify({
+        rulingId: ruled.ruling.ruling_id,
+        intent: intentFor(frozen, ruled.ruling.ruling_id),
+        servicesHostBootId: 'services_boot_1',
+        servicesLedgerId: SERVICES_LEDGER_ID,
+        actor: SERVICES_HOST,
+      }),
+    ).toEqual({ ok: false, defect: 'stale-card' });
+    const state = atCommit.store.snapshot();
+    expect(state.rulings.get(ruled.ruling.ruling_id)?.status).toBe('invalidated');
+    for (const reservation of ruled.ruling.counter_reservations) {
+      expect(state.reservations.get(reservation.id)?.state).toBe('released');
+    }
+  });
+
   it('escalates every cumulative ceiling before issuing unreserved allow authority', async () => {
     const amount = harness();
     await initialize(amount);

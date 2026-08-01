@@ -5,6 +5,8 @@
 
 **Amendment (M3 review, 2026-08-01):** a restart probe that proves the same ledger has no effect records `no-effect`, not `failed`; only an executed effect may have a `failed` outcome. Commitments pin a persistent services-ledger id so replacement storage cannot masquerade as proof of absence.
 
+**Amendment (M3 review follow-up, 2026-08-02):** M4 successor rulings use a private authorization-service entry point; terminal `no-effect` remains append-only and is corrected only by linked review evidence.
+
 ## Context
 
 The authorization service is the single serialization point. Commitment is two-phase: `commit-verify`
@@ -221,6 +223,10 @@ created and the action fails closed.
 Dialogue escalations are the same machine with the extended disposition set ADR-004 defines
 (`confirm | correct | narrow | permit | abstain | route`); all of them land in the `disposed` row above,
 none issues a ruling directly, and their timeout default is `abstain` or `narrow` — never proceed.
+
+M4 implements the `allow within scope` successor as a private authorization-service operation invoked
+only by the authenticated disposition transaction after it consumes the escalation. It reuses the
+evaluator; the public orchestrator-only proposal endpoint is not widened to manufacture successors.
 
 ### 8. Time, expiry, and the sweeper
 

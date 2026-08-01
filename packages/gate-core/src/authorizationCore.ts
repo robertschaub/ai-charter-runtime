@@ -621,6 +621,22 @@ export class AuthorizationCore {
     this.#resolveModelEvidence = options.resolveModelEvidence;
   }
 
+  #resolveModelEvidenceFailClosed(proposal: FrozenProposal): ModelEvidence {
+    try {
+      return this.#resolveModelEvidence(proposal);
+    } catch {
+      // Startup validation still throws while constructing CardRegistry. Once the
+      // service is running, a malformed or transient card set is ambiguity, not
+      // authority: convert it to the existing recorded stale-card path.
+      return {
+        servedModelAccepted: false,
+        cardStatus: 'withdrawn',
+        cardKeyId: 'unverified',
+        cardDigest: ZERO_DIGEST,
+      };
+    }
+  }
+
   async activatePolicy(actor: TransactionActor = { credential: 'proc:authz', claimed_role: null }): Promise<void> {
     if (actor.credential !== 'proc:authz') {
       throw new AuthorizationError('unauthorized-actor', 'only the authorization process may activate policy');
@@ -691,7 +707,7 @@ export class AuthorizationCore {
     const caseId = id.parse(input.caseId);
     const proposal = frozenProposal.parse(input.proposal);
     verifyProposalHash(proposal);
-    const evidence = this.#resolveModelEvidence(proposal);
+    const evidence = this.#resolveModelEvidenceFailClosed(proposal);
     if (!evidence.servedModelAccepted || evidence.cardStatus === 'withdrawn') {
       return { accepted: false, defect: 'model-quarantined' };
     }
@@ -700,7 +716,7 @@ export class AuthorizationCore {
       'model_select',
       input.actor,
       (state, at) => {
-        const currentEvidence = this.#resolveModelEvidence(proposal);
+        const currentEvidence = this.#resolveModelEvidenceFailClosed(proposal);
         if (!currentEvidence.servedModelAccepted || currentEvidence.cardStatus === 'withdrawn') {
           return { ops: [], result: { accepted: false, defect: 'model-quarantined' } as const };
         }
@@ -836,7 +852,7 @@ export class AuthorizationCore {
         this.#keyring,
         at,
         this.#resolveAuthorizedAgent(input.actor),
-        this.#resolveModelEvidence(proposal),
+        this.#resolveModelEvidenceFailClosed(proposal),
       );
       if (defects.defects.includes('stale-policy')) {
         throw new AuthorizationError('policy-not-active', 'the configured policy is not the active durable policy');
@@ -1120,7 +1136,7 @@ export class AuthorizationCore {
         if (approved === undefined || approved.card_digest !== ruling.binding.card_digest) defect = 'substituted-model';
         else if (approved.re_confirmation_required === true) defect = 'stale-card';
         else {
-          const currentEvidence = this.#resolveModelEvidence(proposal);
+          const currentEvidence = this.#resolveModelEvidenceFailClosed(proposal);
           if (
             !currentEvidence.servedModelAccepted ||
             currentEvidence.cardStatus !== 'current' ||
