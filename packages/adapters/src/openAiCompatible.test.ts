@@ -80,4 +80,22 @@ describe('OpenAI-compatible acting-model adapters', () => {
       adapter.act({ messages: [{ role: 'user', content: 'Synthetic.' }], maxOutputTokens: 64 }),
     ).rejects.toEqual(expect.objectContaining<Partial<ModelAdapterError>>({ code: 'malformed-response' }));
   });
+
+  it('stops reading a provider response that exceeds the configured byte limit', async () => {
+    const adapter = new OpenAiCompatibleAdapter(
+      {
+        ...laneConfigFromEnv('openai', { OPENAI_API_KEY: 'test-openai-key' }),
+        maxResponseBytes: 64,
+      },
+      (async () =>
+        new Response(
+          JSON.stringify({ model: 'gpt-5.5', choices: [{ message: { content: 'x'.repeat(128) } }] }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        )) as typeof fetch,
+    );
+
+    await expect(
+      adapter.act({ messages: [{ role: 'user', content: 'Synthetic.' }], maxOutputTokens: 64 }),
+    ).rejects.toEqual(expect.objectContaining<Partial<ModelAdapterError>>({ code: 'malformed-response' }));
+  });
 });

@@ -99,4 +99,18 @@ describe('server-owned model-card registry', () => {
       integrityAlarm: true,
     });
   });
+
+  it('re-reads withdrawal state on every resolve without requiring a restart', () => {
+    const directory = copiedCards();
+    const registry = CardRegistry.load(directory);
+    const requested = proposal('openai-gpt-5.5', 'gpt-5.5', 'gpt-5.5');
+    expect(registry.resolve(requested).cardStatus).toBe('current');
+
+    writeFileSync(join(directory, 'openai-gpt-5.5.revocation.json'), '{}\n');
+
+    expect(registry.resolve(requested)).toMatchObject({
+      cardStatus: 'withdrawn',
+      integrityAlarm: true,
+    });
+  });
 });

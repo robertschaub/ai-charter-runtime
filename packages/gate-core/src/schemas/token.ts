@@ -41,7 +41,7 @@ export const commitToken = z
     effect_id: id,
     ruling_id: id,
     frozen_proposal_hash: hexDigest,
-    /** Digest of `effectIntent` under the `proposal` domain. */
+    /** Digest of `effectIntent` under the `effect-intent` domain. */
     effect_request_digest: hexDigest,
     /**
      * Hex SHA-256 over canonical `{world_id, ruling_id, nonce}`. Filename-safe on Windows:

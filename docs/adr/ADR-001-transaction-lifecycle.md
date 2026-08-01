@@ -3,6 +3,8 @@
 
 **Status:** accepted (M1, 2026-08-01). **Spec:** §4 Gate ruling / Record entry, §5 Transactional core + Escalations-are-single-use, §6 criterion 6, §10 M1 (world-id seams).
 
+**Amendment (M3 review, 2026-08-01):** a restart probe that proves the same ledger has no effect records `no-effect`, not `failed`; only an executed effect may have a `failed` outcome. Commitments pin a persistent services-ledger id so replacement storage cannot masquerade as proof of absence.
+
 ## Context
 
 The authorization service is the single serialization point. Commitment is two-phase: `commit-verify`
@@ -62,6 +64,7 @@ projections. One line = one **transaction**, so a whole action's mutations land 
     "effect_request_digest":"…","idempotency_key":"…","service":"filing",
     "action_class":"grant-filing","bound_at":"2026-08-01T09:14:22.418Z",
     "token_expires_at":"2026-08-01T09:14:27.418Z","services_host_boot_id":"svc_boot_2",
+    "services_ledger_id":"ledger_7f3a",
     "recovery_contract":{"…":"…"},
     "state":"bound","outcome":null,"recovery_owner_role":"principal"}},
    {"op":"record.action.append","entry":{"world_id":"w-demo","entry_id":"rec_1044","…":"…"}}
@@ -151,6 +154,7 @@ Positive deltas count from **reservation** (in-flight attempts count); negative 
 - Unbound attempts consume nothing: `released` contributes zero, so a deny, expiry, or cancellation
   returns the counter to baseline.
 - A `failed` effect after binding stays counted — its reservation remains `settled`.
+- A proved absence after a services-host restart is `no-effect`, not a failed effect; it releases the held reservation.
 - **Compensation is a new gated action, not a counter edit.** The WAL is append-only and the machine has
   no un-settle arc; the recovery owner's compensating action runs the gates itself and carries a
   negative-delta reservation that only counts once it settles at its own `commit-verify`.
@@ -182,6 +186,9 @@ own recovery owner.
   guaranteed upstream — the nonce is consumable exactly once — and again downstream, where the
   idempotency key cannot create a second effect; an exact repeat returns the recorded outcome while a
   conflicting outcome is rejected.
+- **Ledger continuity id** — the services host creates one persistent, non-secret id beside the effect
+  ledger. `commit-verify` pins it into the commitment and the service repeats it in outcomes and probes.
+  Replacement or cleared storage therefore cannot prove that a bound effect was absent.
 - **One local transaction on the service side:** the effect payload *is* the ledger record. The service
   writes a unique `records/{world_id}/effects/{idempotency_key}.*.tmp`, fsyncs it, then atomically creates
   `…/{idempotency_key}.json` as a hard link to that complete inode. `link` is create-only on NTFS and
@@ -225,8 +232,10 @@ none issues a ruling directly, and their timeout default is `abstain` or `narrow
   counters are freed. It makes state visible; it never makes state safe.
 - **Reconciliation** of a `bound` commitment with no outcome: probe the services host by idempotency key
   (read-only, no token). `recorded` → adopt the outcome and discharge. `absent` **and** the services host
-  reports a different `boot_id` than the one at binding → `failed` (no effect: an unrenamed `.tmp` cannot
-  survive a restart). `absent` **and** the host has run continuously → retry with backoff, then
+  reports the **same `ledger_id`** and a different `boot_id` from binding → `no-effect` (an unrenamed
+  `.tmp` cannot survive a restart). A changed ledger id is not evidence of absence: bounded probes end in
+  `unknown`. Rollback to an older copy carrying the same ledger id remains an M3 limit pending ADR-003
+  anchoring. `absent` **and** the host has run continuously → retry with backoff, then
   `unknown → reconciliation-required`, which opens an escalation whose routing and eligible role come
   from the policy file's intervention-contract parameters — this is where criterion 7's *named recovery
   owner* lives, so no new mandate field is introduced. Its permitted dispositions record findings only;

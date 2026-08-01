@@ -67,7 +67,7 @@ export const walOp = z.discriminatedUnion('op', [
     .object({
       op: z.literal('commitment.reconcile'),
       commitment_id: id,
-      resolution: z.enum(['success', 'failed', 'routed']),
+      resolution: z.enum(['success', 'failed', 'no-effect', 'routed']),
     })
     .strict(),
 

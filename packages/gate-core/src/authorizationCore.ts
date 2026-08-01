@@ -46,6 +46,7 @@ export class AuthorizationError extends Error {
       | 'proposal-already-committed'
       | 'policy-not-active'
       | 'invalid-counter-delta'
+      | 'unauthorized-actor'
       | 'unsupported-ordering-rule',
     message: string,
   ) {
@@ -103,7 +104,12 @@ export interface RuleProposalResult {
   readonly mandateNarrowed: boolean;
 }
 
-export type CommitDefect = AuthorityDefect | 'not-allowed' | 'counter-invalid' | 'expired-ruling';
+export type CommitDefect =
+  | AuthorityDefect
+  | 'not-allowed'
+  | 'counter-invalid'
+  | 'expired-ruling'
+  | 'unauthorized-caller';
 
 export type CommitVerifyResult =
   | {
@@ -118,6 +124,7 @@ export interface CommitVerifyInput {
   readonly rulingId: string;
   readonly intent: EffectIntent;
   readonly servicesHostBootId: string;
+  readonly servicesLedgerId: string;
   readonly actor: TransactionActor;
 }
 
@@ -128,6 +135,7 @@ export interface EffectOutcomeReportInput {
   readonly idempotencyKey: string;
   readonly effectRequestDigest: string;
   readonly servicesHostBootId: string;
+  readonly servicesLedgerId: string;
   readonly outcome: 'success' | 'failed';
   readonly recordedAt: string;
   readonly detail?: string;
@@ -163,6 +171,7 @@ export type ReconcileAbsentResult =
         | 'unauthorized-reporter'
         | 'missing-commitment'
         | 'host-still-running'
+        | 'ledger-continuity-mismatch'
         | 'effect-already-recorded'
         | 'terminal-commitment';
     };
@@ -174,6 +183,7 @@ export type CommitmentProbe =
       readonly record: {
         readonly world_id: string;
         readonly services_host_boot_id: string;
+        readonly services_ledger_id: string;
         readonly effect_id: string;
         readonly idempotency_key: string;
         readonly effect_request_digest: string;
@@ -182,7 +192,7 @@ export type CommitmentProbe =
         readonly detail?: string;
       };
     }
-  | { readonly state: 'absent'; readonly boot_id: string };
+  | { readonly state: 'absent'; readonly boot_id: string; readonly ledger_id: string };
 
 export interface ReconcileCommitmentOptions {
   readonly commitmentId: string;
@@ -373,6 +383,28 @@ function requestedDeltas(input: RuleProposalInput): Partial<Record<CounterName, 
   return deltas;
 }
 
+function rulingReservationsMatchDeltas(
+  ruling: GateRuling,
+  deltas: Partial<Record<CounterName, number>>,
+): boolean {
+  const expected = new Map(
+    (Object.entries(deltas) as [CounterName, number][]).filter(([, delta]) => delta !== 0),
+  );
+  if (ruling.counter_reservations.length !== expected.size) return false;
+  const seen = new Set<CounterName>();
+  for (const reservation of ruling.counter_reservations) {
+    if (seen.has(reservation.counter) || expected.get(reservation.counter) !== reservation.delta) return false;
+    seen.add(reservation.counter);
+  }
+  return seen.size === expected.size;
+}
+
+function requireMandateActor(actor: TransactionActor, allowBootstrap: boolean): void {
+  if (actor.credential === 'role:principal') return;
+  if (allowBootstrap && actor.credential === 'proc:authz') return;
+  throw new AuthorizationError('unauthorized-actor', 'only the principal may change mandate authority');
+}
+
 function counterLimit(mandateValue: Mandate | undefined, counter: CounterName): number | null {
   if (mandateValue === undefined) return null;
   if (counter === 'actions') return mandateValue.limits.frequency_per_day ?? null;
@@ -479,6 +511,7 @@ function commitmentRecordEntry(
   effectId: string,
   idempotencyKey: string,
   effectRequestDigest: string,
+  servicesLedgerId: string,
   boundAt: string,
   tokenExpiresAt: string,
 ): RecordEntry {
@@ -511,6 +544,7 @@ function commitmentRecordEntry(
       idempotency_key: idempotencyKey,
       frozen_proposal_hash: proposal.proposal_hash,
       effect_request_digest: effectRequestDigest,
+      services_ledger_id: servicesLedgerId,
       service: ruling.binding.service,
       bound_at: boundAt,
       token_expires_at: tokenExpiresAt,
@@ -588,6 +622,9 @@ export class AuthorizationCore {
   }
 
   async activatePolicy(actor: TransactionActor = { credential: 'proc:authz', claimed_role: null }): Promise<void> {
+    if (actor.credential !== 'proc:authz') {
+      throw new AuthorizationError('unauthorized-actor', 'only the authorization process may activate policy');
+    }
     const policy = this.#policy;
     await this.#store.transactWithState('policy_reload', actor, (state, at) => ({
       ops:
@@ -613,6 +650,9 @@ export class AuthorizationCore {
   }
 
   async reloadPolicy(policy: LoadedPolicy, actor: TransactionActor): Promise<void> {
+    if (actor.credential !== 'proc:authz') {
+      throw new AuthorizationError('unauthorized-actor', 'only the authorization process may reload policy');
+    }
     await this.#store.transactWithState('policy_reload', actor, (state, at) => ({
       ops:
         state.policy?.policy_version === policy.policy.policy_version &&
@@ -638,6 +678,7 @@ export class AuthorizationCore {
   }
 
   async grantMandate(value: Mandate, actor: TransactionActor): Promise<void> {
+    requireMandateActor(actor, true);
     const parsed = mandate.parse(value);
     requireValidMandateMac(this.#keyring, parsed);
     await this.#store.transact('mandate_grant', actor, [{ op: 'mandate.grant', mandate: parsed }]);
@@ -659,6 +700,10 @@ export class AuthorizationCore {
       'model_select',
       input.actor,
       (state, at) => {
+        const currentEvidence = this.#resolveModelEvidence(proposal);
+        if (!currentEvidence.servedModelAccepted || currentEvidence.cardStatus === 'withdrawn') {
+          return { ops: [], result: { accepted: false, defect: 'model-quarantined' } as const };
+        }
         const status = state.mandateStatus.get(proposal.mandate_ref.mandate_id);
         const mandateValue = state.mandates.get(
           mandateVersionKey(proposal.mandate_ref.mandate_id, proposal.mandate_ref.version),
@@ -674,7 +719,7 @@ export class AuthorizationCore {
           status?.state !== 'active' ||
           status.version !== proposal.mandate_ref.version ||
           approved === undefined ||
-          (evidence.cardStatus === 'current' && approved.card_digest !== evidence.cardDigest)
+          (currentEvidence.cardStatus === 'current' && approved.card_digest !== currentEvidence.cardDigest)
         ) {
           return { ops: [], result: { accepted: false, defect: 'model-not-approved' } as const };
         }
@@ -704,6 +749,7 @@ export class AuthorizationCore {
   }
 
   async amendMandate(value: Mandate, actor: TransactionActor): Promise<void> {
+    requireMandateActor(actor, false);
     const parsed = mandate.parse(value);
     requireValidMandateMac(this.#keyring, parsed);
     await this.#store.transactWithState('mandate_amend', actor, (state) => ({
@@ -720,6 +766,7 @@ export class AuthorizationCore {
   }
 
   async revokeMandate(mandateId: string, version: number, actor: TransactionActor): Promise<void> {
+    requireMandateActor(actor, false);
     await this.#store.transactWithState('mandate_revoke', actor, (state, at) => ({
       ops: [
         ...invalidationOps(
@@ -734,6 +781,9 @@ export class AuthorizationCore {
   }
 
   async ruleProposal(input: RuleProposalInput): Promise<RuleProposalResult> {
+    if (input.actor.credential !== 'proc:orchestrator') {
+      throw new AuthorizationError('unauthorized-actor', 'only the orchestrator may submit a proposal for ruling');
+    }
     const proposal = frozenProposal.parse(input.proposal);
     verifyProposalHash(proposal);
     const policy = this.#policy;
@@ -803,7 +853,7 @@ export class AuthorizationCore {
           },
         ]),
       );
-      const evaluation = evaluatePolicy(policy.policy, {
+      const policyEvaluation = evaluatePolicy(policy.policy, {
         gate: input.gate,
         proposal,
         mandate: defects.mandate,
@@ -817,6 +867,20 @@ export class AuthorizationCore {
         reauthorizationRequired: defects.reauthorizationRequired,
       });
 
+      const wouldExceed = Object.values(counters).some(
+        (counter) => counter.limit !== null && counter.current + counter.delta > counter.limit,
+      );
+      const evaluation =
+        wouldExceed && policyEvaluation.verdict === 'allow'
+          ? {
+              verdict: 'escalate' as const,
+              uxClass: 'stop' as const,
+              matchedRuleId: 'default:aggregate-ceiling',
+              reason: 'The proposal would cross a cumulative mandate ceiling.',
+              interventionContract: policy.policy.default_escalation_contract,
+            }
+          : policyEvaluation;
+
       const rulingId = this.#ids.next('rul');
       const nonceId = this.#ids.next('nce');
       const mandateExpiry = defects.mandate?.expires_at;
@@ -826,9 +890,6 @@ export class AuthorizationCore {
         evaluation.verdict === 'deny'
           ? ttlEnd
           : [ttlEnd, mandateExpiry, mandateWindowEnd].filter((value): value is string => value !== undefined).sort()[0] ?? ttlEnd;
-      const wouldExceed = Object.values(counters).some(
-        (counter) => counter.limit !== null && counter.current + counter.delta > counter.limit,
-      );
       const reserve = evaluation.verdict !== 'deny' && !wouldExceed;
       const reservations = reserve
         ? (Object.entries(deltas) as [CounterName, number][])
@@ -981,7 +1042,12 @@ export class AuthorizationCore {
   }
 
   async commitVerify(input: CommitVerifyInput): Promise<CommitVerifyResult> {
+    if (input.actor.credential !== 'proc:services_host') {
+      return { ok: false, defect: 'unauthorized-caller' };
+    }
     const intent = effectIntent.parse(input.intent);
+    const servicesHostBootId = id.parse(input.servicesHostBootId);
+    const servicesLedgerId = id.parse(input.servicesLedgerId);
     const completed = await this.#store.transactWithState<CommitVerifyResult>('commit_verify', input.actor, (state, at) => {
       const ruling = state.rulings.get(input.rulingId);
       if (ruling === undefined) return { ops: [], result: { ok: false, defect: 'replayed-ruling' } as const };
@@ -1053,6 +1119,17 @@ export class AuthorizationCore {
         );
         if (approved === undefined || approved.card_digest !== ruling.binding.card_digest) defect = 'substituted-model';
         else if (approved.re_confirmation_required === true) defect = 'stale-card';
+        else {
+          const currentEvidence = this.#resolveModelEvidence(proposal);
+          if (
+            !currentEvidence.servedModelAccepted ||
+            currentEvidence.cardStatus !== 'current' ||
+            currentEvidence.cardDigest !== ruling.binding.card_digest ||
+            currentEvidence.cardKeyId !== ruling.binding.card_key_id
+          ) {
+            defect = 'stale-card';
+          }
+        }
       }
       if (
         defect === undefined &&
@@ -1065,6 +1142,22 @@ export class AuthorizationCore {
       }
       const nonce = state.nonces.get(ruling.binding.nonce);
       if (defect === undefined && (nonce === undefined || nonce.state !== 'issued')) defect = 'replayed-ruling';
+      if (defect === undefined) {
+        let deltas: Partial<Record<CounterName, number>>;
+        try {
+          deltas = requestedDeltas({
+            gate: ruling.gate,
+            proposal,
+            service: ruling.binding.service,
+            actionClass: ruling.binding.action_class,
+            actor: input.actor,
+          });
+        } catch {
+          deltas = {};
+          defect = 'counter-invalid';
+        }
+        if (defect === undefined && !rulingReservationsMatchDeltas(ruling, deltas)) defect = 'counter-invalid';
+      }
       if (defect === undefined) {
         for (const reservation of ruling.counter_reservations) {
           const stored = state.reservations.get(reservation.id);
@@ -1094,7 +1187,7 @@ export class AuthorizationCore {
         return { ops, result: { ok: false, defect } as const };
       }
 
-      const effectRequestDigest = digestFor('proposal', intent);
+      const effectRequestDigest = digestFor('effect-intent', intent);
       const idempotencyKey = sha256Hex(
         canonicalize({ world_id: state.worldId, ruling_id: ruling.ruling_id, nonce: ruling.binding.nonce }),
       );
@@ -1134,7 +1227,8 @@ export class AuthorizationCore {
             action_class: ruling.binding.action_class,
             bound_at: at,
             token_expires_at: tokenExpiresAt,
-            services_host_boot_id: input.servicesHostBootId,
+            services_host_boot_id: servicesHostBootId,
+            services_ledger_id: servicesLedgerId,
             recovery_contract: this.#policy.policy.recovery_escalation_contract,
             state: 'bound',
             outcome: null,
@@ -1152,6 +1246,7 @@ export class AuthorizationCore {
             effectId,
             idempotencyKey,
             effectRequestDigest,
+            servicesLedgerId,
             at,
             tokenExpiresAt,
           ),
@@ -1175,6 +1270,7 @@ export class AuthorizationCore {
     const idempotencyKey = hexDigest.parse(input.idempotencyKey);
     const effectRequestDigest = hexDigest.parse(input.effectRequestDigest);
     const servicesHostBootId = id.parse(input.servicesHostBootId);
+    const servicesLedgerId = id.parse(input.servicesLedgerId);
     const recordedAt = timestamp.parse(input.recordedAt);
 
     const completed = await this.#store.transactWithState<EffectOutcomeReportResult>(
@@ -1190,7 +1286,8 @@ export class AuthorizationCore {
           commitment.effect_id !== effectId ||
           commitment.idempotency_key !== idempotencyKey ||
           commitment.effect_request_digest !== effectRequestDigest ||
-          commitment.services_host_boot_id !== servicesHostBootId
+          commitment.services_host_boot_id !== servicesHostBootId ||
+          commitment.services_ledger_id !== servicesLedgerId
         ) {
           return { ops: [], result: { accepted: false, defect: 'binding-mismatch' } as const };
         }
@@ -1244,6 +1341,7 @@ export class AuthorizationCore {
               commitment_id: commitmentId,
               idempotency_key: idempotencyKey,
               effect_request_digest: effectRequestDigest,
+              services_ledger_id: servicesLedgerId,
               outcome: input.outcome,
               recorded_at: recordedAt,
               ...(input.detail === undefined ? {} : { detail: input.detail }),
@@ -1321,6 +1419,7 @@ export class AuthorizationCore {
           idempotencyKey: probe.record.idempotency_key,
           effectRequestDigest: probe.record.effect_request_digest,
           servicesHostBootId: probe.record.services_host_boot_id,
+          servicesLedgerId: probe.record.services_ledger_id,
           outcome: probe.record.outcome,
           recordedAt: probe.record.recorded_at,
           ...(probe.record.detail === undefined ? {} : { detail: probe.record.detail }),
@@ -1329,8 +1428,12 @@ export class AuthorizationCore {
         });
         return { resolution: 'recorded', report };
       }
-      if (probe?.state === 'absent' && probe.boot_id !== initial.services_host_boot_id) {
-        const result = await this.reconcileAbsentAfterRestart(commitmentId, probe.boot_id);
+      if (
+        probe?.state === 'absent' &&
+        probe.ledger_id === initial.services_ledger_id &&
+        probe.boot_id !== initial.services_host_boot_id
+      ) {
+        const result = await this.reconcileAbsentAfterRestart(commitmentId, probe.boot_id, probe.ledger_id);
         if (!result.ok && result.defect === 'effect-already-recorded') {
           return { resolution: 'already-terminal' };
         }
@@ -1443,18 +1546,20 @@ export class AuthorizationCore {
   async reconcileAbsentAfterRestart(
     commitmentIdInput: string,
     observedServicesHostBootIdInput: string,
+    observedServicesLedgerIdInput: string,
     actor: TransactionActor = { credential: 'proc:authz', claimed_role: null },
   ): Promise<ReconcileAbsentResult> {
     if (actor.credential !== 'proc:authz') return { ok: false, defect: 'unauthorized-reporter' };
     const commitmentId = id.parse(commitmentIdInput);
     const observedBootId = id.parse(observedServicesHostBootIdInput);
+    const observedLedgerId = id.parse(observedServicesLedgerIdInput);
     const completed = await this.#store.transactWithState<ReconcileAbsentResult>(
       'commitment_reconcile_absent',
       actor,
       (state, at) => {
         const commitment = state.commitments.get(commitmentId);
         if (commitment === undefined) return { ops: [], result: { ok: false, defect: 'missing-commitment' } as const };
-        if (commitment.state === 'reconciled' && commitment.outcome === 'failed') {
+        if (commitment.state === 'reconciled' && commitment.outcome === 'no-effect') {
           return {
             ops: [],
             result: { ok: true, status: 'already-reconciled', recordEntryId: null } as const,
@@ -1462,6 +1567,9 @@ export class AuthorizationCore {
         }
         if (observedBootId === commitment.services_host_boot_id) {
           return { ops: [], result: { ok: false, defect: 'host-still-running' } as const };
+        }
+        if (observedLedgerId !== commitment.services_ledger_id) {
+          return { ops: [], result: { ok: false, defect: 'ledger-continuity-mismatch' } as const };
         }
         if (state.effects.has(commitment.effect_id)) {
           return { ops: [], result: { ok: false, defect: 'effect-already-recorded' } as const };
@@ -1485,7 +1593,7 @@ export class AuthorizationCore {
             recovery_owner_role: commitment.recovery_owner_role,
           });
         }
-        ops.push({ op: 'commitment.reconcile', commitment_id: commitmentId, resolution: 'failed' });
+        ops.push({ op: 'commitment.reconcile', commitment_id: commitmentId, resolution: 'no-effect' });
         for (const reservation of ruling.counter_reservations) {
           const reservationState = state.reservations.get(reservation.id)?.state;
           if (reservationState === 'held_for_reconciliation' || reservationState === 'settled') {
@@ -1501,7 +1609,7 @@ export class AuthorizationCore {
           entry: commitmentEventRecordEntry(state, commitment, actor, recordEntryId, at, {
             event: 'effect_outcome',
             effect_id: commitment.effect_id,
-            outcome: 'failed',
+            outcome: 'no-effect',
             reported_at: at,
             recovery_owner_role: null,
             detail: 'The services host restarted without a committed idempotency-ledger entry.',

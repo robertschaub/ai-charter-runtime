@@ -35,6 +35,7 @@ export const serviceEffectRecord = z
     version: z.literal(1),
     world_id: worldId,
     services_host_boot_id: id,
+    services_ledger_id: id,
     idempotency_key: hexDigest,
     effect_id: id,
     ruling_id: id,
@@ -50,6 +51,14 @@ export const serviceEffectRecord = z
   .strict();
 
 export type ServiceEffectRecord = z.infer<typeof serviceEffectRecord>;
+
+const ledgerIdentity = z
+  .object({
+    version: z.literal(1),
+    world_id: worldId,
+    ledger_id: id,
+  })
+  .strict();
 
 export interface EffectLedgerOptions {
   readonly recordsRoot: string;
@@ -76,8 +85,13 @@ export type ExecuteEffectResult =
     };
 
 export type EffectProbe =
-  | { readonly state: 'recorded'; readonly boot_id: string; readonly record: ServiceEffectRecord }
-  | { readonly state: 'absent'; readonly boot_id: string };
+  | {
+      readonly state: 'recorded';
+      readonly boot_id: string;
+      readonly ledger_id: string;
+      readonly record: ServiceEffectRecord;
+    }
+  | { readonly state: 'absent'; readonly boot_id: string; readonly ledger_id: string };
 
 export class EffectLedgerError extends Error {
   constructor(
@@ -130,6 +144,7 @@ export class EffectLedger {
   readonly #directory: string;
   readonly #worldId: string;
   readonly #bootId: string;
+  readonly #ledgerId: string;
   readonly #keyring: Keyring;
   readonly #now: () => string;
 
@@ -140,11 +155,16 @@ export class EffectLedger {
     this.#now = options.now ?? (() => new Date().toISOString());
     this.#directory = resolve(options.recordsRoot, this.#worldId, 'effects');
     mkdirSync(this.#directory, { recursive: true });
+    this.#ledgerId = this.#loadOrCreateLedgerId();
     this.#removeStaleTemps();
   }
 
   get bootId(): string {
     return this.#bootId;
+  }
+
+  get ledgerId(): string {
+    return this.#ledgerId;
   }
 
   execute(
@@ -173,6 +193,7 @@ export class EffectLedger {
       version: 1,
       world_id: this.#worldId,
       services_host_boot_id: this.#bootId,
+      services_ledger_id: this.#ledgerId,
       idempotency_key: current.token.idempotency_key,
       effect_id: current.token.effect_id,
       ruling_id: current.token.ruling_id,
@@ -192,8 +213,8 @@ export class EffectLedger {
     const key = hexDigest.parse(idempotencyKeyInput);
     const record = this.#read(key);
     return record === undefined
-      ? { state: 'absent', boot_id: this.#bootId }
-      : { state: 'recorded', boot_id: this.#bootId, record };
+      ? { state: 'absent', boot_id: this.#bootId, ledger_id: this.#ledgerId }
+      : { state: 'recorded', boot_id: this.#bootId, ledger_id: this.#ledgerId, record };
   }
 
   #path(key: string): string {
@@ -204,7 +225,11 @@ export class EffectLedger {
     const path = this.#path(key);
     if (!existsSync(path)) return undefined;
     try {
-      return serviceEffectRecord.parse(JSON.parse(readFileSync(path, 'utf8')));
+      const record = serviceEffectRecord.parse(JSON.parse(readFileSync(path, 'utf8')));
+      if (record.world_id !== this.#worldId || record.services_ledger_id !== this.#ledgerId) {
+        throw new Error('ledger identity mismatch');
+      }
+      return record;
     } catch {
       throw new EffectLedgerError('corrupt-ledger', `effect ledger entry ${key} is not valid`);
     }
@@ -277,5 +302,36 @@ export class EffectLedger {
     for (const name of readdirSync(this.#directory)) {
       if (name.endsWith('.tmp')) unlinkSync(join(this.#directory, name));
     }
+  }
+
+  #loadOrCreateLedgerId(): string {
+    const identityPath = join(this.#directory, 'ledger-identity.json');
+    if (existsSync(identityPath)) {
+      try {
+        const identity = ledgerIdentity.parse(JSON.parse(readFileSync(identityPath, 'utf8')));
+        if (identity.world_id !== this.#worldId) throw new Error('world mismatch');
+        return identity.ledger_id;
+      } catch {
+        throw new EffectLedgerError('corrupt-ledger', 'the services ledger identity is invalid');
+      }
+    }
+    const committedEntries = readdirSync(this.#directory).filter((name) => /^[a-f0-9]{64}\.json$/.test(name));
+    if (committedEntries.length > 0) {
+      throw new EffectLedgerError('corrupt-ledger', 'the services ledger identity is missing');
+    }
+    const identity = ledgerIdentity.parse({
+      version: 1,
+      world_id: this.#worldId,
+      ledger_id: `ledger_${randomUUID()}`,
+    });
+    const bytes = Buffer.from(`${canonicalize(identity)}\n`, 'utf8');
+    const fd = openSync(identityPath, 'wx', 0o600);
+    try {
+      writeAll(fd, bytes);
+      fsyncSync(fd);
+    } finally {
+      closeSync(fd);
+    }
+    return identity.ledger_id;
   }
 }

@@ -11,6 +11,7 @@ export interface ModelLaneConfig {
   readonly apiKey: string;
   readonly tokenParameter: 'max_tokens' | 'max_completion_tokens';
   readonly timeoutMs?: number;
+  readonly maxResponseBytes?: number;
 }
 
 export interface ChatMessage {
@@ -44,7 +45,7 @@ export class ModelAdapterError extends Error {
   }
 }
 
-const printableModelId = z.string().regex(/^[\x21-\x7e]+$/);
+const printableModelId = z.string().max(256).regex(/^[\x21-\x7e]+$/);
 const providerResponse = z
   .object({
     model: printableModelId,
@@ -55,7 +56,7 @@ const providerResponse = z
             message: z
               .object({
                 content: z.string().nullable(),
-                tool_calls: z.array(z.unknown()).optional(),
+                tool_calls: z.array(z.unknown()).max(128).optional(),
               })
               .passthrough(),
           })
@@ -78,8 +79,44 @@ function chatUrl(baseUrl: string): string {
   return new URL('chat/completions', parsed).toString();
 }
 
+async function readBoundedJson(response: Response, maxBytes: number): Promise<unknown> {
+  const declaredLength = response.headers.get('content-length');
+  if (declaredLength !== null) {
+    const parsedLength = Number(declaredLength);
+    if (Number.isFinite(parsedLength) && parsedLength > maxBytes) {
+      throw new ModelAdapterError('malformed-response', 'model provider response exceeded the byte limit');
+    }
+  }
+  if (response.body === null) throw new ModelAdapterError('malformed-response', 'model provider response was empty');
+
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  while (true) {
+    const next = await reader.read();
+    if (next.done) break;
+    total += next.value.byteLength;
+    if (total > maxBytes) {
+      await reader.cancel();
+      throw new ModelAdapterError('malformed-response', 'model provider response exceeded the byte limit');
+    }
+    chunks.push(next.value);
+  }
+  const bytes = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  try {
+    return JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes)) as unknown;
+  } catch {
+    throw new ModelAdapterError('malformed-response', 'model provider response was not JSON');
+  }
+}
+
 export class OpenAiCompatibleAdapter {
-  readonly #config: Required<Omit<ModelLaneConfig, 'timeoutMs'>> & { readonly timeoutMs: number };
+  readonly #config: Required<ModelLaneConfig>;
   readonly #fetch: typeof fetch;
 
   constructor(config: ModelLaneConfig, fetchImplementation: typeof fetch = fetch) {
@@ -87,9 +124,19 @@ export class OpenAiCompatibleAdapter {
     if (!Number.isSafeInteger(config.timeoutMs ?? 30_000) || (config.timeoutMs ?? 30_000) <= 0) {
       throw new ModelAdapterError('invalid-config', 'model timeout must be a positive safe integer');
     }
+    if (
+      !Number.isSafeInteger(config.maxResponseBytes ?? 1_048_576) ||
+      (config.maxResponseBytes ?? 1_048_576) <= 0
+    ) {
+      throw new ModelAdapterError('invalid-config', 'model response byte limit must be a positive safe integer');
+    }
     printableModelId.parse(config.requestedModel);
     chatUrl(config.baseUrl);
-    this.#config = { ...config, timeoutMs: config.timeoutMs ?? 30_000 };
+    this.#config = {
+      ...config,
+      timeoutMs: config.timeoutMs ?? 30_000,
+      maxResponseBytes: config.maxResponseBytes ?? 1_048_576,
+    };
     this.#fetch = fetchImplementation;
   }
 
@@ -118,12 +165,7 @@ export class OpenAiCompatibleAdapter {
       if (!response.ok) {
         throw new ModelAdapterError('provider-http', `model provider returned HTTP ${response.status}`, response.status);
       }
-      let raw: unknown;
-      try {
-        raw = await response.json();
-      } catch {
-        throw new ModelAdapterError('malformed-response', 'model provider response was not JSON');
-      }
+      const raw = await readBoundedJson(response, this.#config.maxResponseBytes);
       const parsed = providerResponse.safeParse(raw);
       if (!parsed.success) throw new ModelAdapterError('malformed-response', 'model provider response was malformed');
       const message = parsed.data.choices[0]?.message;

@@ -76,6 +76,7 @@ export class MockServicesHost {
       idempotencyKey: executed.record.idempotency_key,
       effectRequestDigest: executed.record.effect_request_digest,
       servicesHostBootId: executed.record.services_host_boot_id,
+      servicesLedgerId: executed.record.services_ledger_id,
       outcome: executed.record.outcome,
       recordedAt: executed.record.recorded_at,
       ...(executed.record.detail === undefined ? {} : { detail: executed.record.detail }),
@@ -102,6 +103,7 @@ export class MockServicesHost {
       rulingId,
       intent,
       servicesHostBootId: this.ledger.bootId,
+      servicesLedgerId: this.ledger.ledgerId,
       actor: SERVICES_HOST,
     });
     this.#commitInFlight.set(cacheKey, request);

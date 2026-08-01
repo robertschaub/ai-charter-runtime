@@ -84,6 +84,8 @@ Orchestrator: `GET /console/*` unauthenticated assets; `POST /w/{w}/cases/{id}/m
 `GET /w/{w}/cases/{id}/state`, `GET /w/{w}/models` all `role:case_officer`.
 Services host: `POST /w/{w}/services/{service}/execute` `proc:orchestrator`;
 `GET /w/{w}/effects/{idempotency_key}` (read-only reconciliation probe) `proc:authz`; `GET /healthz` open.
+`commit-verify`, effect outcomes, and reconciliation probes carry both the current services-host boot id
+and the persistent services-ledger id; only absence under the same ledger id can release a commitment.
 
 **The orchestrator's credential appears on exactly four authorization-service routes** — proposal
 submission, ruling read, approved-model read, and the read-only escalation mirror ADR-004 §7 requires so

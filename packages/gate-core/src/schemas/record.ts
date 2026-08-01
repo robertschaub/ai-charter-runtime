@@ -23,7 +23,7 @@ import {
 } from './common.js';
 import { disposition, interventionContract, standingClass } from './intervention.js';
 
-export const EFFECT_OUTCOMES = ['success', 'failed', 'unknown-reconciliation-required'] as const;
+export const EFFECT_OUTCOMES = ['success', 'failed', 'no-effect', 'unknown-reconciliation-required'] as const;
 export const effectOutcomeValue = z.enum(EFFECT_OUTCOMES);
 
 /** Sealed before the effect executes (ADR-001 §6). */
@@ -35,6 +35,7 @@ export const commitmentEvent = z.object({
   idempotency_key: hexDigest,
   frozen_proposal_hash: hexDigest,
   effect_request_digest: hexDigest,
+  services_ledger_id: id,
   service: id,
   bound_at: timestamp,
   token_expires_at: timestamp,
@@ -56,7 +57,7 @@ export const retryServedEvent = z.object({
   effect_id: id,
   idempotency_key: hexDigest,
   served_at: timestamp,
-  recorded_outcome: effectOutcomeValue,
+  recorded_outcome: z.enum(['success', 'failed']),
 }).strict();
 
 /** ADR-001 §7: every arrival after the first is a recorded no-op. */

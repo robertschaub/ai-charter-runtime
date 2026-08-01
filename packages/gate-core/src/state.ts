@@ -394,6 +394,14 @@ export function applyWorldOp(state: WorldState, op: WalOp, transactionTimestamp:
     case 'commitment.reconcile': {
       const current = requireValue(state.commitments, op.commitment_id, `commitment ${op.commitment_id}`);
       if (current.state !== 'unknown') fail('illegal-transition', `commitment ${op.commitment_id}: ${current.state} -> reconciled`);
+      const effect = state.effects.get(current.effect_id);
+      if (op.resolution === 'success' || op.resolution === 'failed') {
+        if (effect === undefined || effect.outcome !== op.resolution) {
+          fail('binding-mismatch', `commitment ${op.commitment_id} has no matching durable effect outcome`);
+        }
+      } else if (op.resolution === 'no-effect' && effect !== undefined) {
+        fail('binding-mismatch', `commitment ${op.commitment_id} already has a durable effect outcome`);
+      }
       state.commitments.set(op.commitment_id, {
         ...current,
         state: 'reconciled',
@@ -468,7 +476,8 @@ export function applyWorldOp(state: WorldState, op: WalOp, transactionTimestamp:
       if (
         commitment.effect_id !== op.effect.effect_id ||
         commitment.idempotency_key !== op.effect.idempotency_key ||
-        commitment.effect_request_digest !== op.effect.effect_request_digest
+        commitment.effect_request_digest !== op.effect.effect_request_digest ||
+        commitment.services_ledger_id !== op.effect.services_ledger_id
       ) {
         fail('binding-mismatch', `effect ${op.effect.effect_id} differs from its commitment`);
       }
@@ -609,7 +618,8 @@ export function applyWorldOp(state: WorldState, op: WalOp, transactionTimestamp:
             commitment.ruling_id !== ruling.ruling_id ||
             commitment.effect_id !== commitmentEvent.effect_id ||
             commitment.idempotency_key !== commitmentEvent.idempotency_key ||
-            commitment.effect_request_digest !== commitmentEvent.effect_request_digest
+            commitment.effect_request_digest !== commitmentEvent.effect_request_digest ||
+            commitment.services_ledger_id !== commitmentEvent.services_ledger_id
           ) {
             fail('record-mismatch', `action record ${op.entry.entry_id} differs from its commitment`);
           }

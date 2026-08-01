@@ -45,7 +45,7 @@ function tokenFor(keyring: Keyring, value: EffectIntent, overrides: Partial<Comm
     effect_id: 'eff_1',
     ruling_id: value.ruling_id,
     frozen_proposal_hash: value.frozen_proposal_hash,
-    effect_request_digest: digestFor('proposal', value),
+    effect_request_digest: digestFor('effect-intent', value),
     idempotency_key: IDEMPOTENCY_KEY,
     service: value.service,
     action_class: value.action_class,
@@ -82,7 +82,11 @@ describe('services-host effect ledger', () => {
       value.ledger.execute(token, intent({ exact_parameters: { amount_minor_units: 51 } }), execute),
     ).toEqual({ accepted: false, reason: 'binding-mismatch' });
     expect(execute).not.toHaveBeenCalled();
-    expect(value.ledger.probe(IDEMPOTENCY_KEY)).toEqual({ state: 'absent', boot_id: 'services_boot_1' });
+    expect(value.ledger.probe(IDEMPOTENCY_KEY)).toEqual({
+      state: 'absent',
+      boot_id: 'services_boot_1',
+      ledger_id: value.ledger.ledgerId,
+    });
   });
 
   it('commits the effect once and serves the identical result on retry, even after token expiry', () => {
@@ -101,6 +105,7 @@ describe('services-host effect ledger', () => {
     expect(value.ledger.probe(IDEMPOTENCY_KEY)).toEqual({
       state: 'recorded',
       boot_id: 'services_boot_1',
+      ledger_id: value.ledger.ledgerId,
       record: first.accepted ? first.record : undefined,
     });
   });
@@ -136,7 +141,40 @@ describe('services-host effect ledger', () => {
     });
 
     expect(existsSync(stale)).toBe(false);
-    expect(ledger.probe(IDEMPOTENCY_KEY)).toEqual({ state: 'absent', boot_id: 'services_boot_2' });
+    expect(ledger.probe(IDEMPOTENCY_KEY)).toEqual({
+      state: 'absent',
+      boot_id: 'services_boot_2',
+      ledger_id: ledger.ledgerId,
+    });
+  });
+
+  it('preserves ledger identity across restart and changes it after storage replacement', () => {
+    const root = mkdtempSync(join(tmpdir(), 'services-mock-ledger-id-'));
+    roots.push(root);
+    const keyring = new Keyring(new Map([[KEY_ID, KEY]]), KEY_ID);
+    const first = new EffectLedger({
+      recordsRoot: root,
+      worldId: 'w-demo',
+      bootId: 'services_boot_1',
+      keyring,
+    });
+    const restarted = new EffectLedger({
+      recordsRoot: root,
+      worldId: 'w-demo',
+      bootId: 'services_boot_2',
+      keyring,
+    });
+    expect(restarted.ledgerId).toBe(first.ledgerId);
+
+    const effectsDirectory = join(root, 'w-demo', 'effects');
+    rmSync(effectsDirectory, { recursive: true });
+    const replaced = new EffectLedger({
+      recordsRoot: root,
+      worldId: 'w-demo',
+      bootId: 'services_boot_3',
+      keyring,
+    });
+    expect(replaced.ledgerId).not.toBe(first.ledgerId);
   });
 
   it('fails closed on a corrupt committed ledger entry', () => {

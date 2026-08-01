@@ -17,8 +17,8 @@ On any divergence, the specification and its linked Charter source documents pre
 - **Not an assurance or certification claim.** This demonstrates a runtime *mechanism*. Nothing here is
   "Charter-certified"; there is no green light, no trust API, no queryable certification (see [NOTICE](NOTICE)).
 - **Institutions are simulated — two roles are absent.** Rulemaker, operator, and record keeper are surfaces
-  played by one person; independent reviewer and remedy decider do not exist here. Same-machine process
-  isolation is separation of duties in miniature, not independence.
+  played by one person; independent reviewer and remedy decider do not exist here. M3's vertical slice is
+  in-process; M4's same-machine process isolation will be separation of duties in miniature, not independence.
 - **A deterministic gate proves declared rules were applied** — not that the rules are lawful, fair, or legitimate.
 - **Commit-token window (interpretive choice).** Commitment binds at `commit-verify`; a revocation landing in the
   token's short TTL is too late for that action by definition. On the stricter reading of "authority in flight",

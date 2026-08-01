@@ -86,32 +86,43 @@ function verifySignature(
 }
 
 export class CardRegistry {
-  readonly #cards = new Map<string, VerifiedCard>();
+  #cards = new Map<string, VerifiedCard>();
+  readonly #cardsDirectory: string;
+
+  private constructor(cardsDirectory: string) {
+    this.#cardsDirectory = cardsDirectory;
+  }
 
   static load(cardsDirectory: string): CardRegistry {
+    const registry = new CardRegistry(cardsDirectory);
+    registry.#reload();
+    return registry;
+  }
+
+  #reload(): void {
     let keys: SigningKeyEntry[];
     try {
-      keys = signingKeys.parse(readJson(join(cardsDirectory, 'signing-keys.json')));
+      keys = signingKeys.parse(readJson(join(this.#cardsDirectory, 'signing-keys.json')));
     } catch (error) {
       if (error instanceof CardRegistryError) throw error;
       throw new CardRegistryError('invalid-trust-root', 'signing-keys.json is not a valid trust root');
     }
     const keyById = new Map(keys.map((key) => [key.key_id, key]));
-    const registry = new CardRegistry();
-    const names = readdirSync(cardsDirectory).filter(
+    const cards = new Map<string, VerifiedCard>();
+    const names = readdirSync(this.#cardsDirectory).filter(
       (name) => name.endsWith('.json') && name !== 'signing-keys.json' && !name.endsWith('.revocation.json'),
     );
     for (const name of names) {
       let card: ModelCard;
       try {
-        card = modelCard.parse(readJson(join(cardsDirectory, name)));
+        card = modelCard.parse(readJson(join(this.#cardsDirectory, name)));
       } catch {
         throw new CardRegistryError('invalid-card', `${name} does not satisfy the model-card schema`);
       }
       if (`${card.card_id}.json` !== name) {
         throw new CardRegistryError('filename-mismatch', `${name} does not match card id ${card.card_id}`);
       }
-      if (registry.#cards.has(card.card_id)) {
+      if (cards.has(card.card_id)) {
         throw new CardRegistryError('duplicate-card', `duplicate card id ${card.card_id}`);
       }
       const key = keyById.get(card.signature.key_id);
@@ -121,7 +132,7 @@ export class CardRegistry {
         key,
         'model-card',
       );
-      const revocationPath = join(cardsDirectory, `${card.card_id}.revocation.json`);
+      const revocationPath = join(this.#cardsDirectory, `${card.card_id}.revocation.json`);
       let withdrawn = false;
       let integrityAlarm = false;
       if (existsSync(revocationPath)) {
@@ -146,7 +157,7 @@ export class CardRegistry {
           integrityAlarm = true;
         }
       }
-      registry.#cards.set(card.card_id, {
+      cards.set(card.card_id, {
         card,
         digest: digestFor('model-card', unsigned(card as unknown as Record<string, unknown>, 'signature')),
         keyId: card.signature.key_id,
@@ -155,10 +166,14 @@ export class CardRegistry {
         integrityAlarm,
       });
     }
-    return registry;
+    this.#cards = cards;
   }
 
   resolve(proposal: FrozenProposal): CardResolution {
+    // ADR-006 requires withdrawal and supersession to be visible at every gate
+    // touch. The card set is deliberately small, so a fail-closed reload is
+    // clearer than a cache whose invalidation can miss a security withdrawal.
+    this.#reload();
     const cardId = cardSlug.parse(proposal.acting_model.card_id);
     const entry = this.#cards.get(cardId);
     if (entry === undefined) {
@@ -199,6 +214,7 @@ export class CardRegistry {
   }
 
   get(cardIdInput: string): { readonly card: ModelCard; readonly digest: string; readonly keyId: string } | undefined {
+    this.#reload();
     const entry = this.#cards.get(cardSlug.parse(cardIdInput));
     if (entry === undefined) return undefined;
     return { card: entry.card, digest: entry.digest, keyId: entry.keyId };

@@ -71,10 +71,11 @@ export const commitmentRecord = z
     bound_at: timestamp,
     token_expires_at: timestamp,
     services_host_boot_id: id,
+    services_ledger_id: id,
     /** Pinned at commitment time so a later policy reload cannot reroute recovery. */
     recovery_contract: interventionContract,
     state: commitmentState,
-    outcome: z.enum(['success', 'failed', 'unknown-reconciliation-required']).nullable(),
+    outcome: z.enum(['success', 'failed', 'no-effect', 'unknown-reconciliation-required']).nullable(),
     recovery_owner_role: role,
   })
   .strict()
@@ -116,6 +117,7 @@ export const effectRecord = z
     commitment_id: id,
     idempotency_key: hexDigest,
     effect_request_digest: hexDigest,
+    services_ledger_id: id,
     outcome: z.enum(['success', 'failed', 'unknown-reconciliation-required']),
     recorded_at: timestamp,
     detail: z.string().optional(),

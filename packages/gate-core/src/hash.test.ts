@@ -24,13 +24,14 @@ describe('hash', () => {
     const value = { world_id: 'w-demo', seq: 1 };
     const digests = new Set([
       digestFor('proposal', value),
+      digestFor('effect-intent', value),
       digestFor('record-entry', value),
       digestFor('access-entry', value),
       digestFor('wal-entry', value),
       digestFor('model-card', value),
       digestFor('card-revocation', value),
     ]);
-    expect(digests.size).toBe(6);
+    expect(digests.size).toBe(7);
   });
 
   it('rejects an unknown domain tag rather than hashing untagged', () => {

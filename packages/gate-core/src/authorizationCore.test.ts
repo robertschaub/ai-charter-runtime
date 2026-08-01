@@ -26,9 +26,11 @@ const KEY_ID = 'hmac-test';
 const KEY = 'a'.repeat(64);
 const CARD_DIGEST = 'c'.repeat(64);
 const BUILD_DIGEST = 'b'.repeat(64);
+const SERVICES_LEDGER_ID = 'ledger_test';
 const POLICY_FILE = fileURLToPath(new URL('../policy/v1.yaml', import.meta.url));
 const ORCHESTRATOR = { credential: 'proc:orchestrator', claimed_role: 'case_officer' } as const;
 const SERVICES_HOST = { credential: 'proc:services_host', claimed_role: null } as const;
+const AUTHZ = { credential: 'proc:authz', claimed_role: null } as const;
 const PRINCIPAL = { credential: 'role:principal', claimed_role: 'principal' } as const;
 
 class SequentialIds implements IdFactory {
@@ -226,6 +228,53 @@ describe('M2 authorization transactions', () => {
     expect(existsSync(escaped)).toBe(false);
   });
 
+  it('refuses mandate authority changes from the orchestrator credential', async () => {
+    const h = harness();
+    await h.core.activatePolicy();
+    const first = bindMandate(h.keyring, mandateBody());
+    await expect(h.core.grantMandate(first, ORCHESTRATOR)).rejects.toMatchObject({
+      code: 'unauthorized-actor',
+    });
+    expect(h.store.snapshot().mandates.size).toBe(0);
+
+    await h.core.grantMandate(first, PRINCIPAL);
+    const amended = bindMandate(
+      h.keyring,
+      mandateBody({ version: 2, issued_at: '2026-08-01T09:00:01.000Z' }),
+    );
+    await expect(h.core.amendMandate(amended, ORCHESTRATOR)).rejects.toMatchObject({
+      code: 'unauthorized-actor',
+    });
+    await expect(h.core.revokeMandate('mdt_demo', 1, ORCHESTRATOR)).rejects.toMatchObject({
+      code: 'unauthorized-actor',
+    });
+    expect(h.store.snapshot().mandateStatus.get('mdt_demo')).toMatchObject({ version: 1, state: 'active' });
+  });
+
+  it('refuses wrong-process calls across the remaining authority-changing core methods', async () => {
+    const h = harness();
+    await expect(h.core.activatePolicy(ORCHESTRATOR)).rejects.toMatchObject({ code: 'unauthorized-actor' });
+    await h.core.activatePolicy();
+    await expect(h.core.reloadPolicy(h.policy, ORCHESTRATOR)).rejects.toMatchObject({ code: 'unauthorized-actor' });
+    await h.core.grantMandate(bindMandate(h.keyring, mandateBody()), PRINCIPAL);
+    const frozen = proposal(49);
+    await expect(
+      h.core.ruleProposal(ruleInput(frozen, { actor: SERVICES_HOST })),
+    ).rejects.toMatchObject({ code: 'unauthorized-actor' });
+
+    const ruled = await h.core.ruleProposal(ruleInput(frozen));
+    expect(
+      await h.core.commitVerify({
+        rulingId: ruled.ruling.ruling_id,
+        intent: intentFor(frozen, ruled.ruling.ruling_id),
+        servicesHostBootId: 'services_boot_1',
+        servicesLedgerId: SERVICES_LEDGER_ID,
+        actor: ORCHESTRATOR,
+      }),
+    ).toEqual({ ok: false, defect: 'unauthorized-caller' });
+    expect(h.store.snapshot().nonces.get(ruled.ruling.binding.nonce)?.state).toBe('issued');
+  });
+
   it('seals an exact commitment before returning a token, rejects replay, and replays from WAL', async () => {
     const h = harness();
     await initialize(h);
@@ -240,6 +289,7 @@ describe('M2 authorization transactions', () => {
       rulingId: ruled.ruling.ruling_id,
       intent: intentFor(frozen, ruled.ruling.ruling_id),
       servicesHostBootId: 'services_boot_1',
+      servicesLedgerId: SERVICES_LEDGER_ID,
       actor: SERVICES_HOST,
     });
     expect(committed.ok).toBe(true);
@@ -279,6 +329,7 @@ describe('M2 authorization transactions', () => {
       rulingId: ruled.ruling.ruling_id,
       intent: intentFor(frozen, ruled.ruling.ruling_id),
       servicesHostBootId: 'services_boot_1',
+      servicesLedgerId: SERVICES_LEDGER_ID,
       actor: SERVICES_HOST,
     });
     expect(replay).toEqual({ ok: false, defect: 'replayed-ruling' });
@@ -338,6 +389,7 @@ describe('M2 authorization transactions', () => {
       rulingId: ruled.ruling.ruling_id,
       intent: intentFor(frozen, ruled.ruling.ruling_id),
       servicesHostBootId: 'services_boot_1',
+      servicesLedgerId: SERVICES_LEDGER_ID,
       actor: SERVICES_HOST,
     });
     if (!committed.ok) throw new Error('expected commitment');
@@ -349,6 +401,7 @@ describe('M2 authorization transactions', () => {
       idempotencyKey: committed.token.idempotency_key,
       effectRequestDigest: committed.token.effect_request_digest,
       servicesHostBootId: 'services_boot_1',
+      servicesLedgerId: SERVICES_LEDGER_ID,
       outcome: 'success' as const,
       recordedAt: '2026-08-01T09:00:00.500Z',
       actor: SERVICES_HOST,
@@ -396,6 +449,7 @@ describe('M2 authorization transactions', () => {
       rulingId: ruled.ruling.ruling_id,
       intent: intentFor(frozen, ruled.ruling.ruling_id),
       servicesHostBootId: 'services_boot_1',
+      servicesLedgerId: SERVICES_LEDGER_ID,
       actor: SERVICES_HOST,
     });
     if (!committed.ok) throw new Error('expected commitment');
@@ -413,7 +467,7 @@ describe('M2 authorization transactions', () => {
     };
     await h.core.reloadPolicy(
       { ...h.policy, policy: reloadedSet, policyContentDigest: digestFor('policy-set', reloadedSet) },
-      PRINCIPAL,
+      AUTHZ,
     );
 
     const unknown = await h.core.markCommitmentUnknown(committed.commitmentId);
@@ -443,6 +497,7 @@ describe('M2 authorization transactions', () => {
         idempotencyKey: committed.token.idempotency_key,
         effectRequestDigest: committed.token.effect_request_digest,
         servicesHostBootId: 'services_boot_1',
+        servicesLedgerId: SERVICES_LEDGER_ID,
         outcome: 'success',
         recordedAt: '2026-08-01T09:00:00.500Z',
         delivery: 'executed',
@@ -469,6 +524,7 @@ describe('M2 authorization transactions', () => {
       rulingId: ruled.ruling.ruling_id,
       intent: intentFor(frozen, ruled.ruling.ruling_id),
       servicesHostBootId: 'services_boot_1',
+      servicesLedgerId: SERVICES_LEDGER_ID,
       actor: SERVICES_HOST,
     });
     if (!committed.ok) throw new Error('expected commitment');
@@ -484,7 +540,7 @@ describe('M2 authorization transactions', () => {
       },
       probe: async () => {
         probes += 1;
-        return { state: 'absent' as const, boot_id: 'services_boot_1' };
+        return { state: 'absent' as const, boot_id: 'services_boot_1', ledger_id: SERVICES_LEDGER_ID };
       },
     });
 
@@ -497,6 +553,38 @@ describe('M2 authorization transactions', () => {
     });
   });
 
+  it('treats replacement services-ledger storage as unknown instead of proof of no effect', async () => {
+    const h = harness();
+    await initialize(h);
+    const frozen = proposal(33);
+    const ruled = await h.core.ruleProposal(ruleInput(frozen));
+    const committed = await h.core.commitVerify({
+      rulingId: ruled.ruling.ruling_id,
+      intent: intentFor(frozen, ruled.ruling.ruling_id),
+      servicesHostBootId: 'services_boot_1',
+      servicesLedgerId: SERVICES_LEDGER_ID,
+      actor: SERVICES_HOST,
+    });
+    if (!committed.ok) throw new Error('expected commitment');
+
+    expect(
+      await h.core.reconcileCommitment({
+        commitmentId: committed.commitmentId,
+        attempts: 1,
+        probe: async () => ({
+          state: 'absent',
+          boot_id: 'services_boot_2',
+          ledger_id: 'ledger_replacement',
+        }),
+      }),
+    ).toMatchObject({ resolution: 'unknown', result: { ok: true, status: 'opened' } });
+    const state = h.store.snapshot();
+    expect(state.commitments.get(committed.commitmentId)?.state).toBe('unknown');
+    for (const reservation of ruled.ruling.counter_reservations) {
+      expect(state.reservations.get(reservation.id)?.state).toBe('held_for_reconciliation');
+    }
+  });
+
   it('adopts a service ledger outcome found by an authorization-side reconciliation probe', async () => {
     const h = harness();
     await initialize(h);
@@ -506,6 +594,7 @@ describe('M2 authorization transactions', () => {
       rulingId: ruled.ruling.ruling_id,
       intent: intentFor(frozen, ruled.ruling.ruling_id),
       servicesHostBootId: 'services_boot_1',
+      servicesLedgerId: SERVICES_LEDGER_ID,
       actor: SERVICES_HOST,
     });
     if (!committed.ok) throw new Error('expected commitment');
@@ -520,6 +609,7 @@ describe('M2 authorization transactions', () => {
           record: {
             world_id: 'w-demo',
             services_host_boot_id: 'services_boot_1',
+            services_ledger_id: SERVICES_LEDGER_ID,
             effect_id: committed.token.effect_id,
             idempotency_key: committed.token.idempotency_key,
             effect_request_digest: committed.token.effect_request_digest,
@@ -544,18 +634,40 @@ describe('M2 authorization transactions', () => {
       rulingId: ruled.ruling.ruling_id,
       intent: intentFor(frozen, ruled.ruling.ruling_id),
       servicesHostBootId: 'services_boot_1',
+      servicesLedgerId: SERVICES_LEDGER_ID,
       actor: SERVICES_HOST,
     });
     if (!committed.ok) throw new Error('expected commitment');
 
     expect(
-      await h.core.reconcileAbsentAfterRestart(committed.commitmentId, 'services_boot_1'),
+      await h.core.reconcileAbsentAfterRestart(
+        committed.commitmentId,
+        'services_boot_1',
+        SERVICES_LEDGER_ID,
+      ),
     ).toEqual({ ok: false, defect: 'host-still-running' });
     expect(
-      await h.core.reconcileAbsentAfterRestart(committed.commitmentId, 'services_boot_2'),
+      await h.core.reconcileAbsentAfterRestart(
+        committed.commitmentId,
+        'services_boot_2',
+        'different-services-ledger',
+      ),
+    ).toEqual({ ok: false, defect: 'ledger-continuity-mismatch' });
+    for (const reservation of ruled.ruling.counter_reservations) {
+      expect(h.store.snapshot().reservations.get(reservation.id)?.state).toBe('settled');
+    }
+    expect(
+      await h.core.reconcileAbsentAfterRestart(
+        committed.commitmentId,
+        'services_boot_2',
+        SERVICES_LEDGER_ID,
+      ),
     ).toMatchObject({ ok: true, status: 'reconciled' });
     const state = h.store.snapshot();
-    expect(state.commitments.get(committed.commitmentId)).toMatchObject({ state: 'reconciled', outcome: 'failed' });
+    expect(state.commitments.get(committed.commitmentId)).toMatchObject({
+      state: 'reconciled',
+      outcome: 'no-effect',
+    });
     expect(state.effects.size).toBe(0);
     for (const reservation of ruled.ruling.counter_reservations) {
       expect(state.reservations.get(reservation.id)?.state).toBe('released');
@@ -692,6 +804,7 @@ describe('M2 authorization transactions', () => {
         rulingId: firstRuling.ruling.ruling_id,
         intent: intentFor(first, firstRuling.ruling.ruling_id),
         servicesHostBootId: 'services_boot_1',
+        servicesLedgerId: SERVICES_LEDGER_ID,
         actor: SERVICES_HOST,
       }),
     ).toEqual({ ok: false, defect: 'replayed-ruling' });
@@ -704,6 +817,7 @@ describe('M2 authorization transactions', () => {
           rulingId: secondRuling.ruling.ruling_id,
           intent: intentFor(second, secondRuling.ruling.ruling_id),
           servicesHostBootId: 'services_boot_1',
+          servicesLedgerId: SERVICES_LEDGER_ID,
           actor: SERVICES_HOST,
         })
       ).ok,
@@ -750,6 +864,88 @@ describe('M2 authorization transactions', () => {
     const denied = await withdrawnCore.ruleProposal(ruleInput(proposal(7)));
     expect(denied.ruling.verdict).toBe('deny');
     expect(denied.ruling.reason).toContain('stale-card');
+  });
+
+  it('rechecks card trust at commit-verify and blocks a withdrawal after ruling issuance', async () => {
+    const h = harness();
+    await initialize(h);
+    let cardStatus: 'current' | 'withdrawn' = 'current';
+    const core = new AuthorizationCore({
+      store: h.store,
+      keyring: h.keyring,
+      policy: h.policy,
+      ids: h.ids,
+      resolveAuthorizedAgent: () => 'agent_demo',
+      resolveModelEvidence: () => ({
+        servedModelAccepted: true,
+        cardStatus,
+        cardKeyId: 'card-test',
+        cardDigest: CARD_DIGEST,
+      }),
+    });
+    const frozen = proposal(8);
+    const ruled = await core.ruleProposal(ruleInput(frozen));
+    expect(ruled.ruling.verdict).toBe('allow');
+
+    cardStatus = 'withdrawn';
+    expect(
+      await core.commitVerify({
+        rulingId: ruled.ruling.ruling_id,
+        intent: intentFor(frozen, ruled.ruling.ruling_id),
+        servicesHostBootId: 'services_boot_1',
+        servicesLedgerId: SERVICES_LEDGER_ID,
+        actor: SERVICES_HOST,
+      }),
+    ).toEqual({ ok: false, defect: 'stale-card' });
+  });
+
+  it('escalates every cumulative ceiling before issuing unreserved allow authority', async () => {
+    const amount = harness();
+    await initialize(amount);
+    const amountResults = [];
+    for (let index = 50; index < 53; index += 1) {
+      amountResults.push(
+        await amount.core.ruleProposal(
+          ruleInput(
+            proposal(index, {
+              cost_obligation: {
+                amount_minor_units: 50,
+                description: 'Synthetic amount.',
+              },
+            }),
+          ),
+        ),
+      );
+    }
+    expect(amountResults.map((value) => value.ruling.verdict)).toEqual(['allow', 'allow', 'escalate']);
+    expect(amountResults[2]?.ruling).toMatchObject({
+      matched_rule_id: 'default:aggregate-ceiling',
+      counter_reservations: [],
+    });
+    expect(counterValue(amount.store.snapshot(), 'mdt_demo', 'amount')).toBe(100);
+
+    const actions = harness();
+    await initialize(
+      actions,
+      mandateBody({
+        limits: { ...mandateBody().limits, amount_minor_units: 1_000, frequency_per_day: 2 },
+      }),
+    );
+    const actionResults = [];
+    for (let index = 60; index < 63; index += 1) {
+      actionResults.push(
+        await actions.core.ruleProposal(
+          ruleInput(
+            proposal(index, {
+              cost_obligation: { amount_minor_units: 0, description: 'No cost.' },
+            }),
+          ),
+        ),
+      );
+    }
+    expect(actionResults.map((value) => value.ruling.verdict)).toEqual(['allow', 'allow', 'escalate']);
+    expect(actionResults[2]?.ruling.matched_rule_id).toBe('default:aggregate-ceiling');
+    expect(counterValue(actions.store.snapshot(), 'mdt_demo', 'actions')).toBe(2);
   });
 
   it('serializes a counter race so only one request reserves below the ceiling', async () => {
@@ -825,6 +1021,7 @@ describe('M2 authorization transactions', () => {
         rulingId: ruled.ruling.ruling_id,
         intent: mutated,
         servicesHostBootId: 'services_boot_1',
+        servicesLedgerId: SERVICES_LEDGER_ID,
         actor: SERVICES_HOST,
       }),
     ).toEqual({ ok: false, defect: 'proposal-mismatch' });
@@ -835,6 +1032,7 @@ describe('M2 authorization transactions', () => {
           rulingId: ruled.ruling.ruling_id,
           intent: exact,
           servicesHostBootId: 'services_boot_1',
+          servicesLedgerId: SERVICES_LEDGER_ID,
           actor: SERVICES_HOST,
         })
       ).ok,
@@ -852,6 +1050,7 @@ describe('M2 authorization transactions', () => {
         rulingId: firstRuling.ruling.ruling_id,
         intent: intentFor(firstProposal, firstRuling.ruling.ruling_id),
         servicesHostBootId: 'services_boot_1',
+        servicesLedgerId: SERVICES_LEDGER_ID,
         actor: SERVICES_HOST,
       }),
     ]);
@@ -867,6 +1066,7 @@ describe('M2 authorization transactions', () => {
         rulingId: secondRuling.ruling.ruling_id,
         intent: intentFor(secondProposal, secondRuling.ruling.ruling_id),
         servicesHostBootId: 'services_boot_1',
+        servicesLedgerId: SERVICES_LEDGER_ID,
         actor: SERVICES_HOST,
       }),
       commitFirst.core.revokeMandate('mdt_demo', 1, PRINCIPAL),
@@ -887,11 +1087,12 @@ describe('M2 authorization transactions', () => {
     const firstProposal = proposal(19);
     const firstRuling = await reloadFirst.core.ruleProposal(ruleInput(firstProposal));
     const [, denied] = await Promise.all([
-      reloadFirst.core.reloadPolicy(changedPolicy(reloadFirst.policy), PRINCIPAL),
+      reloadFirst.core.reloadPolicy(changedPolicy(reloadFirst.policy), AUTHZ),
       reloadFirst.core.commitVerify({
         rulingId: firstRuling.ruling.ruling_id,
         intent: intentFor(firstProposal, firstRuling.ruling.ruling_id),
         servicesHostBootId: 'services_boot_1',
+        servicesLedgerId: SERVICES_LEDGER_ID,
         actor: SERVICES_HOST,
       }),
     ]);
@@ -907,9 +1108,10 @@ describe('M2 authorization transactions', () => {
         rulingId: secondRuling.ruling.ruling_id,
         intent: intentFor(secondProposal, secondRuling.ruling.ruling_id),
         servicesHostBootId: 'services_boot_1',
+        servicesLedgerId: SERVICES_LEDGER_ID,
         actor: SERVICES_HOST,
       }),
-      commitFirst.core.reloadPolicy(changedPolicy(commitFirst.policy), PRINCIPAL),
+      commitFirst.core.reloadPolicy(changedPolicy(commitFirst.policy), AUTHZ),
     ]);
     expect(bound.ok).toBe(true);
     expect([...commitFirst.store.snapshot().commitments.values()][0]?.state).toBe('bound');

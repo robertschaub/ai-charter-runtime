@@ -41,7 +41,7 @@ export function verifyCommitTokenBinding(
     token.frozen_proposal_hash !== intent.frozen_proposal_hash ||
     token.service !== intent.service ||
     token.action_class !== intent.action_class ||
-    !verifyDigest(token.effect_request_digest, digestFor('proposal', intent))
+    !verifyDigest(token.effect_request_digest, digestFor('effect-intent', intent))
   ) {
     return { valid: false, reason: 'binding-mismatch' };
   }
