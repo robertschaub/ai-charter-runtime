@@ -1,0 +1,146 @@
+[
+  {
+    "name": "rfc8785-key-ordering",
+    "source": "RFC 8785 §3.2.3 (the UTF-16 code-unit sorting sample)",
+    "note": "The RFC renders its sample output with \\u escapes because the RFC text format is ASCII. The canonical bytes hold U+007F and U+0080 literally: ADR-007 fixes string serialization as JSON.stringify, which escapes only U+0000-U+001F, quote and backslash. The surrogate pair U+D83D U+DE02 sorts before U+FB33, which is the property this vector exists to pin.",
+    "input": {
+      "\u20ac": "Euro Sign",
+      "\r": "Carriage Return",
+      "\u000a": "Newline",
+      "1": "One",
+      "\u0080": "Control\u007f",
+      "\ud83d\ude02": "Smiley",
+      "\u00f6": "Latin Small Letter O With Diaeresis",
+      "\ufb33": "Hebrew Letter Dalet With Dagesh",
+      "</script>": "Browser Challenge"
+    },
+    "expected": "{\"\\n\":\"Newline\",\"\\r\":\"Carriage Return\",\"1\":\"One\",\"</script>\":\"Browser Challenge\",\"\u0080\":\"Control\u007f\",\"\u00f6\":\"Latin Small Letter O With Diaeresis\",\"\u20ac\":\"Euro Sign\",\"\ud83d\ude02\":\"Smiley\",\"\ufb33\":\"Hebrew Letter Dalet With Dagesh\"}"
+  },
+  {
+    "name": "empty-object",
+    "source": "subset",
+    "input": {},
+    "expected": "{}"
+  },
+  {
+    "name": "empty-array",
+    "source": "subset",
+    "input": [],
+    "expected": "[]"
+  },
+  {
+    "name": "literals",
+    "source": "subset",
+    "input": { "t": true, "f": false, "n": null },
+    "expected": "{\"f\":false,\"n\":null,\"t\":true}"
+  },
+  {
+    "name": "key-sort-ascii",
+    "source": "subset",
+    "note": "Digits sort before uppercase, uppercase before lowercase; \"10\" sorts before \"2\" because sorting is over code units, not numeric value.",
+    "input": { "b": 1, "A": 2, "a": 3, "10": 4, "2": 5 },
+    "expected": "{\"10\":4,\"2\":5,\"A\":2,\"a\":3,\"b\":1}"
+  },
+  {
+    "name": "empty-string-key",
+    "source": "subset",
+    "input": { "a": 2, "": 1 },
+    "expected": "{\"\":1,\"a\":2}"
+  },
+  {
+    "name": "nested-objects-and-arrays",
+    "source": "subset",
+    "note": "Objects sort; arrays keep the order they were given.",
+    "input": { "b": { "d": 1, "c": 2 }, "a": [{ "z": 1, "y": 2 }, 3, 1, 2] },
+    "expected": "{\"a\":[{\"y\":2,\"z\":1},3,1,2],\"b\":{\"c\":2,\"d\":1}}"
+  },
+  {
+    "name": "integers-including-negative-zero",
+    "source": "subset",
+    "note": "String(-0) is \"0\", which is the JCS form; the safe-integer bounds are inside the subset.",
+    "input": {
+      "zero": 0,
+      "negzero": -0,
+      "one": 1,
+      "neg": -1,
+      "max": 9007199254740991,
+      "min": -9007199254740991
+    },
+    "expected": "{\"max\":9007199254740991,\"min\":-9007199254740991,\"neg\":-1,\"negzero\":0,\"one\":1,\"zero\":0}"
+  },
+  {
+    "name": "two-character-string-escapes",
+    "source": "subset",
+    "input": { "s": "\b\f\n\r\t\"\\" },
+    "expected": "{\"s\":\"\\b\\f\\n\\r\\t\\\"\\\\\"}"
+  },
+  {
+    "name": "control-chars-use-lowercase-hex",
+    "source": "subset",
+    "input": { "c": "\u0000\u001f" },
+    "expected": "{\"c\":\"\\u0000\\u001f\"}"
+  },
+  {
+    "name": "del-and-c1-are-literal",
+    "source": "subset",
+    "note": "U+007F and U+0080 are outside U+0000-U+001F, so they are emitted literally, not escaped.",
+    "input": { "c": "\u007f\u0080" },
+    "expected": "{\"c\":\"\u007f\u0080\"}"
+  },
+  {
+    "name": "non-bmp-literal",
+    "source": "subset",
+    "input": { "e": "\ud83d\ude02" },
+    "expected": "{\"e\":\"\ud83d\ude02\"}"
+  },
+  {
+    "name": "store-item",
+    "source": "repo: ADR-005 §3 serialization on the four stores",
+    "input": {
+      "id": "inf_7",
+      "store": "inferred",
+      "turn": "t12",
+      "text": "Z\u00fcrich registry read",
+      "provenance": {
+        "derived_from": ["said_3", "doc_2"],
+        "hops": [{ "requested": "gpt-5.5", "served": "gpt-5.5-2026-04-23" }]
+      },
+      "tags": ["conf:case", "purpose:grant-assessment"]
+    },
+    "expected": "{\"id\":\"inf_7\",\"provenance\":{\"derived_from\":[\"said_3\",\"doc_2\"],\"hops\":[{\"requested\":\"gpt-5.5\",\"served\":\"gpt-5.5-2026-04-23\"}]},\"store\":\"inferred\",\"tags\":[\"conf:case\",\"purpose:grant-assessment\"],\"text\":\"Z\u00fcrich registry read\",\"turn\":\"t12\"}"
+  },
+  {
+    "name": "wal-chain-entry-body",
+    "source": "repo: ADR-001 §2, the entry as hashed (without entry_hash, including prev_hash)",
+    "input": {
+      "seq": 1,
+      "world_id": "w-demo",
+      "ts": "2026-08-01T09:14:22.418Z",
+      "txn": "commit_verify",
+      "run_id": "run-2026-08-01-02",
+      "ops": [{ "op": "reservation.settle", "id": "rsv_2c91", "counter": "amount", "delta": 2500000 }],
+      "prev_hash": "0000000000000000000000000000000000000000000000000000000000000000"
+    },
+    "expected": "{\"ops\":[{\"counter\":\"amount\",\"delta\":2500000,\"id\":\"rsv_2c91\",\"op\":\"reservation.settle\"}],\"prev_hash\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"run_id\":\"run-2026-08-01-02\",\"seq\":1,\"ts\":\"2026-08-01T09:14:22.418Z\",\"txn\":\"commit_verify\",\"world_id\":\"w-demo\"}"
+  },
+  {
+    "name": "integer-only-amounts-and-percent",
+    "source": "repo: ADR-007 integer-only regime (minor units, confidence_pct)",
+    "input": { "amount_minor_units": 2500000, "confidence_pct": 88, "notification_volume": 0 },
+    "expected": "{\"amount_minor_units\":2500000,\"confidence_pct\":88,\"notification_volume\":0}"
+  },
+  {
+    "name": "sorted-restriction-tags-are-preserved",
+    "source": "repo: ADR-005 §3 (canonicalization preserves array order, so the producer must sort)",
+    "input": {
+      "tags": ["conf:case", "conf:sensitive", "purpose:grant-assessment", "recipient:provider:openai-gpt-5.5"]
+    },
+    "expected": "{\"tags\":[\"conf:case\",\"conf:sensitive\",\"purpose:grant-assessment\",\"recipient:provider:openai-gpt-5.5\"]}"
+  },
+  {
+    "name": "unsorted-array-is-not-reordered",
+    "source": "repo: ADR-005 §3 (an unsorted array is a different digest for the same tag set)",
+    "input": { "tags": ["purpose:grant-assessment", "conf:case"] },
+    "expected": "{\"tags\":[\"purpose:grant-assessment\",\"conf:case\"]}"
+  }
+]

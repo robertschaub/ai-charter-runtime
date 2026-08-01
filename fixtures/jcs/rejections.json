@@ -1,0 +1,112 @@
+[
+  {
+    "case": "non-integer-number",
+    "code": "non-integer-number",
+    "why": "The subset carries integers only; amounts are minor units and confidence is confidence_pct."
+  },
+  {
+    "case": "nan",
+    "code": "not-finite",
+    "why": "NaN has no JSON form and no canonical form."
+  },
+  {
+    "case": "infinity",
+    "code": "not-finite",
+    "why": "Infinity has no JSON form and no canonical form."
+  },
+  {
+    "case": "negative-infinity",
+    "code": "not-finite",
+    "why": "-Infinity has no JSON form and no canonical form."
+  },
+  {
+    "case": "unsafe-integer",
+    "code": "unsafe-integer",
+    "why": "Above Number.MAX_SAFE_INTEGER the value no longer round-trips, so the digest would be ambiguous."
+  },
+  {
+    "case": "unsafe-integer-negative",
+    "code": "unsafe-integer",
+    "why": "Same bound in the negative direction."
+  },
+  {
+    "case": "exponent-integer",
+    "code": "unsafe-integer",
+    "why": "1e21 is an integer by Number.isInteger but unsafe, and String() would emit exponent notation."
+  },
+  {
+    "case": "bigint",
+    "code": "bigint",
+    "why": "BigInt is outside the subset; there is no JSON number form for it."
+  },
+  {
+    "case": "undefined-root",
+    "code": "undefined",
+    "why": "undefined has no canonical form."
+  },
+  {
+    "case": "undefined-in-array",
+    "code": "undefined",
+    "why": "JSON.stringify would silently emit null; the subset refuses rather than guesses."
+  },
+  {
+    "case": "undefined-property",
+    "code": "undefined",
+    "why": "JSON.stringify would silently drop the key; the subset refuses rather than guesses."
+  },
+  {
+    "case": "date",
+    "code": "date",
+    "why": "Timestamps are RFC 3339 UTC strings; a Date would hash via toJSON and hide the conversion."
+  },
+  {
+    "case": "map",
+    "code": "map-or-set",
+    "why": "Map has no JSON form; JSON.stringify would emit {}."
+  },
+  {
+    "case": "set",
+    "code": "map-or-set",
+    "why": "Set has no JSON form; JSON.stringify would emit {}."
+  },
+  {
+    "case": "class-instance",
+    "code": "class-instance",
+    "why": "A class instance may carry a toJSON, accessors, or a prototype chain the digest cannot see."
+  },
+  {
+    "case": "array-subclass",
+    "code": "class-instance",
+    "why": "Array.isArray is true for a subclass, so the prototype is checked explicitly."
+  },
+  {
+    "case": "lone-high-surrogate-value",
+    "code": "lone-surrogate",
+    "why": "An unpaired surrogate has no UTF-8 encoding; well-formed stringify would substitute an escape."
+  },
+  {
+    "case": "lone-low-surrogate-value",
+    "code": "lone-surrogate",
+    "why": "Same, in the low-surrogate range."
+  },
+  {
+    "case": "lone-surrogate-key",
+    "code": "lone-surrogate",
+    "why": "Keys are serialized by the same string rule as values."
+  },
+  {
+    "case": "function",
+    "code": "function",
+    "why": "JSON.stringify would silently drop or null it."
+  },
+  {
+    "case": "symbol",
+    "code": "symbol",
+    "why": "JSON.stringify would silently drop or null it."
+  },
+  {
+    "case": "cycle",
+    "code": "cycle",
+    "why": "A circular reference has no finite canonical form."
+  }
+]

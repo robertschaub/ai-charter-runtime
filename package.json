@@ -4,11 +4,24 @@
   "private": true,
   "description": "Proof of concept of the Our AI Charter runtime gates (Authorize, Submit, Verify, Commit, Rely) — maintainer sketch, not a certification artifact.",
   "type": "module",
+  "workspaces": [
+    "packages/*"
+  ],
   "engines": {
     "node": ">=20"
   },
   "scripts": {
-    "probe": "node tooling/probe.mjs --lane all"
+    "probe": "node tooling/probe.mjs --lane all",
+    "keys": "node tooling/keys.mjs",
+    "typecheck": "tsc -b",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.0",
+    "js-yaml": "^4.1.0",
+    "typescript": "^5.9.0",
+    "vitest": "^3.2.0",
+    "zod": "^3.25.0"
   },
   "license": "SEE LICENSE IN LICENSE.md"
 }
