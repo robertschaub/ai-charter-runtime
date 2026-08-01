@@ -35,7 +35,8 @@ const LANES = {
       : ['https://api.publicai.co/v1', 'https://platform.publicai.co/v1'],
     pickModel: (ids) =>
       process.env.PUBLICAI_MODEL ??
-      ids.find((id) => /apertus.*70b/i.test(id)) ??
+      ids.find((id) => /apertus-v1\.5-70b$/i.test(id)) ?? // v1.5, non-thinking (thinking mode lacks tool calling)
+      ids.find((id) => /apertus-v1\.5-8b$/i.test(id)) ??
       ids.find((id) => /apertus/i.test(id)),
     headerHints: ['inference-id', 'x-ratelimit-limit', 'x-ratelimit-remaining', 'x-ratelimit-reset', 'retry-after'],
     tokenParam: 'max_tokens',
