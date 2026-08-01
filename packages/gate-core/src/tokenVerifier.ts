@@ -11,16 +11,21 @@ export type CommitTokenVerification =
       readonly reason: 'malformed' | 'invalid-mac' | 'expired' | 'binding-mismatch';
     };
 
-export function verifyCommitTokenForIntent(
+/**
+ * Verify the token's authenticity and exact request binding without applying its TTL.
+ *
+ * The services host uses this narrower check only when an idempotency-ledger entry already
+ * exists. Possession of the exact expired token may retrieve the outcome it created, but
+ * can never create a new effect. Fresh execution must call `verifyCommitTokenForIntent`.
+ */
+export function verifyCommitTokenBinding(
   keyring: Keyring,
   tokenInput: unknown,
   intentInput: unknown,
-  nowInput: string,
 ): CommitTokenVerification {
   const parsedToken = commitToken.safeParse(tokenInput);
   const parsedIntent = effectIntent.safeParse(intentInput);
-  const parsedNow = timestamp.safeParse(nowInput);
-  if (!parsedToken.success || !parsedIntent.success || !parsedNow.success) {
+  if (!parsedToken.success || !parsedIntent.success) {
     return { valid: false, reason: 'malformed' };
   }
   const token = parsedToken.data;
@@ -30,7 +35,6 @@ export function verifyCommitTokenForIntent(
   ) {
     return { valid: false, reason: 'invalid-mac' };
   }
-  if (parsedNow.data >= token.expires_at) return { valid: false, reason: 'expired' };
   if (
     token.world_id !== intent.world_id ||
     token.ruling_id !== intent.ruling_id ||
@@ -42,4 +46,20 @@ export function verifyCommitTokenForIntent(
     return { valid: false, reason: 'binding-mismatch' };
   }
   return { valid: true, token, intent };
+}
+
+export function verifyCommitTokenForIntent(
+  keyring: Keyring,
+  tokenInput: unknown,
+  intentInput: unknown,
+  nowInput: string,
+): CommitTokenVerification {
+  const binding = verifyCommitTokenBinding(keyring, tokenInput, intentInput);
+  const parsedNow = timestamp.safeParse(nowInput);
+  if (!binding.valid || !parsedNow.success) {
+    if (!binding.valid) return binding;
+    return { valid: false, reason: 'malformed' };
+  }
+  if (parsedNow.data >= binding.token.expires_at) return { valid: false, reason: 'expired' };
+  return binding;
 }

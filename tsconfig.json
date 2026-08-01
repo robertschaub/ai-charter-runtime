@@ -1,4 +1,9 @@
 {
   "files": [],
-  "references": [{ "path": "./packages/gate-core" }]
+  "references": [
+    { "path": "./packages/gate-core" },
+    { "path": "./packages/adapters" },
+    { "path": "./packages/services-mock" },
+    { "path": "./packages/consoles" }
+  ]
 }

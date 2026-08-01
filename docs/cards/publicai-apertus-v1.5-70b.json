@@ -1,0 +1,108 @@
+{
+  "schema": "ai-charter-runtime/model-card@1",
+  "card_id": "publicai-apertus-v1.5-70b",
+  "card_version": 1,
+  "valid_from": "2026-08-01",
+  "attestation": "self-declared or probe-tested — never independently attested",
+  "model": {
+    "requested_id": "swiss-ai/apertus-v1.5-70b",
+    "pinning_mode": "exact",
+    "resolution": {
+      "lane": "publicai",
+      "policy": "exact-match-required",
+      "snapshot_pattern": "^swiss-ai\\/apertus-v1\\.5-70b$",
+      "observed_snapshots": [
+        {
+          "id": "swiss-ai/apertus-v1.5-70b",
+          "first_seen": "2026-08-01"
+        }
+      ]
+    }
+  },
+  "operator": {
+    "value": "PublicAI",
+    "provenance": "self-declared",
+    "date": "2026-08-01"
+  },
+  "endpoint": {
+    "value": "https://api.publicai.co/v1",
+    "provenance": "probe-tested",
+    "date": "2026-08-01"
+  },
+  "jurisdiction": {
+    "value": "Not established by the M0 probe",
+    "provenance": "probe-tested",
+    "date": "2026-08-01"
+  },
+  "openness_class": {
+    "value": "Open-weight model served through a hosted API",
+    "provenance": "self-declared",
+    "date": "2026-08-01"
+  },
+  "capabilities": {
+    "tools": {
+      "value": true,
+      "provenance": "probe-tested",
+      "date": "2026-08-01"
+    },
+    "response_format": {
+      "value": [
+        "json_schema",
+        "json_object"
+      ],
+      "provenance": "probe-tested",
+      "date": "2026-08-01"
+    },
+    "token_parameter": {
+      "value": "max_tokens",
+      "provenance": "probe-tested",
+      "date": "2026-08-01"
+    }
+  },
+  "evidence_status": {
+    "as_of": "2026-08-01",
+    "source": "M0 probe",
+    "not_checked": [
+      {
+        "item": "alternate platform.publicai.co/v1 base URL",
+        "why": "the first configured candidate succeeded"
+      },
+      {
+        "item": "router cross-border or cross-model fallback behaviour",
+        "why": "not exposed by the probe"
+      },
+      {
+        "item": "sustained latency under varied prompts",
+        "why": "identical repeats were cache-suspect"
+      }
+    ]
+  },
+  "known_limits": [
+    {
+      "value": "No informative x-ratelimit headers were observed",
+      "provenance": "probe-tested",
+      "date": "2026-08-01"
+    },
+    {
+      "value": "Wallet or credit metering can return HTTP 402",
+      "provenance": "probe-tested",
+      "date": "2026-08-01"
+    }
+  ],
+  "declared_data_classes": {
+    "acting": [
+      "conf:public",
+      "conf:case",
+      "purpose:grant-assessment"
+    ],
+    "screening": [
+      "conf:public",
+      "purpose:grant-assessment"
+    ]
+  },
+  "signature": {
+    "alg": "ed25519",
+    "key_id": "card-2026-08-01",
+    "signature": "OMv7yl11lNI2fZiq2lRxb3nVTn94SikjCPyYYNTneu8fCwOH3oMLTnP5HOoSb9WLiUlz0qmfNLH2rA+YzhLYAQ=="
+  }
+}

@@ -24,6 +24,27 @@ default_escalation_contract:
     record_events: [escalation_raised, disposition_recorded]
     feedback_consequence: Increment the escalation-pattern counter.
 
+recovery_escalation_contract:
+  trigger_and_state: { trigger: effect-outcome-unknown, state: open }
+  decision_and_route:
+    eligible_role: principal
+    standing_class: own-permission
+    competence_declared: Principal for the synthetic demo mandate (declared, not verified).
+    independence_declared: Same-operator POC; no independent recovery institution exists.
+    substitute_rule: Findings may resolve the record but cannot authorize another effect.
+  decision_basis_shown: [commitment, service-probe-history, idempotency-key]
+  response_bound_and_default:
+    response_bound_ms: 900000
+    safe_default:
+      kind: stop-remains
+      disposition: cancel
+      authority_basis: { kind: no-new-authority }
+      reversible: true
+  permitted_dispositions: [seek-review, cancel, route-to-remedy]
+  record_and_feedback:
+    record_events: [effect_outcome, escalation_raised, disposition_recorded]
+    feedback_consequence: Preserve the counter hold until a recovery finding is recorded.
+
 escalation_pattern:
   window_ms: 3600000
   escalation_count: 3

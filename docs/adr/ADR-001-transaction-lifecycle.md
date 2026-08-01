@@ -62,6 +62,7 @@ projections. One line = one **transaction**, so a whole action's mutations land 
     "effect_request_digest":"…","idempotency_key":"…","service":"filing",
     "action_class":"grant-filing","bound_at":"2026-08-01T09:14:22.418Z",
     "token_expires_at":"2026-08-01T09:14:27.418Z","services_host_boot_id":"svc_boot_2",
+    "recovery_contract":{"…":"…"},
     "state":"bound","outcome":null,"recovery_owner_role":"principal"}},
    {"op":"record.action.append","entry":{"world_id":"w-demo","entry_id":"rec_1044","…":"…"}}
  ],
@@ -79,8 +80,9 @@ projections. One line = one **transaction**, so a whole action's mutations land 
   transaction, never corrupt an earlier one.
 - **Amounts are integers in minor units** (ADR-007), so counter deltas never carry a float.
 - **Clock guard:** WAL timestamps must be non-decreasing. A backwards clock jump is rejected; at startup
-  the service refuses to run if the wall clock is earlier than the last WAL entry's `ts`. All expiry is
-  evaluated against this one clock — the executing service never adjudicates expiry itself.
+  the service refuses to run if the wall clock is earlier than the last WAL entry's `ts`. Ruling and
+  mandate expiry use this one authorization-service clock; the executing service checks only the signed
+  commit token's short TTL.
 - **Op vocabulary is closed and versioned.** `apply(state, op)` is the *only* mutation path in the
   service, which is what makes replay faithful by construction.
 
@@ -164,6 +166,10 @@ transaction it re-validates the binding tuple, exact effect intent, and counters
 settles every reservation; marks the ruling `consumed`; creates the `bound` commitment; seals the pre-effect
 `commitment` record event, and mints the token.
 
+The commitment also pins the policy-owned recovery contract and its eligible role. A later policy reload
+therefore cannot reroute an already-bound unknown effect, and the services caller cannot nominate its
+own recovery owner.
+
 - **Idempotency key** = hex SHA-256 over canonical `{world_id, ruling_id, nonce}`. One ruling ⇒ one nonce
   ⇒ one key ⇒ at most one effect. It is minted by the authorization service and carried in the token, and
   it is filename-safe on Windows (64 lowercase hex chars, no separators, no reserved names).
@@ -173,12 +179,14 @@ settles every reservation; marks the ruling `consumed`; creates the `bound` comm
   idempotency_key, service, action_class, expires_at}` plus an ADR-007 MAC block
   `{alg, key_id, value}` under the `commit-token` domain. The executing service recomputes the exact
   effect-intent digest, verifies MAC and TTL locally, and uses the token once. Single use is
-  guaranteed upstream — the nonce is consumable exactly once — and again downstream, since a duplicate
-  `effect_outcome` for an `effect_id` is rejected.
+  guaranteed upstream — the nonce is consumable exactly once — and again downstream, where the
+  idempotency key cannot create a second effect; an exact repeat returns the recorded outcome while a
+  conflicting outcome is rejected.
 - **One local transaction on the service side:** the effect payload *is* the ledger record. The service
-  writes `records/{world_id}/effects/{idempotency_key}.json.tmp`, fsyncs it, and renames it to
-  `…/{idempotency_key}.json` — a create-only rename, so no Windows overwrite semantics are involved. The
-  rename is the atomic commit point: the file exists ⇔ the effect happened ⇔ its outcome is recorded.
+  writes a unique `records/{world_id}/effects/{idempotency_key}.*.tmp`, fsyncs it, then atomically creates
+  `…/{idempotency_key}.json` as a hard link to that complete inode. `link` is create-only on NTFS and
+  POSIX, unlike Windows `rename`, which may overwrite. Creating the final link is the commit point: the
+  file exists ⇔ the effect happened ⇔ its outcome is recorded.
   Stale `.tmp` files are deleted at service startup. This directory is owned exclusively by the services
   host; the authorization service reads it only over HTTP (ADR-002), never from the filesystem, so the
   process boundary stays real.

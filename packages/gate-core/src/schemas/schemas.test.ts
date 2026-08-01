@@ -456,6 +456,7 @@ describe('schemas — accept the shapes the ADRs specify', () => {
       policy_version: '2026-08-01.3',
       ordering: 'deny-escalate-allow-then-priority',
       default_escalation_contract: validContract(),
+      recovery_escalation_contract: validContract(),
       escalation_pattern: {
         window_ms: 3_600_000,
         escalation_count: 3,
@@ -633,6 +634,7 @@ describe('schemas — reject what fails closed', () => {
       policy_version: '2026-08-01.3',
       ordering: 'deny-escalate-allow-then-priority',
       default_escalation_contract: validContract(),
+      recovery_escalation_contract: validContract(),
       escalation_pattern: {
         window_ms: 3_600_000,
         escalation_count: 3,

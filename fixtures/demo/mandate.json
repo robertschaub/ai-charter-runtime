@@ -1,0 +1,97 @@
+{
+  "world_id": "w-demo",
+  "mandate_id": "mdt_demo_grant",
+  "version": 1,
+  "state": "active",
+  "ordering_rule": "latest-version-wins",
+  "principal": {
+    "id": "principal",
+    "display_name": "Synthetic principal"
+  },
+  "authorized_agent": {
+    "id": "agent_demo",
+    "display_name": "Governed demo agent"
+  },
+  "authority_chain": [
+    {
+      "hop": 0,
+      "delegator": "principal",
+      "delegate": "agent_demo",
+      "subdelegation_scope": [
+        "grant-filing"
+      ]
+    }
+  ],
+  "action_class": "grant-filing",
+  "connected_service": "filing",
+  "target": {
+    "recipient": "grant-office",
+    "resource": "application-42"
+  },
+  "permitted_data_fields": [
+    "applicant_name"
+  ],
+  "disclosure_destinations": [
+    "filing"
+  ],
+  "limits": {
+    "amount_minor_units": 10000,
+    "frequency_per_day": 10,
+    "notification_volume": 5,
+    "geographic": [
+      "CH"
+    ],
+    "time_window": {
+      "not_before": "2026-08-01T00:00:00.000Z",
+      "not_after": "2026-08-02T00:00:00.000Z"
+    }
+  },
+  "declared_purpose": "Process one synthetic grant application.",
+  "user_objective": "File the synthetic grant application within the declared limits.",
+  "issued_at": "2026-08-01T08:00:00.000Z",
+  "expires_at": "2026-08-02T00:00:00.000Z",
+  "revocation_endpoint": "/w/w-demo/mandates/mdt_demo_grant/revoke",
+  "replay_protection": {
+    "scheme": "per-ruling-nonce"
+  },
+  "substitution_rules": {
+    "model_substitution": "approved-set-only",
+    "service_substitution": "named-services-only"
+  },
+  "risk_class": "medium",
+  "reversibility_class": "partially-reversible",
+  "approved_models": [
+    {
+      "card_id": "publicai-apertus-v1.5-70b",
+      "card_version": 1,
+      "card_digest": "bd2cbb6a3fe27ae71d84f132acaee091751e3772e703ef7fb5750bac2201c5ab",
+      "requested_id": "swiss-ai/apertus-v1.5-70b",
+      "roles": [
+        "acting"
+      ],
+      "data_classes": {
+        "acting": [
+          "conf:public",
+          "conf:case",
+          "purpose:grant-assessment"
+        ]
+      }
+    },
+    {
+      "card_id": "openai-gpt-5.5",
+      "card_version": 1,
+      "card_digest": "0577111a4a86dd783d0a9aa9138427c534364994368a85e622abcc33a3c7decf",
+      "requested_id": "gpt-5.5",
+      "roles": [
+        "acting"
+      ],
+      "data_classes": {
+        "acting": [
+          "conf:public",
+          "conf:case",
+          "purpose:grant-assessment"
+        ]
+      }
+    }
+  ]
+}

@@ -13,6 +13,7 @@ import {
   type IdFactory,
 } from './authorizationCore.js';
 import { verifyChain } from './chain.js';
+import { digestFor } from './hash.js';
 import { Keyring, verifyEmbeddedMac } from './keyring.js';
 import { loadPolicyFile, type LoadedPolicy } from './policyLoader.js';
 import type { EffectIntent, FrozenProposal, Mandate } from './schemas/index.js';
@@ -281,6 +282,9 @@ describe('M2 authorization transactions', () => {
       actor: SERVICES_HOST,
     });
     expect(replay).toEqual({ ok: false, defect: 'replayed-ruling' });
+    await expect(h.core.ruleProposal(ruleInput(frozen))).rejects.toMatchObject({
+      code: 'proposal-already-committed',
+    });
 
     const before = h.store.snapshot();
     expect(before.nonces.get(ruled.ruling.binding.nonce)?.state).toBe('consumed');
@@ -305,6 +309,257 @@ describe('M2 authorization transactions', () => {
     expect(after.rulings).toEqual(before.rulings);
     expect(verifyChain(join(h.root, 'w-demo', 'wal.jsonl'), 'wal-entry').ok).toBe(true);
     expect(verifyChain(join(h.root, 'w-demo', 'action.jsonl'), 'record-entry').ok).toBe(true);
+  });
+
+  it('makes duplicate concurrent ruling requests idempotent instead of minting replay capacity', async () => {
+    const h = harness();
+    await initialize(h);
+    const frozen = proposal(42);
+
+    const [first, second] = await Promise.all([
+      h.core.ruleProposal(ruleInput(frozen)),
+      h.core.ruleProposal(ruleInput(frozen)),
+    ]);
+
+    expect(second).toEqual(first);
+    const state = h.store.snapshot();
+    expect(state.rulings.size).toBe(1);
+    expect(
+      [...state.reservations.values()].filter((reservation) => reservation.ruling_id === first.ruling.ruling_id),
+    ).toHaveLength(first.ruling.counter_reservations.length);
+  });
+
+  it('adopts one durable service outcome and records later idempotent retries without discharging twice', async () => {
+    const h = harness();
+    await initialize(h);
+    const frozen = proposal(2);
+    const ruled = await h.core.ruleProposal(ruleInput(frozen));
+    const committed = await h.core.commitVerify({
+      rulingId: ruled.ruling.ruling_id,
+      intent: intentFor(frozen, ruled.ruling.ruling_id),
+      servicesHostBootId: 'services_boot_1',
+      actor: SERVICES_HOST,
+    });
+    if (!committed.ok) throw new Error('expected commitment');
+
+    const report = {
+      worldId: 'w-demo',
+      commitmentId: committed.commitmentId,
+      effectId: committed.token.effect_id,
+      idempotencyKey: committed.token.idempotency_key,
+      effectRequestDigest: committed.token.effect_request_digest,
+      servicesHostBootId: 'services_boot_1',
+      outcome: 'success' as const,
+      recordedAt: '2026-08-01T09:00:00.500Z',
+      actor: SERVICES_HOST,
+    };
+    expect(() =>
+      applyWorldTransaction(
+        h.store.snapshot(),
+        [{ op: 'commitment.discharge', commitment_id: committed.commitmentId, outcome: 'success' }],
+        '2026-08-01T09:00:00.250Z',
+      ),
+    ).toThrow(/no matching durable effect outcome/);
+    expect(await h.core.reportEffectOutcome({ ...report, delivery: 'executed' })).toMatchObject({
+      accepted: true,
+      status: 'recorded',
+    });
+    expect(h.store.snapshot().commitments.get(committed.commitmentId)).toMatchObject({
+      state: 'discharged',
+      outcome: 'success',
+    });
+    expect(await h.core.reportEffectOutcome({ ...report, delivery: 'retry' })).toMatchObject({
+      accepted: true,
+      status: 'retry-recorded',
+    });
+    expect(
+      h.store.snapshot().actionRecords.map((entry) => entry.commitment_and_effect?.event),
+    ).toContain('retry_served');
+    expect(
+      await h.core.reportEffectOutcome({ ...report, outcome: 'failed', delivery: 'retry' }),
+    ).toEqual({ accepted: false, defect: 'conflicting-outcome' });
+    expect(
+      await h.core.reportEffectOutcome({
+        ...report,
+        delivery: 'retry',
+        actor: ORCHESTRATOR,
+      }),
+    ).toEqual({ accepted: false, defect: 'unauthorized-reporter' });
+  });
+
+  it('holds counters on an unknown outcome, opens one pinned recovery escalation, and adopts a late service record', async () => {
+    const h = harness();
+    await initialize(h);
+    const frozen = proposal(3);
+    const ruled = await h.core.ruleProposal(ruleInput(frozen));
+    const committed = await h.core.commitVerify({
+      rulingId: ruled.ruling.ruling_id,
+      intent: intentFor(frozen, ruled.ruling.ruling_id),
+      servicesHostBootId: 'services_boot_1',
+      actor: SERVICES_HOST,
+    });
+    if (!committed.ok) throw new Error('expected commitment');
+
+    const reloadedSet = {
+      ...h.policy.policy,
+      policy_version: '2026-08-01.recovery-reroute',
+      recovery_escalation_contract: {
+        ...h.policy.policy.recovery_escalation_contract,
+        decision_and_route: {
+          ...h.policy.policy.recovery_escalation_contract.decision_and_route,
+          eligible_role: 'case_officer' as const,
+        },
+      },
+    };
+    await h.core.reloadPolicy(
+      { ...h.policy, policy: reloadedSet, policyContentDigest: digestFor('policy-set', reloadedSet) },
+      PRINCIPAL,
+    );
+
+    const unknown = await h.core.markCommitmentUnknown(committed.commitmentId);
+    expect(unknown).toMatchObject({ ok: true, status: 'opened' });
+    if (!unknown.ok) throw new Error('expected recovery escalation');
+    const afterUnknown = h.store.snapshot();
+    expect(afterUnknown.commitments.get(committed.commitmentId)?.state).toBe('unknown');
+    expect(afterUnknown.escalations.get(unknown.escalationId)).toMatchObject({
+      state: 'open',
+      source_commitment_id: committed.commitmentId,
+      contract: { decision_and_route: { eligible_role: 'principal' } },
+    });
+    for (const reservation of ruled.ruling.counter_reservations) {
+      expect(afterUnknown.reservations.get(reservation.id)?.state).toBe('held_for_reconciliation');
+    }
+    expect(await h.core.markCommitmentUnknown(committed.commitmentId)).toEqual({
+      ok: true,
+      status: 'already-open',
+      escalationId: unknown.escalationId,
+    });
+
+    expect(
+      await h.core.reportEffectOutcome({
+        worldId: 'w-demo',
+        commitmentId: committed.commitmentId,
+        effectId: committed.token.effect_id,
+        idempotencyKey: committed.token.idempotency_key,
+        effectRequestDigest: committed.token.effect_request_digest,
+        servicesHostBootId: 'services_boot_1',
+        outcome: 'success',
+        recordedAt: '2026-08-01T09:00:00.500Z',
+        delivery: 'executed',
+        actor: SERVICES_HOST,
+      }),
+    ).toMatchObject({ accepted: true, status: 'recorded' });
+    const reconciled = h.store.snapshot();
+    expect(reconciled.commitments.get(committed.commitmentId)).toMatchObject({
+      state: 'reconciled',
+      outcome: 'success',
+    });
+    expect(reconciled.escalations.get(unknown.escalationId)?.state).toBe('cancelled');
+    for (const reservation of ruled.ruling.counter_reservations) {
+      expect(reconciled.reservations.get(reservation.id)?.state).toBe('settled');
+    }
+  });
+
+  it('runs bounded same-boot probes before routing an unavailable outcome to its pinned recovery owner', async () => {
+    const h = harness();
+    await initialize(h);
+    const frozen = proposal(31);
+    const ruled = await h.core.ruleProposal(ruleInput(frozen));
+    const committed = await h.core.commitVerify({
+      rulingId: ruled.ruling.ruling_id,
+      intent: intentFor(frozen, ruled.ruling.ruling_id),
+      servicesHostBootId: 'services_boot_1',
+      actor: SERVICES_HOST,
+    });
+    if (!committed.ok) throw new Error('expected commitment');
+    let probes = 0;
+    const delays: number[] = [];
+
+    const result = await h.core.reconcileCommitment({
+      commitmentId: committed.commitmentId,
+      attempts: 3,
+      backoffMs: [1, 2],
+      delay: async (milliseconds) => {
+        delays.push(milliseconds);
+      },
+      probe: async () => {
+        probes += 1;
+        return { state: 'absent' as const, boot_id: 'services_boot_1' };
+      },
+    });
+
+    expect(result).toMatchObject({ resolution: 'unknown', result: { ok: true, status: 'opened' } });
+    expect(probes).toBe(3);
+    expect(delays).toEqual([1, 2]);
+    expect(h.store.snapshot().commitments.get(committed.commitmentId)).toMatchObject({
+      state: 'unknown',
+      recovery_owner_role: 'principal',
+    });
+  });
+
+  it('adopts a service ledger outcome found by an authorization-side reconciliation probe', async () => {
+    const h = harness();
+    await initialize(h);
+    const frozen = proposal(32);
+    const ruled = await h.core.ruleProposal(ruleInput(frozen));
+    const committed = await h.core.commitVerify({
+      rulingId: ruled.ruling.ruling_id,
+      intent: intentFor(frozen, ruled.ruling.ruling_id),
+      servicesHostBootId: 'services_boot_1',
+      actor: SERVICES_HOST,
+    });
+    if (!committed.ok) throw new Error('expected commitment');
+
+    expect(
+      await h.core.reconcileCommitment({
+        commitmentId: committed.commitmentId,
+        attempts: 1,
+        probe: async () => ({
+          state: 'recorded',
+          boot_id: 'services_boot_2',
+          record: {
+            world_id: 'w-demo',
+            services_host_boot_id: 'services_boot_1',
+            effect_id: committed.token.effect_id,
+            idempotency_key: committed.token.idempotency_key,
+            effect_request_digest: committed.token.effect_request_digest,
+            outcome: 'success',
+            recorded_at: '2026-08-01T09:00:00.500Z',
+            detail: 'Recovered synthetic service outcome.',
+          },
+        }),
+      }),
+    ).toMatchObject({ resolution: 'recorded', report: { accepted: true, status: 'recorded' } });
+    const state = h.store.snapshot();
+    expect(state.commitments.get(committed.commitmentId)).toMatchObject({ state: 'discharged', outcome: 'success' });
+    expect(state.actionRecords.at(-1)?.authenticated_actor).toBe('proc:authz');
+  });
+
+  it('releases held counters only after an absent probe proves the services host restarted', async () => {
+    const h = harness();
+    await initialize(h);
+    const frozen = proposal(4);
+    const ruled = await h.core.ruleProposal(ruleInput(frozen));
+    const committed = await h.core.commitVerify({
+      rulingId: ruled.ruling.ruling_id,
+      intent: intentFor(frozen, ruled.ruling.ruling_id),
+      servicesHostBootId: 'services_boot_1',
+      actor: SERVICES_HOST,
+    });
+    if (!committed.ok) throw new Error('expected commitment');
+
+    expect(
+      await h.core.reconcileAbsentAfterRestart(committed.commitmentId, 'services_boot_1'),
+    ).toEqual({ ok: false, defect: 'host-still-running' });
+    expect(
+      await h.core.reconcileAbsentAfterRestart(committed.commitmentId, 'services_boot_2'),
+    ).toMatchObject({ ok: true, status: 'reconciled' });
+    const state = h.store.snapshot();
+    expect(state.commitments.get(committed.commitmentId)).toMatchObject({ state: 'reconciled', outcome: 'failed' });
+    expect(state.effects.size).toBe(0);
+    for (const reservation of ruled.ruling.counter_reservations) {
+      expect(state.reservations.get(reservation.id)?.state).toBe('released');
+    }
   });
 
   it('denies missing, expired, revoked, broadened, and substituted authority', async () => {
@@ -345,6 +600,117 @@ describe('M2 authorization transactions', () => {
     expect(result.ruling.reason).toContain('substituted-model');
   });
 
+  it('records requested and served ids only for an acting model pinned in the active mandate', async () => {
+    const h = harness();
+    await initialize(h);
+    const approved = proposal(5, {
+      acting_model: {
+        requested_id: 'model-demo-v1',
+        served_id: 'model-demo-v1-2026-08-01',
+        card_id: 'model-demo',
+        card_version: 1,
+      },
+    });
+    expect(await h.core.recordModelSelection({ caseId: 'case_1', proposal: approved, actor: ORCHESTRATOR })).toMatchObject({
+      accepted: true,
+    });
+    expect(h.store.snapshot().modelSelections[0]).toMatchObject({
+      case_id: 'case_1',
+      requested_id: 'model-demo-v1',
+      served_id: 'model-demo-v1-2026-08-01',
+      card_digest: CARD_DIGEST,
+    });
+
+    const unapproved = proposal(6, {
+      acting_model: {
+        requested_id: 'other-model',
+        served_id: 'other-model',
+        card_id: 'other-card',
+        card_version: 1,
+      },
+    });
+    expect(
+      await h.core.recordModelSelection({ caseId: 'case_1', proposal: unapproved, actor: ORCHESTRATOR }),
+    ).toEqual({ accepted: false, defect: 'model-not-approved' });
+    expect(
+      await h.core.recordModelSelection({ caseId: 'case_1', proposal: approved, actor: PRINCIPAL }),
+    ).toEqual({ accepted: false, defect: 'unauthorized-reporter' });
+  });
+
+  it('invalidates the old issued path as soon as an approved mid-case model switch is recorded', async () => {
+    const h = harness();
+    await initialize(
+      h,
+      mandateBody({
+        approved_models: [
+          {
+            card_id: 'model-demo',
+            card_version: 1,
+            card_digest: CARD_DIGEST,
+            requested_id: 'model-demo-v1',
+            roles: ['acting'],
+            data_classes: { acting: ['conf:case', 'purpose:grant-assessment'] },
+          },
+          {
+            card_id: 'model-other',
+            card_version: 1,
+            card_digest: CARD_DIGEST,
+            requested_id: 'model-other-v1',
+            roles: ['acting'],
+            data_classes: { acting: ['conf:case', 'purpose:grant-assessment'] },
+          },
+        ],
+      }),
+    );
+    const first = proposal(7, { action_id: 'act_switch', revision: 1 });
+    expect(await h.core.recordModelSelection({ caseId: 'case_switch', proposal: first, actor: ORCHESTRATOR })).toMatchObject({
+      accepted: true,
+    });
+    const firstRuling = await h.core.ruleProposal(ruleInput(first));
+    expect(firstRuling.ruling.verdict).toBe('allow');
+
+    const second = proposal(8, {
+      action_id: 'act_switch',
+      revision: 2,
+      acting_model: {
+        requested_id: 'model-other-v1',
+        served_id: 'model-other-v1',
+        card_id: 'model-other',
+        card_version: 1,
+      },
+    });
+    expect(await h.core.recordModelSelection({ caseId: 'case_switch', proposal: second, actor: ORCHESTRATOR })).toMatchObject({
+      accepted: true,
+    });
+    const afterSwitch = h.store.snapshot();
+    expect(afterSwitch.rulings.get(firstRuling.ruling.ruling_id)?.status).toBe('invalidated');
+    for (const reservation of firstRuling.ruling.counter_reservations) {
+      expect(afterSwitch.reservations.get(reservation.id)?.state).toBe('released');
+    }
+    expect(
+      await h.core.commitVerify({
+        rulingId: firstRuling.ruling.ruling_id,
+        intent: intentFor(first, firstRuling.ruling.ruling_id),
+        servicesHostBootId: 'services_boot_1',
+        actor: SERVICES_HOST,
+      }),
+    ).toEqual({ ok: false, defect: 'replayed-ruling' });
+
+    const secondRuling = await h.core.ruleProposal(ruleInput(second));
+    expect(secondRuling.ruling.verdict).toBe('allow');
+    expect(
+      (
+        await h.core.commitVerify({
+          rulingId: secondRuling.ruling.ruling_id,
+          intent: intentFor(second, secondRuling.ruling.ruling_id),
+          servicesHostBootId: 'services_boot_1',
+          actor: SERVICES_HOST,
+        })
+      ).ok,
+    ).toBe(true);
+    expect(h.store.snapshot().modelSelections).toHaveLength(2);
+  });
+
   it('routes ordinary card supersession to re-confirmation but fails a withdrawal closed', async () => {
     const superseded = harness();
     await initialize(superseded);
@@ -358,7 +724,7 @@ describe('M2 authorization transactions', () => {
         servedModelAccepted: true,
         cardStatus: 'superseded',
         cardKeyId: 'card-test',
-        cardDigest: CARD_DIGEST,
+        cardDigest: 'd'.repeat(64),
       }),
     });
     expect((await supersededCore.ruleProposal(ruleInput(proposal(6)))).ruling).toMatchObject({
@@ -508,6 +874,46 @@ describe('M2 authorization transactions', () => {
     expect(bound.ok).toBe(true);
     expect([...commitFirst.store.snapshot().commitments.values()][0]?.state).toBe('bound');
     expect(commitFirst.store.snapshot().mandateStatus.get('mdt_demo')?.state).toBe('revoked');
+  });
+
+  it('linearizes a policy-content change before or after commit-verify', async () => {
+    function changedPolicy(source: LoadedPolicy): LoadedPolicy {
+      const policy = { ...source.policy, policy_version: '2026-08-01.2' };
+      return { ...source, policy, policyContentDigest: digestFor('policy-set', policy) };
+    }
+
+    const reloadFirst = harness();
+    await initialize(reloadFirst);
+    const firstProposal = proposal(19);
+    const firstRuling = await reloadFirst.core.ruleProposal(ruleInput(firstProposal));
+    const [, denied] = await Promise.all([
+      reloadFirst.core.reloadPolicy(changedPolicy(reloadFirst.policy), PRINCIPAL),
+      reloadFirst.core.commitVerify({
+        rulingId: firstRuling.ruling.ruling_id,
+        intent: intentFor(firstProposal, firstRuling.ruling.ruling_id),
+        servicesHostBootId: 'services_boot_1',
+        actor: SERVICES_HOST,
+      }),
+    ]);
+    expect(denied).toEqual({ ok: false, defect: 'replayed-ruling' });
+    expect(reloadFirst.store.snapshot().commitments.size).toBe(0);
+
+    const commitFirst = harness();
+    await initialize(commitFirst);
+    const secondProposal = proposal(20);
+    const secondRuling = await commitFirst.core.ruleProposal(ruleInput(secondProposal));
+    const [bound] = await Promise.all([
+      commitFirst.core.commitVerify({
+        rulingId: secondRuling.ruling.ruling_id,
+        intent: intentFor(secondProposal, secondRuling.ruling.ruling_id),
+        servicesHostBootId: 'services_boot_1',
+        actor: SERVICES_HOST,
+      }),
+      commitFirst.core.reloadPolicy(changedPolicy(commitFirst.policy), PRINCIPAL),
+    ]);
+    expect(bound.ok).toBe(true);
+    expect([...commitFirst.store.snapshot().commitments.values()][0]?.state).toBe('bound');
+    expect(commitFirst.store.snapshot().policy?.policy_version).toBe('2026-08-01.2');
   });
 
   it('turns the recurring-escalation threshold into a suspended mandate version', async () => {

@@ -71,11 +71,22 @@ export const commitmentRecord = z
     bound_at: timestamp,
     token_expires_at: timestamp,
     services_host_boot_id: id,
+    /** Pinned at commitment time so a later policy reload cannot reroute recovery. */
+    recovery_contract: interventionContract,
     state: commitmentState,
     outcome: z.enum(['success', 'failed', 'unknown-reconciliation-required']).nullable(),
-    recovery_owner_role: role.nullable(),
+    recovery_owner_role: role,
   })
-  .strict();
+  .strict()
+  .superRefine((record, ctx) => {
+    if (record.recovery_contract.decision_and_route.eligible_role !== record.recovery_owner_role) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['recovery_owner_role'],
+        message: 'recovery owner must be the pinned recovery contract eligible role',
+      });
+    }
+  });
 export type CommitmentRecord = z.infer<typeof commitmentRecord>;
 
 export const ESCALATION_STATES = ['open', 'disposed', 'timed_out', 'cancelled'] as const;
@@ -85,6 +96,8 @@ export const escalationRecord = z
     world_id: worldId,
     escalation_id: id,
     ruling_id: id,
+    /** Null for a ruling escalation; set when an unknown commitment opens recovery. */
+    source_commitment_id: id.nullable().default(null),
     frozen_proposal_hash: hexDigest,
     contract: interventionContract,
     opened_at: timestamp,

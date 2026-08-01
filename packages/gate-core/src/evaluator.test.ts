@@ -87,7 +87,16 @@ describe('deterministic policy evaluator', () => {
     expect(result).toMatchObject({ verdict: 'escalate', uxClass: 'stop' });
   });
 
-  it('distinguishes an inadmissible tool with fallback from a request for new authority', () => {
+  it('beat 1 allows a permitted registry retrieval as a silent trace', () => {
+    expect(
+      evaluatePolicy(
+        policy,
+        context({ gate: 'submit', mandate: { ...mandate, action_class: 'registry-read' } }),
+      ),
+    ).toMatchObject({ verdict: 'allow', uxClass: 'silent', matchedRuleId: 'allow-registry-read' });
+  });
+
+  it('beat 2 denies an inadmissible tool with fallback and escalates only genuinely new authority', () => {
     const inadmissible = evaluatePolicy(
       policy,
       context({ gate: 'authorize', context: { tool_request_class: 'inadmissible-with-fallback' } }),

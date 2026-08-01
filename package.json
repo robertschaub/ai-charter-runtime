@@ -13,6 +13,7 @@
   "scripts": {
     "probe": "node tooling/probe.mjs --lane all",
     "keys": "node tooling/keys.mjs",
+    "cards:verify": "tsc -b && node tooling/cards.mjs verify all",
     "typecheck": "tsc -b",
     "test": "vitest run"
   },

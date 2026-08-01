@@ -1,0 +1,19 @@
+{
+  "name": "model-adapters",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "description": "OpenAI-compatible acting-model adapters for the PublicAI and OpenAI lanes.",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "dependencies": {
+    "zod": "^3.25.0"
+  },
+  "license": "MIT"
+}

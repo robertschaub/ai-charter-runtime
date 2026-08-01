@@ -338,6 +338,9 @@ export function applyWorldOp(state: WorldState, op: WalOp, transactionTimestamp:
     case 'commitment.bind': {
       requireWorld(state, op.commitment, 'commitment');
       if (op.commitment.state !== 'bound') fail('illegal-initial-state', 'a new commitment must be bound');
+      if (op.commitment.recovery_owner_role !== op.commitment.recovery_contract.decision_and_route.eligible_role) {
+        fail('binding-mismatch', 'commitment recovery owner differs from its pinned recovery contract');
+      }
       requireUnique(state.commitments, op.commitment.commitment_id, `commitment ${op.commitment.commitment_id}`);
       const ruling = requireValue(state.rulings, op.commitment.ruling_id, `ruling ${op.commitment.ruling_id}`);
       if (ruling.status !== 'consumed' || ruling.verdict !== 'allow') {
@@ -367,12 +370,19 @@ export function applyWorldOp(state: WorldState, op: WalOp, transactionTimestamp:
       if (current.state !== 'bound' && current.state !== 'unknown') {
         fail('illegal-transition', `commitment ${op.commitment_id}: ${current.state} -> discharged`);
       }
+      const effect = state.effects.get(current.effect_id);
+      if (effect === undefined || effect.outcome !== op.outcome) {
+        fail('binding-mismatch', `commitment ${op.commitment_id} has no matching durable effect outcome`);
+      }
       state.commitments.set(op.commitment_id, { ...current, state: 'discharged', outcome: op.outcome });
       break;
     }
     case 'commitment.mark_unknown': {
       const current = requireValue(state.commitments, op.commitment_id, `commitment ${op.commitment_id}`);
       if (current.state !== 'bound') fail('illegal-transition', `commitment ${op.commitment_id}: ${current.state} -> unknown`);
+      if (state.effects.has(current.effect_id)) {
+        fail('illegal-transition', `commitment ${op.commitment_id} already has a durable effect outcome`);
+      }
       state.commitments.set(op.commitment_id, {
         ...current,
         state: 'unknown',
@@ -396,7 +406,23 @@ export function applyWorldOp(state: WorldState, op: WalOp, transactionTimestamp:
       if (op.escalation.state !== 'open') fail('illegal-initial-state', 'a new escalation must be open');
       requireUnique(state.escalations, op.escalation.escalation_id, `escalation ${op.escalation.escalation_id}`);
       const ruling = requireValue(state.rulings, op.escalation.ruling_id, `ruling ${op.escalation.ruling_id}`);
-      if (ruling.verdict !== 'escalate') fail('binding-mismatch', 'only an escalate ruling can open an escalation');
+      if (op.escalation.source_commitment_id === null) {
+        if (ruling.verdict !== 'escalate') fail('binding-mismatch', 'only an escalate ruling can open a ruling escalation');
+      } else {
+        const commitment = requireValue(
+          state.commitments,
+          op.escalation.source_commitment_id,
+          `commitment ${op.escalation.source_commitment_id}`,
+        );
+        if (
+          commitment.state !== 'unknown' ||
+          commitment.ruling_id !== ruling.ruling_id ||
+          commitment.frozen_proposal_hash !== op.escalation.frozen_proposal_hash ||
+          op.escalation.contract.trigger_and_state.trigger !== 'effect-outcome-unknown'
+        ) {
+          fail('binding-mismatch', 'a recovery escalation requires its matching unknown commitment');
+        }
+      }
       state.escalations.set(op.escalation.escalation_id, op.escalation);
       break;
     }
@@ -445,6 +471,12 @@ export function applyWorldOp(state: WorldState, op: WalOp, transactionTimestamp:
         commitment.effect_request_digest !== op.effect.effect_request_digest
       ) {
         fail('binding-mismatch', `effect ${op.effect.effect_id} differs from its commitment`);
+      }
+      if (commitment.state !== 'bound' && commitment.state !== 'unknown') {
+        fail('illegal-transition', `effect ${op.effect.effect_id} cannot attach to ${commitment.state} commitment`);
+      }
+      if (op.effect.outcome === 'unknown-reconciliation-required') {
+        fail('illegal-transition', 'the services host cannot durably record an unknown effect outcome');
       }
       const existing = state.effectByIdempotencyKey.get(op.effect.idempotency_key);
       if (existing !== undefined) fail('duplicate-state', `idempotency key already belongs to ${existing}`);

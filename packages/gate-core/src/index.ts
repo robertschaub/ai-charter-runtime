@@ -24,4 +24,5 @@ export * from './evaluator.js';
 export * from './authorizationCore.js';
 export * from './sweeper.js';
 export * from './tokenVerifier.js';
+export * from './cardRegistry.js';
 export * from './schemas/index.js';

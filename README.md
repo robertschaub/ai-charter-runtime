@@ -40,7 +40,7 @@ On any divergence, the specification and its linked Charter source documents pre
 | `packages/gate-core/` | Authorization service — the independent gate (AGPL-3.0-only) | M2 |
 | `packages/adapters/` | OpenAI-compatible model adapters (MIT) | M3 |
 | `packages/services-mock/` | Executing services with commitment verification (MIT) | M3 |
-| `packages/consoles/` | Case console + governance console (MIT) | M4 |
+| `packages/consoles/` | M3 deterministic orchestrator slice; case + governance consoles (MIT) | M3–M4 |
 | `fixtures/` | Synthetic grant-scenario data and pinned test fixtures (MIT) | M3+ |
 
 Licensing is per-directory — see [LICENSE.md](LICENSE.md).

@@ -11,4 +11,9 @@ M2 adds the replay-complete per-world WAL and single-writer lock, deterministic 
 versioned mandate operations with eager and lazy invalidation, atomic counter/nonce/ruling issuance,
 `commit-verify` with an exact effect-intent binding and pre-effect record seal, escalation-pattern
 suspension, the expiry/timeout sweeper, and the pure token verifier the executing service calls before
-touching its own idempotency ledger. Run `npm test` and `npm run typecheck` from the repository root.
+touching its own idempotency ledger.
+
+M3 adds server-owned signed-card verification, approved-model selection records, durable effect-outcome
+adoption, and the unknown/absent crash-reconciliation transitions. The recovery owner and six-field
+contract are pinned into the commitment before effect. Run `npm test` and `npm run typecheck` from the
+repository root.

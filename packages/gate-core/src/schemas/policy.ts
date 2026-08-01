@@ -125,6 +125,8 @@ export const policySet = z
     action_class: classToken.optional(),
     ordering: z.literal('deny-escalate-allow-then-priority'),
     default_escalation_contract: interventionContract,
+    /** ADR-001 §8: server-owned route and named recovery owner for unknown effects. */
+    recovery_escalation_contract: interventionContract,
     escalation_pattern: escalationPatternPolicy,
     rules: z.array(policyRule).min(1),
   })

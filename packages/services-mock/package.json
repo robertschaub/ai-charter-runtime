@@ -1,0 +1,20 @@
+{
+  "name": "services-mock",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "description": "Mock connected services with commit-token and idempotency-ledger enforcement.",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "dependencies": {
+    "gate-core": "0.0.1",
+    "zod": "^3.25.0"
+  },
+  "license": "MIT"
+}

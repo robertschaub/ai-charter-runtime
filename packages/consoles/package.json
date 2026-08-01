@@ -1,0 +1,22 @@
+{
+  "name": "runtime-consoles",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "description": "Orchestrator loop and console surfaces for the runtime-gates proof of concept.",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "dependencies": {
+    "gate-core": "0.0.1",
+    "model-adapters": "0.0.1",
+    "services-mock": "0.0.1",
+    "zod": "^3.25.0"
+  },
+  "license": "MIT"
+}

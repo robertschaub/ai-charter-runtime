@@ -1,0 +1,104 @@
+{
+  "schema": "ai-charter-runtime/model-card@1",
+  "card_id": "openai-gpt-5.5",
+  "card_version": 1,
+  "valid_from": "2026-08-01",
+  "attestation": "self-declared or probe-tested — never independently attested",
+  "model": {
+    "requested_id": "gpt-5.5",
+    "pinning_mode": "alias",
+    "resolution": {
+      "lane": "openai",
+      "policy": "alias-to-dated-snapshot",
+      "snapshot_pattern": "^gpt-5\\.5-\\d{4}-\\d{2}-\\d{2}$",
+      "observed_snapshots": [
+        {
+          "id": "gpt-5.5-2026-04-23",
+          "first_seen": "2026-08-01"
+        }
+      ]
+    }
+  },
+  "operator": {
+    "value": "OpenAI",
+    "provenance": "self-declared",
+    "date": "2026-08-01"
+  },
+  "endpoint": {
+    "value": "https://api.openai.com/v1",
+    "provenance": "probe-tested",
+    "date": "2026-08-01"
+  },
+  "jurisdiction": {
+    "value": "US",
+    "provenance": "self-declared",
+    "date": "2026-08-01"
+  },
+  "openness_class": {
+    "value": "Closed weights, hosted API",
+    "provenance": "self-declared",
+    "date": "2026-08-01"
+  },
+  "capabilities": {
+    "tools": {
+      "value": true,
+      "provenance": "probe-tested",
+      "date": "2026-08-01"
+    },
+    "response_format": {
+      "value": [
+        "json_schema",
+        "json_object"
+      ],
+      "provenance": "probe-tested",
+      "date": "2026-08-01"
+    },
+    "token_parameter": {
+      "value": "max_completion_tokens",
+      "provenance": "probe-tested",
+      "date": "2026-08-01"
+    }
+  },
+  "evidence_status": {
+    "as_of": "2026-08-01",
+    "source": "M0 probe",
+    "not_checked": [
+      {
+        "item": "training data and weights provenance",
+        "why": "not exposed by the API"
+      },
+      {
+        "item": "sustained latency under varied prompts",
+        "why": "outside the M0 sanity probe"
+      }
+    ]
+  },
+  "known_limits": [
+    {
+      "value": "Reasoning tokens count against the completion cap",
+      "provenance": "probe-tested",
+      "date": "2026-08-01"
+    },
+    {
+      "value": "The served model may be a dated snapshot of the requested alias",
+      "provenance": "probe-tested",
+      "date": "2026-08-01"
+    }
+  ],
+  "declared_data_classes": {
+    "acting": [
+      "conf:public",
+      "conf:case",
+      "purpose:grant-assessment"
+    ],
+    "screening": [
+      "conf:public",
+      "purpose:grant-assessment"
+    ]
+  },
+  "signature": {
+    "alg": "ed25519",
+    "key_id": "card-2026-08-01",
+    "signature": "ZYLuW9qPHfJYGby+BZsKQ0qNDQnkpbcxRdHgeuoT2bciFhL/Qc67E/JNNx6XB7m7KkMhNqSXKUm10+E0/lEjCw=="
+  }
+}
