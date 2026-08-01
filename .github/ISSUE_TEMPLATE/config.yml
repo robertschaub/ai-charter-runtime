@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Gate bypass or record-integrity finding
+    url: https://github.com/robertschaub/ai-charter-runtime/blob/main/SECURITY.md
+    about: Report privately (private vulnerability reporting or email) — never in a public issue.
+  - name: Specification question or change
+    url: https://github.com/robertschaub/our-ai-charter/issues
+    about: The build specification lives in our-ai-charter; it changes there, not here.

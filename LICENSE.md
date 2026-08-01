@@ -14,11 +14,12 @@ Full license texts are in [`LICENSES/`](LICENSES/). Strategic choice, not legal 
 | `packages/services-mock/` | MIT | `MIT` | Mock connected services (registry, filing, notification) |
 | `tooling/` | MIT | `MIT` | Probes, scripts, test harness |
 | `fixtures/` | MIT | `MIT` | Synthetic demo data (no ODbL: not a curated database) |
-| `docs/`, `README.md` | CC BY 4.0 | `CC-BY-4.0` | Documentation. Deliberate deviation from FactHarbor's CC BY-SA so text moves freely in both directions between this repo and the CC BY 4.0 [our-ai-charter](https://github.com/robertschaub/our-ai-charter) repository |
+| `docs/`, `README.md`, repo-meta Markdown (`AGENTS.md`, `CLAUDE.md`, `SECURITY.md`), `.github/` | CC BY 4.0 | `CC-BY-4.0` | Documentation and agent/contributor guidance. Deliberate deviation from FactHarbor's CC BY-SA so text moves freely in both directions between this repo and the CC BY 4.0 [our-ai-charter](https://github.com/robertschaub/our-ai-charter) repository |
 
 ## Rules
 
 - **SPDX headers.** Every source file carries `SPDX-License-Identifier: <id>` matching this map. The map, not the header, is authoritative on conflict.
+- **Where a header would not work.** JSON config (`package.json`, `.claude/settings.json`, `.codex/hooks.json`) has no comment syntax, and a comment in the GitHub templates (`.github/pull_request_template.md`, `.github/ISSUE_TEMPLATE/`) would be copied into every issue and pull-request body. Those files carry no header and are governed by the map alone.
 - **Combined artifacts.** MIT-licensed console assets served *by* the AGPL authorization service remain separate MIT works; the service itself stays AGPL-3.0-only. Linking MIT code *into* `gate-core` is fine (MIT is AGPL-compatible); the combined work is distributed under AGPL-3.0-only.
 - **Charter-derived text** (policy-file wording, field lists, quotations from Our AI Charter documents) keeps CC BY 4.0 attribution: *"Derived from [Our AI Charter](https://github.com/robertschaub/our-ai-charter) by Robert Schaub, CC BY 4.0."*
 - **No ODbL** unless a genuine curated database ever emerges here.

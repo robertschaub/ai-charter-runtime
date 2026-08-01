@@ -1,7 +1,9 @@
 # secrets — never committed
 .env
-.env.local
+.env.*
+!.env.local.example
 *.key
+*.pem
 keys/
 
 # runtime output
@@ -10,3 +12,11 @@ records/
 dist/
 *.log
 docs/m0-probe-results.json
+
+# local agent / editor state — personal, never shared
+.claude/settings.local.json
+.claude/state/
+.claude/*.jsonl
+.codex/runtime-logs/
+.vscode/
+.idea/
