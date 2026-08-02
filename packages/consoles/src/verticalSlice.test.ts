@@ -70,7 +70,10 @@ describe('M3 fault-tested vertical slice', () => {
       kind: 'local-record-receipt',
       served_model_id: served,
       outcome: 'success',
+      anchoring_status: 'no-pushed-checkpoint',
+      latest_pushed_checkpoint: null,
     });
+    expect(receipt.local_receipt_notice).toContain('independent lodgment custody is outside this POC');
     expect(receipt).not.toHaveProperty('token');
     expect(verifyChain(join(recordsRoot, 'w-demo', 'wal.jsonl'), 'wal-entry').ok).toBe(true);
     expect(verifyChain(join(recordsRoot, 'w-demo', 'action.jsonl'), 'record-entry').ok).toBe(true);

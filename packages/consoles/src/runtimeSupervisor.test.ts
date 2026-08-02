@@ -15,6 +15,12 @@ const baseKeys = [
   'RUNTIME_RECORDS_ROOT',
   'SWEEP_INTERVAL_MS',
 ];
+const checkpointKeys = [
+  'RUNTIME_CHECKPOINTS_ROOT',
+  'RUNTIME_CHECKPOINT_BRANCH',
+  'RUNTIME_CHECKPOINT_REPO_URL',
+  'CHECKPOINT_VERIFY_LOCAL',
+];
 
 describe('runtime supervisor credential custody', () => {
   it('constructs exact child environment allowlists without model keys or NODE_OPTIONS', () => {
@@ -30,6 +36,10 @@ describe('runtime supervisor credential custody', () => {
       DEMO_WORLD_ID: 'w-demo',
       RUNTIME_RECORDS_ROOT: 'synthetic-records',
       SWEEP_INTERVAL_MS: '5000',
+      RUNTIME_CHECKPOINTS_ROOT: 'synthetic-checkpoints',
+      RUNTIME_CHECKPOINT_BRANCH: 'main',
+      RUNTIME_CHECKPOINT_REPO_URL: 'https://github.com/example/runtime',
+      CHECKPOINT_VERIFY_LOCAL: '1',
       AUTHZ_TOKEN_PRINCIPAL: '1'.repeat(64),
       AUTHZ_TOKEN_CASE_OFFICER: '2'.repeat(64),
       AUTHZ_TOKEN_APPLICANT: '3'.repeat(64),
@@ -44,6 +54,7 @@ describe('runtime supervisor credential custody', () => {
     expect(Object.keys(children.authorization).sort()).toEqual(
       [
         ...baseKeys,
+        ...checkpointKeys,
         'GATE_HMAC_KEY',
         'GATE_HMAC_KEY_ID',
         'AUTHZ_TOKEN_PRINCIPAL',
@@ -84,5 +95,7 @@ describe('runtime supervisor credential custody', () => {
       expect(child).not.toHaveProperty('PUBLICAI_API_KEY');
       expect(child).not.toHaveProperty('NODE_OPTIONS');
     }
+    expect(children.services).not.toHaveProperty('RUNTIME_CHECKPOINTS_ROOT');
+    expect(children.orchestrator).not.toHaveProperty('CHECKPOINT_VERIFY_LOCAL');
   });
 });

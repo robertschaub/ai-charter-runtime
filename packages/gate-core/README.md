@@ -24,6 +24,9 @@ after a deny, enforceable substitute roles, non-overridable aggregate-ceiling co
 suppression, refusal events, and durable review obligations. The authorization service now boots its WAL,
 policy, cards, credentials, observable-expiry sweep, and commitment reconciliation before binding a native
 HTTP listener, using a closed route-to-handler table. Periodic maintenance repeats without overlapping;
-checkpoint anchoring remains separate ADR-003 work.
+ADR-003 run-start verification now precedes the run header, maintenance, and listener. The local checkpoint
+detector provides the write-only composite writer, checkpoint-chain and record-chain verification,
+rollback alarms, receipt references, and `npm run verify:records -- --local`; operational commit/push
+anchoring remains outside this deterministic M4 slice.
 Browser consoles and the remaining read-side route implementations remain to be built.
 Run `npm test` and `npm run typecheck` from the repository root.

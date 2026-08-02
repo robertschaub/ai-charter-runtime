@@ -8,6 +8,11 @@ import { AuthorizationCore } from './authorizationCore.js';
 import { AuthorizationHttpAdapter, type CredentialBinding } from './authorizationHttpAdapter.js';
 import { AuthorizationHttpServer, type ListeningAddress } from './authorizationHttpServer.js';
 import { CardRegistry } from './cardRegistry.js';
+import {
+  recordVerificationAccess,
+  verifyRecords,
+  type RecordsVerificationReport,
+} from './checkpoint.js';
 import { digestFileSet } from './fileSetDigest.js';
 import { loadKeyring } from './keyring.js';
 import { loadPolicyFile } from './policyLoader.js';
@@ -66,6 +71,13 @@ function intervalFrom(env: NodeJS.ProcessEnv): number {
   return value;
 }
 
+function localCheckpointVerification(env: NodeJS.ProcessEnv): boolean {
+  const raw = env['CHECKPOINT_VERIFY_LOCAL'];
+  if (raw === undefined || raw === '' || raw === '0') return false;
+  if (raw === '1') return true;
+  throw new Error('CHECKPOINT_VERIFY_LOCAL must be 0 or 1');
+}
+
 function runtimeId(prefix: string): string {
   return `${prefix}_${randomUUID().replaceAll('-', '')}`;
 }
@@ -73,11 +85,13 @@ function runtimeId(prefix: string): string {
 export interface AuthorizationProcessHandle {
   readonly address: ListeningAddress;
   readonly failure: Promise<Error>;
+  readonly recordVerification: RecordsVerificationReport;
   close(): Promise<void>;
 }
 
 export interface AuthorizationProcessDependencies {
   readonly runMaintenance?: typeof runRuntimeMaintenance;
+  readonly verifyRecordLayer?: typeof verifyRecords;
 }
 
 export async function startAuthorizationProcess(
@@ -106,6 +120,8 @@ export async function startAuthorizationProcess(
     throw new Error('authorization runtime credentials must be mutually distinct');
   }
   const recordsRoot = resolve(env['RUNTIME_RECORDS_ROOT'] ?? 'records');
+  const checkpointsRoot = resolve(env['RUNTIME_CHECKPOINTS_ROOT'] ?? 'docs/checkpoints');
+  const verifyLocally = localCheckpointVerification(env);
   const policyFile = resolve(env['RUNTIME_POLICY_FILE'] ?? 'packages/gate-core/policy/v1.yaml');
   const policyRoot = resolve(env['RUNTIME_POLICY_ROOT'] ?? 'packages/gate-core/policy');
   const sourceRoot = resolve(env['RUNTIME_GATE_SOURCE_ROOT'] ?? 'packages/gate-core/src');
@@ -128,6 +144,7 @@ export async function startAuthorizationProcess(
     policyVersion: policy.policy.policy_version,
     policyContentDigest: policy.policyContentDigest,
     evaluatorBuildDigest: policy.evaluatorBuildDigest,
+    deferRunHeader: true,
   });
   let server: AuthorizationHttpServer | undefined;
   let maintenanceTimer: NodeJS.Timeout | undefined;
@@ -138,7 +155,22 @@ export async function startAuthorizationProcess(
     resolveFailure = resolveFailurePromise;
   });
   const runMaintenance = dependencies.runMaintenance ?? runRuntimeMaintenance;
+  const verifyRecordLayer = dependencies.verifyRecordLayer ?? verifyRecords;
   try {
+    const recordVerification = await verifyRecordLayer({
+      recordsRoot,
+      checkpointsRoot,
+      local: verifyLocally,
+      repoRoot: process.cwd(),
+      ...(env['RUNTIME_CHECKPOINT_BRANCH'] === undefined
+        ? {}
+        : { branch: env['RUNTIME_CHECKPOINT_BRANCH'] }),
+      ...(env['RUNTIME_CHECKPOINT_REPO_URL'] === undefined
+        ? {}
+        : { repoUrl: env['RUNTIME_CHECKPOINT_REPO_URL'] }),
+    });
+    store.beginRun();
+    await recordVerificationAccess(store, recordVerification.readLengths);
     await servicesProbe.requireHealthy();
     const authorization = new AuthorizationCore({
       store,
@@ -187,6 +219,7 @@ export async function startAuthorizationProcess(
     return {
       address,
       failure,
+      recordVerification,
       close: async () => {
         if (closed) return;
         closed = true;

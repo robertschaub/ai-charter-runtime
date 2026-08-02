@@ -16,6 +16,7 @@
     "cards:verify": "tsc -b && node tooling/cards.mjs verify all",
     "runtime:start": "tsc -b && node --env-file=.env.local packages/consoles/dist/runtimeSupervisor.js",
     "typecheck": "tsc -b",
+    "verify:records": "tsc -b && node tooling/verify-records.mjs",
     "pretest": "tsc -b",
     "test": "node --test tooling/git-safety-hook.test.cjs && vitest run"
   },

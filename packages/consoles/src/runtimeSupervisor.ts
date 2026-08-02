@@ -43,6 +43,16 @@ function runtimeSettings(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   return Object.fromEntries(names.flatMap((name) => (env[name] === undefined ? [] : [[name, env[name]]])));
 }
 
+function checkpointSettings(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const names = [
+    'RUNTIME_CHECKPOINTS_ROOT',
+    'RUNTIME_CHECKPOINT_BRANCH',
+    'RUNTIME_CHECKPOINT_REPO_URL',
+    'CHECKPOINT_VERIFY_LOCAL',
+  ];
+  return Object.fromEntries(names.flatMap((name) => (env[name] === undefined ? [] : [[name, env[name]]])));
+}
+
 export interface RuntimeChildEnvironments {
   readonly authorization: NodeJS.ProcessEnv;
   readonly services: NodeJS.ProcessEnv;
@@ -67,6 +77,7 @@ export function runtimeChildEnvironments(env: NodeJS.ProcessEnv): RuntimeChildEn
   return {
     authorization: {
       ...base,
+      ...checkpointSettings(env),
       ...hmac,
       AUTHZ_TOKEN_PRINCIPAL: required(env, 'AUTHZ_TOKEN_PRINCIPAL'),
       AUTHZ_TOKEN_CASE_OFFICER: required(env, 'AUTHZ_TOKEN_CASE_OFFICER'),

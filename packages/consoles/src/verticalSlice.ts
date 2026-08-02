@@ -5,6 +5,7 @@ import { readFileSync } from 'node:fs';
 import {
   AuthorizationCore,
   bindMandate,
+  checkpointReceiptReference,
   digestFor,
   effectIntent,
   freezeProposal,
@@ -12,8 +13,10 @@ import {
   loadPolicyFile,
   WalStore,
   type CardRegistry,
+  type CheckpointReceiptReference,
   type Keyring,
   type Mandate,
+  type RecordsVerificationReport,
 } from 'gate-core';
 import type { OpenAiCompatibleAdapter } from 'model-adapters';
 import { EffectLedger, MockServicesHost } from 'services-mock';
@@ -88,6 +91,8 @@ export interface VerticalSliceOptions {
   readonly cardVersion: number;
   readonly now?: string;
   readonly caseId?: string;
+  /** Authorization-owned startup verification state; absent means no pushed checkpoint is claimed. */
+  readonly recordVerification?: RecordsVerificationReport;
 }
 
 export interface LocalRecordReceipt {
@@ -102,6 +107,9 @@ export interface LocalRecordReceipt {
   readonly effect_id: string;
   readonly outcome: 'success' | 'failed';
   readonly record_entry_id: string;
+  readonly anchoring_status: 'anchored-prefix' | 'open-window' | 'no-pushed-checkpoint';
+  readonly latest_pushed_checkpoint: CheckpointReceiptReference | null;
+  readonly local_receipt_notice: string;
 }
 
 export class VerticalSliceError extends Error {
@@ -218,6 +226,16 @@ export async function runVerticalSlice(options: VerticalSliceOptions): Promise<L
     if (!executed.report.accepted || executed.report.recordEntryId === null) {
       throw new VerticalSliceError('receipt', 'authorization service did not seal an outcome receipt');
     }
+    const recordEntryId = executed.report.recordEntryId;
+    const actionEntryIndex = store
+      .snapshot()
+      .actionRecords.findIndex((entry) => entry.entry_id === recordEntryId);
+    if (actionEntryIndex < 0) throw new VerticalSliceError('receipt', 'outcome receipt is absent from the action chain');
+    const latestPushedCheckpoint = checkpointReceiptReference(
+      options.recordVerification,
+      boundMandate.world_id,
+      actionEntryIndex,
+    );
     return {
       kind: 'local-record-receipt',
       world_id: boundMandate.world_id,
@@ -229,7 +247,15 @@ export async function runVerticalSlice(options: VerticalSliceOptions): Promise<L
       commitment_id: executed.commitmentId,
       effect_id: executed.effect.effect_id,
       outcome: executed.effect.outcome,
-      record_entry_id: executed.report.recordEntryId,
+      record_entry_id: recordEntryId,
+      anchoring_status:
+        latestPushedCheckpoint === null
+          ? 'no-pushed-checkpoint'
+          : latestPushedCheckpoint.action_inside_anchored_prefix
+            ? 'anchored-prefix'
+            : 'open-window',
+      latest_pushed_checkpoint: latestPushedCheckpoint,
+      local_receipt_notice: 'Local record receipt only; independent lodgment custody is outside this POC.',
     };
   } finally {
     store.close();

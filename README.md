@@ -71,7 +71,16 @@ npm run runtime:start
 
 The supervisor passes each child only its scoped credentials and derives narrower audience tokens in
 memory. Services recovers its ledger first so authorization can replay, sweep, and reconcile before its
-own listener binds; the orchestrator binds last. Shutdown handlers are installed before the first spawn,
-and supervised children close when their IPC parent disconnects. All listeners use `127.0.0.1` by default.
+own listener binds. Authorization verifies the record layer against the last composite checkpoint before
+appending the new run header; detected tampering or rollback halts startup, while remote unavailability is
+reported without being confused with missing authority. The orchestrator binds last. Shutdown handlers are
+installed before the first spawn, and supervised children close when their IPC parent disconnects. All listeners
+use `127.0.0.1` by default.
 This is the headless transport slice: the
 governance console, case console, dialogue control, record viewer, and applicant extract remain M4 work.
+
+Offline and deterministic verification uses synthetic records and skips only the remote-presence step:
+
+```powershell
+npm run verify:records -- --local
+```

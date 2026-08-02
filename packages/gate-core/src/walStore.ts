@@ -35,6 +35,8 @@ export interface WalStoreOptions {
   readonly policyVersion: string;
   readonly policyContentDigest: string;
   readonly evaluatorBuildDigest: string;
+  /** Startup recovery may verify ADR-003 before the new run header is appended. */
+  readonly deferRunHeader?: boolean;
   readonly now?: () => string;
   readonly pid?: number;
 }
@@ -63,7 +65,13 @@ export interface TransactionResult<T> {
 
 export class WalStoreError extends Error {
   constructor(
-    readonly code: 'malformed-wal' | 'clock-regression' | 'poisoned' | 'closed' | 'projection-diverged',
+    readonly code:
+      | 'malformed-wal'
+      | 'clock-regression'
+      | 'poisoned'
+      | 'closed'
+      | 'projection-diverged'
+      | 'run-not-started',
     message: string,
   ) {
     super(message);
@@ -169,6 +177,8 @@ export class WalStore {
   readonly #accessWriter: DurableChainWriter;
   #state: WorldState;
   #lastWalTimestamp: string;
+  readonly #genesisTimestamp: string | null;
+  #runStarted: boolean;
   #closed = false;
   #poisoned = false;
 
@@ -180,6 +190,8 @@ export class WalStore {
     accessWriter: DurableChainWriter,
     state: WorldState,
     lastWalTimestamp: string,
+    genesisTimestamp: string | null,
+    runStarted: boolean,
   ) {
     this.#options = options;
     this.#lease = lease;
@@ -188,6 +200,8 @@ export class WalStore {
     this.#accessWriter = accessWriter;
     this.#state = state;
     this.#lastWalTimestamp = lastWalTimestamp;
+    this.#genesisTimestamp = genesisTimestamp;
+    this.#runStarted = runStarted;
   }
 
   static open(input: WalStoreOptions): WalStore {
@@ -220,33 +234,20 @@ export class WalStore {
       accessWriter = materializeProjection(join(worldDir, 'access.jsonl'), 'access-entry', accessExpected);
       walWriter = new DurableChainWriter(walFile, 'wal-entry');
 
-      let lastWalTimestamp = parsed.lastTimestamp ?? now;
-      if (parsed.lines.length === 0) {
-        const genesis = walGenesisHeader.parse({
-          kind: 'genesis',
-          wal_version: 2,
-          world_id: options.worldId,
-          created_at: now,
-        });
-        walWriter.append(genesis);
-        lastWalTimestamp = now;
-      }
-      const runTimestamp = timestampSchema.parse(options.now());
-      if (runTimestamp < lastWalTimestamp) {
-        throw new WalStoreError('clock-regression', `run timestamp ${runTimestamp} precedes ${lastWalTimestamp}`);
-      }
-      const run = walRunHeader.parse({
-        kind: 'run',
-        world_id: options.worldId,
-        ts: runTimestamp,
-        run_id: options.runId,
-        boot_id: options.bootId,
-        policy_version: options.policyVersion,
-        policy_content_digest: options.policyContentDigest,
-        evaluator_build_digest: options.evaluatorBuildDigest,
-      });
-      walWriter.append(run);
-      return new WalStore(options, lease, walWriter, actionWriter, accessWriter, state, runTimestamp);
+      const lastWalTimestamp = parsed.lastTimestamp ?? now;
+      const store = new WalStore(
+        options,
+        lease,
+        walWriter,
+        actionWriter,
+        accessWriter,
+        state,
+        lastWalTimestamp,
+        parsed.lines.length === 0 ? now : null,
+        false,
+      );
+      if (options.deferRunHeader !== true) store.beginRun();
+      return store;
     } catch (error) {
       try {
         accessWriter?.close();
@@ -264,6 +265,49 @@ export class WalStore {
 
   snapshot(): WorldState {
     return cloneWorldState(this.#state);
+  }
+
+  /** Append genesis if needed and the new run header only after startup verification succeeds. */
+  beginRun(): void {
+    if (this.#closed) throw new WalStoreError('closed', 'WAL store is closed');
+    if (this.#poisoned) throw new WalStoreError('poisoned', 'WAL store requires restart after a failed append');
+    if (this.#runStarted) return;
+    try {
+      if (this.#genesisTimestamp !== null) {
+        this.#walWriter.append(
+          walGenesisHeader.parse({
+            kind: 'genesis',
+            wal_version: 2,
+            world_id: this.#options.worldId,
+            created_at: this.#genesisTimestamp,
+          }),
+        );
+      }
+      const runTimestamp = timestampSchema.parse(this.#options.now());
+      if (runTimestamp < this.#lastWalTimestamp) {
+        throw new WalStoreError(
+          'clock-regression',
+          `run timestamp ${runTimestamp} precedes ${this.#lastWalTimestamp}`,
+        );
+      }
+      this.#walWriter.append(
+        walRunHeader.parse({
+          kind: 'run',
+          world_id: this.#options.worldId,
+          ts: runTimestamp,
+          run_id: this.#options.runId,
+          boot_id: this.#options.bootId,
+          policy_version: this.#options.policyVersion,
+          policy_content_digest: this.#options.policyContentDigest,
+          evaluator_build_digest: this.#options.evaluatorBuildDigest,
+        }),
+      );
+      this.#lastWalTimestamp = runTimestamp;
+      this.#runStarted = true;
+    } catch (error) {
+      this.#poisoned = true;
+      throw error;
+    }
   }
 
   async transact(
@@ -291,6 +335,9 @@ export class WalStore {
     return withWorldLock(this.#options.worldId, () => {
       if (this.#closed) throw new WalStoreError('closed', 'WAL store is closed');
       if (this.#poisoned) throw new WalStoreError('poisoned', 'WAL store requires restart after a post-durability failure');
+      if (!this.#runStarted) {
+        throw new WalStoreError('run-not-started', 'WAL run header must be appended before transactions');
+      }
       const transactionTimestamp = timestampSchema.parse(timestamp ?? this.#options.now());
       if (transactionTimestamp < this.#lastWalTimestamp) {
         throw new WalStoreError('clock-regression', `transaction ${transactionTimestamp} precedes ${this.#lastWalTimestamp}`);

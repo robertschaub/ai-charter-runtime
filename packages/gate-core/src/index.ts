@@ -14,6 +14,7 @@ export * from './domain.js';
 export * from './hash.js';
 export * from './fileSetDigest.js';
 export * from './chain.js';
+export * from './checkpoint.js';
 export * from './keyring.js';
 export * from './servedModel.js';
 export * from './worldLock.js';

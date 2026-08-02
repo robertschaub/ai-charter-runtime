@@ -27,7 +27,7 @@ plan change before implementation continues.
 ## Reviewed implementation baseline
 
 The latest maintainer-run, cross-model adversarially reviewed runtime implementation baseline is
-`ff0ada625d059dbf9c018f661b59c448c9494a98` (`ff0ada6`), with a GO verdict and no open findings.
+`2421ae9c7a59b49c8d4ea273883e1d1b89eafb1b` (`2421ae9`), with a GO verdict and no open findings.
 At that baseline, `npm run typecheck` passed, the Git-safety hook suite passed 4 tests, and Vitest passed
 229 tests across 22 files. The work remained unpushed at review time; branch publication remains a
 maintainer decision.
@@ -64,26 +64,28 @@ review. Test-family coverage continues to be reported as exercised, partial, or 
 - Startup-window, graceful-stop, IPC-disconnect, hard-parent-death, port-release, and writer-lease lifecycle
   coverage for the native supervisor.
 
+### Implemented in the current combined review tranche
+
+- Authorization maintenance fail-stop coverage through a deterministic injection seam: listener closure,
+  failure resolution, non-zero exit, port and clean-path writer-lease release, and no credential output.
+- ADR-003 local checkpoint detection: write-only composite checkpoints, checkpoint-chain and local-chain
+  verification, explicit local CLI mode, run-start rollback fail-stop before the run header or listener,
+  remote-unavailability asymmetry, beat-15 tamper/rollback tests, and latest-pushed-checkpoint receipt fields.
+  Synthetic tests do not commit, push, or contact a remote.
+
 ### Remaining before M4 can be called complete
 
-1. Exercise the authorization maintenance fail-stop path: a deterministic synthetic maintenance/store
-   failure must close the listener, resolve the failure path, exit non-zero, release the writer lease on the
-   clean path, and emit no credential material.
-2. Implement the read-side HTTP handlers behind the frozen ACLs and strict ADR-002 projections:
+1. Implement the read-side HTTP handlers behind the frozen ACLs and strict ADR-002 projections:
    ruling status; approved models; filtered mandate and escalation lists; routed escalation detail; record
    and access-chain views/verification; and the applicant's server-side scoped extract.
-3. Serve the governance-console shell from the authorization origin with `frame-ancestors 'none'`, no CORS,
+2. Serve the governance-console shell from the authorization origin with `frame-ancestors 'none'`, no CORS,
    strict same-origin authority-changing requests, and no third-party script or content dependency.
-4. Implement the principal surfaces: mandate grant/amend/revoke, escalation inbox with only contract-permitted
+3. Implement the principal surfaces: mandate grant/amend/revoke, escalation inbox with only contract-permitted
    dispositions enabled, model-card check view, record/access viewer, and applicant extract.
-5. Resolve the browser credential-handoff gate below before shipping a case-console session. Then implement
+4. Resolve the browser credential-handoff gate below before shipping a case-console session. Then implement
    the case-console model picker, authoritative dialogue deep link, two-hop outcome polling, and the HTTP-level
    raw-API bypass beat without moving authority into the UI.
-6. Implement ADR-003 checkpoint anchoring before claiming beats 15–16: a write-only checkpoint writer,
-   composite-head and checkpoint-chain verification, `npm run verify:records` with an explicit local mode,
-   rollback/tamper detector tests, and latest-pushed-checkpoint fields in receipts. Deterministic tests must
-   create only synthetic checkpoint fixtures and must never commit or push them.
-7. Exercise the M4 demo beats and adversarial families named by specification §10, update honest coverage
+5. Exercise the M4 demo beats and adversarial families named by specification §10, update honest coverage
    statements, and obtain an exact-SHA adversarial review. Only then may planning advance to M5.
 
 ## Browser credential-handoff decision gate
@@ -100,19 +102,17 @@ without resolving this gate.
 
 ## Ordered next slices
 
-1. **Maintenance fail-stop test** — the smallest remaining lifecycle gap; tests and only the minimum injection
-   seam required to make the failure deterministic.
-2. **ADR-003 local checkpoint detector** — implement the write-only writer, composite/checkpoint verifier,
-   `verify:records --local`, beat-15 tamper and rollback tests, and receipt checkpoint references; no commit,
-   push, or remote probe is part of this slice.
-3. **Read-side projections and handlers** — complete the server contract, including checkpoint/open-window
+1. **Combined runtime review** — one exact-SHA adversarial review of the maintenance fail-stop and ADR-003
+   local detector tranche; documentation-only acknowledgements do not trigger another review loop.
+2. **Read-side projections and handlers** — complete the server contract, including checkpoint/open-window
    facts required by the record viewer and applicant receipt, before building UI consumers.
-4. **Authorization-origin governance console** — static shell and principal/applicant surfaces, excluding the
+3. **Authorization-origin governance console** — static shell and principal/applicant surfaces, excluding the
    unresolved case-browser handoff.
-5. **Upstream handoff decision** — separately approved specification change followed by ADR alignment.
-6. **Case console and M4 acceptance pass** — model picker, dialogue link/polling, raw-API beat, coverage ledger,
+4. **Upstream handoff decision** — separately approved specification change followed by ADR alignment.
+5. **Case console and M4 acceptance pass** — model picker, dialogue link/polling, raw-API beat, coverage ledger,
    and exact-SHA review.
 
-Each slice is committed and reviewed independently. No slice authorizes live probes, key generation or rotation,
-model-card signing, editing generated or append-only records outside a synthetic test harness, pushing, or
-starting M5.
+Substantive tranches are committed and reviewed at bounded integration points. Documentation-only
+acknowledgements do not trigger recursive review rounds. No tranche authorizes live probes, key generation or
+rotation, model-card signing, editing generated or append-only records outside a synthetic test harness,
+pushing, or starting M5.

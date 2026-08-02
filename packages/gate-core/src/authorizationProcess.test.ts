@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { spawn, type ChildProcess } from 'node:child_process';
-import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
 import { createServer as createNetServer } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -9,10 +9,22 @@ import { fileURLToPath } from 'node:url';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
+import { writeCheckpoint } from './checkpoint.js';
+import { WalStore } from './walStore.js';
+
 const ROOT = fileURLToPath(new URL('../../..', import.meta.url));
 const children: ChildProcess[] = [];
 const roots: string[] = [];
 const servers: Server[] = [];
+const CREDENTIALS = {
+  AUTHZ_TOKEN_PRINCIPAL: '1'.repeat(64),
+  AUTHZ_TOKEN_CASE_OFFICER: '2'.repeat(64),
+  AUTHZ_TOKEN_APPLICANT: '3'.repeat(64),
+  AUTHZ_TOKEN_PROC_ORCHESTRATOR: '4'.repeat(64),
+  AUTHZ_TOKEN_PROC_SERVICES_HOST: '5'.repeat(64),
+  SERVICES_TOKEN_PROC_AUTHZ: '6'.repeat(64),
+  GATE_HMAC_KEY: 'a'.repeat(64),
+} as const;
 
 function hasExited(child: ChildProcess): boolean {
   return child.exitCode !== null || child.signalCode !== null;
@@ -100,7 +112,7 @@ async function startHealthyServices(): Promise<number> {
   });
 }
 
-describe('authorization process maintenance lifecycle', () => {
+describe('authorization process fail-stop lifecycle', () => {
   it(
     'fails stop on periodic maintenance failure without leaking credentials or its writer lease',
     async () => {
@@ -108,15 +120,6 @@ describe('authorization process maintenance lifecycle', () => {
       roots.push(recordsRoot);
       const servicesPort = await startHealthyServices();
       const authorizationPort = await freePort();
-      const credentials = {
-        AUTHZ_TOKEN_PRINCIPAL: '1'.repeat(64),
-        AUTHZ_TOKEN_CASE_OFFICER: '2'.repeat(64),
-        AUTHZ_TOKEN_APPLICANT: '3'.repeat(64),
-        AUTHZ_TOKEN_PROC_ORCHESTRATOR: '4'.repeat(64),
-        AUTHZ_TOKEN_PROC_SERVICES_HOST: '5'.repeat(64),
-        SERVICES_TOKEN_PROC_AUTHZ: '6'.repeat(64),
-        GATE_HMAC_KEY: 'a'.repeat(64),
-      } as const;
       const script = `
         import { runAuthorizationProcess } from './packages/gate-core/dist/authorizationProcess.js';
         import { runRuntimeMaintenance } from './packages/gate-core/dist/runtimeMaintenance.js';
@@ -133,7 +136,7 @@ describe('authorization process maintenance lifecycle', () => {
         cwd: ROOT,
         env: {
           ...systemEnvironment(),
-          ...credentials,
+          ...CREDENTIALS,
           GATE_HMAC_KEY_ID: 'hmac-test',
           RUNTIME_HOST: '127.0.0.1',
           AUTHZ_PORT: String(authorizationPort),
@@ -160,12 +163,93 @@ describe('authorization process maintenance lifecycle', () => {
       expect(child.signalCode).toBeNull();
       expect(JSON.parse(stdout.trim())).toMatchObject({ event: 'ready', service: 'authorization' });
       expect(stderr).toBe('authorization maintenance failed: synthetic maintenance/store failure\n');
-      for (const credential of Object.values(credentials)) {
+      for (const credential of Object.values(CREDENTIALS)) {
         expect(stdout).not.toContain(credential);
         expect(stderr).not.toContain(credential);
       }
       await waitForPortRelease(authorizationPort);
       expect(existsSync(join(recordsRoot, 'w-demo', '.writer.lock'))).toBe(false);
+    },
+    30_000,
+  );
+
+  it(
+    'halts before listening when run-start verification finds a valid-prefix rollback',
+    async () => {
+      const root = mkdtempSync(join(tmpdir(), 'authorization-checkpoint-rollback-'));
+      roots.push(root);
+      const recordsRoot = join(root, 'records');
+      const checkpointsRoot = join(root, 'checkpoints');
+      const store = WalStore.open({
+        recordsRoot,
+        worldId: 'w-demo',
+        runId: 'run_before_rollback',
+        bootId: 'authz_boot_before_rollback',
+        policyVersion: 'policy-test',
+        policyContentDigest: 'a'.repeat(64),
+        evaluatorBuildDigest: 'b'.repeat(64),
+        now: () => '2026-08-02T00:00:00.000Z',
+      });
+      store.close();
+      await writeCheckpoint({
+        recordsRoot,
+        checkpointsRoot,
+        reason: 'run-end',
+        runId: 'run_before_rollback',
+        policyContentDigest: 'a'.repeat(64),
+        evaluatorBuildId: 'gate-core@test',
+        now: () => '2026-08-02T00:01:00.000Z',
+        mode: 'write-only',
+      });
+      const walFile = join(recordsRoot, 'w-demo', 'wal.jsonl');
+      const genesis = readFileSync(walFile, 'utf8').split('\n')[0];
+      writeFileSync(walFile, `${genesis}\n`, 'utf8');
+
+      const servicesPort = await startHealthyServices();
+      const authorizationPort = await freePort();
+      const child = spawn(
+        process.execPath,
+        [join(ROOT, 'packages', 'gate-core', 'dist', 'authorizationProcess.js')],
+        {
+          cwd: ROOT,
+          env: {
+            ...systemEnvironment(),
+            ...CREDENTIALS,
+            GATE_HMAC_KEY_ID: 'hmac-test',
+            RUNTIME_HOST: '127.0.0.1',
+            AUTHZ_PORT: String(authorizationPort),
+            SERVICES_PORT: String(servicesPort),
+            DEMO_WORLD_ID: 'w-demo',
+            RUNTIME_RECORDS_ROOT: recordsRoot,
+            RUNTIME_CHECKPOINTS_ROOT: checkpointsRoot,
+            CHECKPOINT_VERIFY_LOCAL: '1',
+            GATE_KEYRING_PATH: join(recordsRoot, 'absent-keyring.json'),
+          },
+          stdio: ['ignore', 'pipe', 'pipe'],
+          windowsHide: true,
+        },
+      );
+      children.push(child);
+      const stdoutChunks: Buffer[] = [];
+      const stderrChunks: Buffer[] = [];
+      child.stdout?.on('data', (chunk: Buffer) => stdoutChunks.push(chunk));
+      child.stderr?.on('data', (chunk: Buffer) => stderrChunks.push(chunk));
+
+      await waitForExit(child, 20_000);
+      const stdout = Buffer.concat(stdoutChunks).toString('utf8');
+      const stderr = Buffer.concat(stderrChunks).toString('utf8');
+
+      expect(child.exitCode).toBe(1);
+      expect(stdout).toBe('');
+      expect(stderr).toContain('authorization startup failed: rollback alarm for w-demo/wal');
+      expect(stderr).toContain('local length 1 is below anchored length 2');
+      for (const credential of Object.values(CREDENTIALS)) {
+        expect(stdout).not.toContain(credential);
+        expect(stderr).not.toContain(credential);
+      }
+      await waitForPortRelease(authorizationPort);
+      expect(existsSync(join(recordsRoot, 'w-demo', '.writer.lock'))).toBe(false);
+      expect(readFileSync(walFile, 'utf8').split('\n').filter((line) => line.length > 0)).toHaveLength(1);
     },
     30_000,
   );
