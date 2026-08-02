@@ -7,6 +7,8 @@
 
 **Amendment (M4 authority review follow-up, 2026-08-02):** the adapter passes schema-validated named route parameters to handlers and accepts a bare wildcard root such as `/console`. Unauthenticated ingress records only a bounded number of detailed 401s, an initial 429 suppression marker, and a counted summary when the process window rolls over; authenticated refusals remain individually durable.
 
+**Amendment (M4 native-process slice, 2026-08-02):** the local supervisor passes credential subsets rather than the whole environment. It one-way derives distinct case-console and orchestrator→services audience tokens from the existing high-entropy base credentials; the derived values are never stored. A receiving process therefore cannot replay its narrower credential at the authorization service.
+
 ## Context
 
 Three OS processes make "the model proposes, a component outside the model decides, the executing service
@@ -47,6 +49,17 @@ by a tooling script and written to the gitignored `.env.local`:
 | `AUTHZ_TOKEN_PROC_SERVICES_HOST` | process `proc:services_host` | services-host process only |
 | `SERVICES_TOKEN_PROC_AUTHZ` | process `proc:authz` | authorization service, for reconciliation probes |
 
+Two narrower audience credentials are derived in memory by the local supervisor and passed only to the
+target child process: `ORCHESTRATOR_TOKEN_CASE_OFFICER = H("orchestrator-case-officer", AUTHZ_TOKEN_CASE_OFFICER)`
+and `SERVICES_TOKEN_PROC_ORCHESTRATOR = H("services-proc-orchestrator", AUTHZ_TOKEN_PROC_ORCHESTRATOR)`.
+Here `H` is the domain-prefixed SHA-256 derivation implemented by `deriveAudienceToken`; the source tokens
+are random 256-bit values, so a derived value does not reveal the authorization-service credential. These
+are protocol credentials, not new stored secrets. The authorization process receives the five credentials
+it verifies and the HMAC pair; services receives its authorization credential, the derived execute
+credential, its probe credential, and the HMAC pair; the orchestrator receives only its authorization
+process credential and the two narrower credentials it must verify or present. Model API keys are not
+passed by this M4 headless supervisor.
+
 - Transport: `Authorization: Bearer <token>` on every call. No cookies anywhere — which also means no
   CSRF surface on the data routes: there is no ambient credential for a cross-site form to ride, a
   foreign origin cannot read another origin's `localStorage`, and it cannot make the browser attach an
@@ -86,7 +99,12 @@ Authorization service, all data routes under `/w/{world_id}/…`:
 | `GET /healthz` | unauthenticated, no world, no data |
 
 Orchestrator: `GET /console/*` unauthenticated assets; `POST /w/{w}/cases/{id}/messages`,
-`GET /w/{w}/cases/{id}/state`, `GET /w/{w}/models` all `role:case_officer`.
+`GET /w/{w}/cases/{id}/state`, `GET /w/{w}/models` all `role:case_officer`, authenticated with the
+orchestrator-audience derived credential rather than the authorization-service role credential.
+The bounded headless transport slice also exposes `POST /w/{w}/actions/execute` under that same
+orchestrator-audience credential. It accepts an already-frozen synthetic proposal solely to drive the
+cross-process gate/commit/effect path; it is not the case-dialogue API and does not complete the browser
+console contract.
 Services host: `POST /w/{w}/services/{service}/execute` `proc:orchestrator`;
 `GET /w/{w}/effects/{idempotency_key}` (read-only reconciliation probe) `proc:authz`; `GET /healthz` open.
 `commit-verify`, effect outcomes, and reconciliation probes carry both the current services-host boot id
@@ -146,8 +164,9 @@ enforced; and on authority-changing routes a **present** `Origin` header that is
 403. An *absent* `Origin` is allowed — that is a non-browser client, and beat 17's raw API client must
 reach the endpoint so the endpoint can refuse it on the merits rather than at the door.
 
-Consequence for the case console: it holds no role token and makes no credentialed call to the
-authorization service. It renders a pending question read-only from the orchestrator's non-authoritative
+Consequence for the case console: it holds no **authorization-service** role token and makes no credentialed
+call to the authorization service. Its orchestrator-audience credential is not accepted by the authorization
+service. It renders a pending question read-only from the orchestrator's non-authoritative
 mirror (§7) and links the responder to the governance origin to answer. It learns that an action may
 proceed from `GET /rulings/{id}`: that projection reports the ruling's status and, when an escalation's
 "allow within scope" disposition mints a successor, its `successor_ruling_id`.

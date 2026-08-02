@@ -12,6 +12,7 @@
 export * from './canonicalize.js';
 export * from './domain.js';
 export * from './hash.js';
+export * from './fileSetDigest.js';
 export * from './chain.js';
 export * from './keyring.js';
 export * from './servedModel.js';
@@ -23,6 +24,9 @@ export * from './policyLoader.js';
 export * from './evaluator.js';
 export * from './authorizationCore.js';
 export * from './authorizationHttpAdapter.js';
+export * from './authorizationHttpServer.js';
+export * from './authorizationProcess.js';
+export * from './runtimeCredentials.js';
 export * from './sweeper.js';
 export * from './tokenVerifier.js';
 export * from './cardRegistry.js';

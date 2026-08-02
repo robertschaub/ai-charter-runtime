@@ -14,7 +14,9 @@
     "probe": "node tooling/probe.mjs --lane all",
     "keys": "node tooling/keys.mjs",
     "cards:verify": "tsc -b && node tooling/cards.mjs verify all",
+    "runtime:start": "tsc -b && node --env-file=.env.local packages/consoles/dist/runtimeSupervisor.js",
     "typecheck": "tsc -b",
+    "pretest": "tsc -b",
     "test": "node --test tooling/git-safety-hook.test.cjs && vitest run"
   },
   "devDependencies": {

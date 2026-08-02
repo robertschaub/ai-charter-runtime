@@ -17,8 +17,9 @@ On any divergence, the specification and its linked Charter source documents pre
 - **Not an assurance or certification claim.** This demonstrates a runtime *mechanism*. Nothing here is
   "Charter-certified"; there is no green light, no trust API, no queryable certification (see [NOTICE](NOTICE)).
 - **Institutions are simulated — two roles are absent.** Rulemaker, operator, and record keeper are surfaces
-  played by one person; independent reviewer and remedy decider do not exist here. M3's vertical slice is
-  in-process; M4's same-machine process isolation will be separation of duties in miniature, not independence.
+  played by one person; independent reviewer and remedy decider do not exist here. M4 now has a native
+  three-process HTTP boundary, but same-machine process isolation is separation of duties in miniature,
+  not independence; the browser consoles remain unfinished.
 - **A deterministic gate proves declared rules were applied** — not that the rules are lawful, fair, or legitimate.
 - **Commit-token window (interpretive choice).** Commitment binds at `commit-verify`; a revocation landing in the
   token's short TTL is too late for that action by definition. On the stricter reading of "authority in flight",
@@ -42,7 +43,7 @@ On any divergence, the specification and its linked Charter source documents pre
 | `packages/gate-core/` | Authorization service — the independent gate (AGPL-3.0-only) | M2 |
 | `packages/adapters/` | OpenAI-compatible model adapters (MIT) | M3 |
 | `packages/services-mock/` | Executing services with commitment verification (MIT) | M3 |
-| `packages/consoles/` | M3 deterministic orchestrator slice; case + governance consoles (MIT) | M3–M4 |
+| `packages/consoles/` | M3 deterministic loop + M4 orchestrator HTTP process; browser consoles pending (MIT) | M3–M4 |
 | `fixtures/` | Synthetic grant-scenario data and pinned test fixtures (MIT) | M3+ |
 
 Licensing is per-directory — see [LICENSE.md](LICENSE.md).
@@ -56,3 +57,16 @@ node tooling/probe.mjs --lane all
 
 Results land in `docs/m0-probe-results.json` (gitignored); conclusions go into
 [docs/m0-probe-memo.md](docs/m0-probe-memo.md).
+
+## M4 native process boundary
+
+After `.env.local` contains the ADR-002 credentials and ADR-007 HMAC pair, start the local
+authorization, services, and orchestrator processes in fail-closed order with:
+
+```powershell
+npm run runtime:start
+```
+
+The supervisor passes each child only its scoped credentials and derives narrower audience tokens in
+memory. All three listeners bind to `127.0.0.1` by default. This is the headless transport slice: the
+governance console, case console, dialogue control, record viewer, and applicant extract remain M4 work.
