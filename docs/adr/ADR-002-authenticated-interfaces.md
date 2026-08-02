@@ -5,6 +5,8 @@
 
 **Amendment (M3 review follow-up, 2026-08-02):** authenticated HTTP adapters, not in-process actor guards, own access-denial evidence because only the adapters can attest the route and verified credential.
 
+**Amendment (M4 authority review follow-up, 2026-08-02):** the adapter passes schema-validated named route parameters to handlers and accepts a bare wildcard root such as `/console`. Unauthenticated ingress records only a bounded number of detailed 401s plus one 429 suppression marker per process window; authenticated refusals remain individually durable.
+
 ## Context
 
 Three OS processes make "the model proposes, a component outside the model decides, the executing service
@@ -77,6 +79,7 @@ Authorization service, all data routes under `/w/{world_id}/…`:
 | `GET /escalations/{id}` (display mirror, §7 projection) | `proc:orchestrator` (read-only), `role:principal`, `role:case_officer` |
 | `POST /escalations/{id}/disposition` | **the escalation's eligible role token only** |
 | `POST /escalations/{id}/response` (dialogue answer) | **the routed conversation partner's role token only** (ADR-004) |
+| `POST /escalations/{id}/revision` (continue after narrow/modify) | **`proc:orchestrator` only** |
 | `GET /records…` · `POST /records/verify` | `role:principal` (full), `role:case_officer` (case-scoped) |
 | `GET /extract` (server-side scoped applicant extract) | **`role:applicant` only** |
 | `GET /console/*` (governance console assets) | unauthenticated static assets, no data |
@@ -89,9 +92,9 @@ Services host: `POST /w/{w}/services/{service}/execute` `proc:orchestrator`;
 `commit-verify`, effect outcomes, and reconciliation probes carry both the current services-host boot id
 and the persistent services-ledger id; only absence under the same ledger id can release a commitment.
 
-**The orchestrator's credential appears on exactly four authorization-service routes** — proposal
-submission, ruling read, approved-model read, and the read-only escalation mirror ADR-004 §7 requires so
-the case console can render a pending question. Nothing else: it is denied on mandate
+**The orchestrator's credential appears on exactly five authorization-service routes** — proposal
+submission, revised-proposal continuation, ruling read, approved-model read, and the read-only escalation
+mirror ADR-004 §7 requires so the case console can render a pending question. Nothing else: it is denied on mandate
 grant/amend/revoke, escalation disposition, dialogue response, `commit-verify`, effect outcome, record
 read, verify, and extract. Reading escalation *state* is not authority-changing, and §7's projection
 bounds what that read returns. The orchestrator also never receives a commit token: the services host
@@ -100,13 +103,16 @@ obtains its own from `commit-verify` and never trusts the orchestrator's claim o
 ADR-004 writes the two escalation routes without their world prefix (`{AUTHZ_ORIGIN}/escalations/…`);
 the canonical form is the world-scoped one above.
 
-Denials are explicit and recorded: unknown or absent credential → 401; valid credential without route
-permission → 403. Both are written to the access-log chain — a rejected authority-changing attempt is
-evidence, so the POC prefers a recorded 403 over an obscuring 404.
+Denials are explicit: unknown or absent credential → 401, then 429 after the bounded detailed-evidence
+allowance; valid credential without route permission → 403. Authenticated refusals are written
+individually to the access-log chain. Unauthenticated floods are globally coalesced per process window:
+up to the configured detailed limit is written, followed by one suppression marker, so an attacker cannot
+turn durable evidence into an unbounded WAL/fsync workload.
 
 The authenticated HTTP adapter emits those entries because it knows the requested route and verified
 credential. Core actor guards are defence in depth and do not fabricate HTTP evidence; M4's adapter
 must append the denial before returning 401/403 without calling the core operation.
+For the coalesced unauthenticated case it appends the suppression marker before the first 429.
 
 ### 4. On-behalf-of is provenance, never authority
 
@@ -156,6 +162,8 @@ implicit fallback — a request without the segment is a 404. `world_id` matches
 `^[a-z0-9][a-z0-9-]{0,31}$`, which also makes it a safe path segment (no `.`, `..`, `/`, `\`), and the
 Windows reserved device names (`con`, `prn`, `aux`, `nul`, `com1`–`com9`, `lpt1`–`lpt9`) are rejected,
 because the world id becomes a directory name.
+Handlers receive only schema-validated named parameters (`world_id`, opaque `id`) from the adapter;
+wildcard tails are not promoted to authority inputs and must not be re-parsed from the raw pathname.
 
 - Every stored object carries `world_id` as its first field; a transaction touches exactly one world.
 - Storage is per world: `records/{world_id}/{wal,action,access}.jsonl` (ADR-003's three streams) and
@@ -212,7 +220,8 @@ out-of-scope one — and `commit-verify` refuses it again.
 **Deferred, by decision.** No rotation, expiry, refresh, or revocation list. No mTLS or signed
 inter-process requests — the process credential is a shared secret, and a local attacker who can read
 `.env.local` has everything. No per-user identity, directory, or audit of *who* holds a role token. No
-rate limiting beyond the body cap. The v1.1 sandbox needs a token-minting path and a world lifecycle
+general authenticated rate limiting beyond the body cap and the bounded unauthenticated-ingress control
+above. The v1.1 sandbox needs a token-minting path and a world lifecycle
 (create, expire, delete); this ADR reserves the seam and specifies nothing further.
 
 **Implementation follow-up.** `.env.local.example` must gain the six token variables, `RUNTIME_HOST`,

@@ -458,6 +458,7 @@ describe('schemas — accept the shapes the ADRs specify', () => {
       policy_version: '2026-08-01.3',
       ordering: 'deny-escalate-allow-then-priority',
       default_escalation_contract: validContract(),
+      aggregate_ceiling_contract: validContract(),
       recovery_escalation_contract: validContract(),
       escalation_pattern: {
         window_ms: 3_600_000,

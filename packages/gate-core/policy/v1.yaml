@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 # Derived from Our AI Charter by Robert Schaub, CC BY 4.0.
-policy_version: 2026-08-01.1
+policy_version: 2026-08-02.1
 ordering: deny-escalate-allow-then-priority
 
 default_escalation_contract:
@@ -10,6 +10,7 @@ default_escalation_contract:
     standing_class: own-permission
     competence_declared: Principal for the synthetic demo mandate (declared, not verified).
     independence_declared: Same-operator POC; no independent reviewer exists.
+    substitute_roles: []
     substitute_rule: No substitute may expand the mandate.
   decision_basis_shown: [proposal, mandate, policy]
   response_bound_and_default:
@@ -24,6 +25,28 @@ default_escalation_contract:
     record_events: [escalation_raised, disposition_recorded]
     feedback_consequence: Increment the escalation-pattern counter.
 
+aggregate_ceiling_contract:
+  trigger_and_state: { trigger: aggregate-ceiling, state: open }
+  decision_and_route:
+    eligible_role: principal
+    standing_class: own-permission
+    competence_declared: Principal for the synthetic demo mandate (declared, not verified).
+    independence_declared: Same-operator POC; no independent reviewer exists.
+    substitute_roles: []
+    substitute_rule: No substitute or disposition may raise a cumulative ceiling.
+  decision_basis_shown: [proposal, current-counter-values, mandate-ceilings]
+  response_bound_and_default:
+    response_bound_ms: 900000
+    safe_default:
+      kind: stop-remains
+      disposition: cancel
+      authority_basis: { kind: no-new-authority }
+      reversible: true
+  permitted_dispositions: [deny, narrow-or-modify, seek-review, cancel, route-to-remedy]
+  record_and_feedback:
+    record_events: [escalation_raised, disposition_recorded]
+    feedback_consequence: Require a narrower proposal or a separately amended mandate.
+
 recovery_escalation_contract:
   trigger_and_state: { trigger: effect-outcome-unknown, state: open }
   decision_and_route:
@@ -31,6 +54,7 @@ recovery_escalation_contract:
     standing_class: own-permission
     competence_declared: Principal for the synthetic demo mandate (declared, not verified).
     independence_declared: Same-operator POC; no independent recovery institution exists.
+    substitute_roles: []
     substitute_rule: Findings may resolve the record but cannot authorize another effect.
   decision_basis_shown: [commitment, service-probe-history, idempotency-key]
   response_bound_and_default:
@@ -87,6 +111,7 @@ rules:
         standing_class: own-permission
         competence_declared: Principal for the synthetic demo mandate (declared, not verified).
         independence_declared: Same-operator POC; no independent reviewer exists.
+        substitute_roles: []
         substitute_rule: A grant requires a separate mandate amendment.
       decision_basis_shown: [requested-tool, current-mandate]
       response_bound_and_default:
@@ -121,6 +146,7 @@ rules:
         standing_class: own-interpretation
         competence_declared: Assigned case officer (declared, not verified).
         independence_declared: Not independently verified in this POC.
+        substitute_roles: [principal]
         substitute_rule: The principal may take the decision over without expanding authority.
       decision_basis_shown: [screening-signal, suspect-item]
       response_bound_and_default:
@@ -152,6 +178,7 @@ rules:
         standing_class: own-interpretation
         competence_declared: Assigned case officer (declared, not verified).
         independence_declared: Not independently verified in this POC.
+        substitute_roles: [principal]
         substitute_rule: The principal may take the decision over without expanding authority.
       decision_basis_shown: [conflicting-records, frozen-proposal, mandate]
       response_bound_and_default:
@@ -180,6 +207,7 @@ rules:
         standing_class: own-permission
         competence_declared: Principal for the synthetic demo mandate (declared, not verified).
         independence_declared: Same-operator POC; no independent reviewer exists.
+        substitute_roles: []
         substitute_rule: No substitute may raise the ceiling.
       decision_basis_shown: [notification-volume, mandate-ceiling]
       response_bound_and_default:
@@ -202,6 +230,23 @@ rules:
     ux_class: silent
     reason_template: Registry retrieval is inside the current mandate.
 
+  - id: allow-grant-authorize
+    priority: 20
+    gate: authorize
+    matcher: { kind: field, source: mandate, path: [action_class], operator: eq, value: grant-filing }
+    verdict: allow
+    ux_class: silent
+    reason_template: The revised grant filing uses authority already present in the mandate.
+
+  - id: allow-grant-submit
+    priority: 20
+    gate: submit
+    matcher: { kind: field, source: mandate, path: [action_class], operator: eq, value: grant-filing }
+    verdict: allow
+    ux_class: silent
+    reason_template: The revised grant draft passed required screening for submission.
+    screening_required: true
+
   - id: allow-grant-verification
     priority: 20
     gate: verify
@@ -209,6 +254,7 @@ rules:
     verdict: allow
     ux_class: silent
     reason_template: The revised grant draft is within the current mandate and has no unresolved conflict signal.
+    screening_required: true
 
   - id: allow-grant-filing
     priority: 20

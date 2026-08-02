@@ -16,6 +16,7 @@ import {
   hexDigest,
   id,
   mandate,
+  role,
   timestamp,
   worldId,
   type CommitmentRecord,
@@ -111,8 +112,6 @@ export interface DisposeEscalationInput {
   readonly escalationId: string;
   readonly disposition: Disposition;
   readonly actor: TransactionActor;
-  /** Required only for narrow-or-modify; the next immutable revision of the same action. */
-  readonly revisedProposal?: FrozenProposal;
 }
 
 export type DisposeEscalationResult =
@@ -129,10 +128,34 @@ export type DisposeEscalationResult =
         | 'missing-escalation'
         | 'wrong-role'
         | 'disposition-not-permitted'
-        | 'revision-required'
-        | 'revision-not-permitted'
         | 'late-disposition';
       readonly terminalState?: 'disposed' | 'timed_out' | 'cancelled';
+      readonly recordEntryId: string | null;
+    };
+
+export interface ContinueEscalationRevisionInput {
+  readonly escalationId: string;
+  readonly proposal: FrozenProposal;
+  readonly actor: TransactionActor;
+  /** Authorization-service screening evidence over the revised frozen hash. */
+  readonly signals?: readonly ScreeningSignal[];
+  readonly screeningPerformed?: boolean;
+  readonly context?: Readonly<Record<string, unknown>>;
+}
+
+export type ContinueEscalationRevisionResult =
+  | {
+      readonly accepted: true;
+      readonly stages: readonly RuleProposalResult[];
+      readonly successor: RuleProposalResult;
+    }
+  | {
+      readonly accepted: false;
+      readonly defect:
+        | 'missing-escalation'
+        | 'wrong-state'
+        | 'revision-not-permitted'
+        | 'already-continued';
       readonly recordEntryId: string | null;
     };
 
@@ -140,7 +163,7 @@ export interface RecordAccessInput {
   readonly route: string;
   readonly authenticatedActor: CredentialLabel | null;
   readonly claimedActor: { readonly role: 'principal' | 'case_officer' | 'applicant' | null; readonly session?: string } | null;
-  readonly outcome: 'served' | 'unauthenticated' | 'forbidden';
+  readonly outcome: 'served' | 'unauthenticated' | 'forbidden' | 'rate-limited';
   readonly httpStatus: number;
   readonly recorder: TransactionActor;
   readonly readLengths?: Readonly<Record<string, number>>;
@@ -896,7 +919,11 @@ export class AuthorizationCore {
     input: RuleProposalInput,
     state: WorldState,
     at: string,
-    options: { readonly recordActor?: TransactionActor; readonly extraBasis?: readonly string[] } = {},
+    options: {
+      readonly recordActor?: TransactionActor;
+      readonly extraBasis?: readonly string[];
+      readonly authorizedAgentId?: string;
+    } = {},
   ): TransactionBuild<RuleProposalResult> {
     const proposal = input.proposal;
     const policy = this.#policy;
@@ -947,7 +974,7 @@ export class AuthorizationCore {
         policy,
         this.#keyring,
         at,
-        this.#resolveAuthorizedAgent(input.actor),
+        options.authorizedAgentId ?? this.#resolveAuthorizedAgent(input.actor),
         this.#resolveModelEvidenceFailClosed(proposal),
       );
       if (defects.defects.includes('stale-policy')) {
@@ -989,7 +1016,7 @@ export class AuthorizationCore {
               uxClass: 'stop' as const,
               matchedRuleId: 'default:aggregate-ceiling',
               reason: 'The proposal would cross a cumulative mandate ceiling.',
-              interventionContract: policy.policy.default_escalation_contract,
+              interventionContract: policy.policy.aggregate_ceiling_contract,
             }
           : policyEvaluation;
 
@@ -1002,7 +1029,8 @@ export class AuthorizationCore {
         evaluation.verdict === 'deny'
           ? ttlEnd
           : [ttlEnd, mandateExpiry, mandateWindowEnd].filter((value): value is string => value !== undefined).sort()[0] ?? ttlEnd;
-      const reserve = evaluation.verdict !== 'deny' && !wouldExceed;
+      // Only a Commit allow can bind capacity. Pre-commit gates are evidence, not commitments.
+      const reserve = input.gate === 'commit' && evaluation.verdict !== 'deny' && !wouldExceed;
       const reservations = reserve
         ? (Object.entries(deltas) as [CounterName, number][])
             .filter(([, delta]) => delta !== 0)
@@ -1196,9 +1224,6 @@ export class AuthorizationCore {
   async disposeEscalation(input: DisposeEscalationInput): Promise<DisposeEscalationResult> {
     const escalationId = id.parse(input.escalationId);
     const disposition = input.disposition;
-    const revisedProposal =
-      input.revisedProposal === undefined ? undefined : frozenProposal.parse(input.revisedProposal);
-    if (revisedProposal !== undefined) verifyProposalHash(revisedProposal);
 
     const completed = await this.#store.transactWithState<DisposeEscalationResult>(
       'escalation_dispose',
@@ -1306,33 +1331,45 @@ export class AuthorizationCore {
           };
         }
 
-        const eligibleCredential = `role:${escalation.contract.decision_and_route.eligible_role}`;
-        if (input.actor.credential !== eligibleCredential) {
-          return { ops: [], result: { accepted: false, defect: 'wrong-role', recordEntryId: null } };
-        }
+        const refuse = (
+          defect: 'wrong-role' | 'disposition-not-permitted',
+        ): TransactionBuild<DisposeEscalationResult> => {
+          const recordEntryId = this.#ids.next('rec');
+          return {
+            ops: [
+              {
+                op: 'record.action.append',
+                entry: escalationEventRecord(state, ruling, input.actor, recordEntryId, at, {
+                  event: 'human_intervention_event',
+                  escalation_id: escalationId,
+                  payload: {
+                    kind: 'disposition_refused',
+                    attempted_disposition: disposition,
+                    authenticated_actor: input.actor.credential,
+                    reason_code: defect === 'wrong-role' ? 'wrong_role' : 'disposition_not_permitted',
+                    at,
+                  },
+                }),
+              },
+            ],
+            result: { accepted: false, defect, recordEntryId },
+          };
+        };
+        const responderRole = input.actor.credential.startsWith('role:')
+          ? role.parse(input.actor.credential.slice('role:'.length))
+          : null;
+        const eligibleRoles = [
+          escalation.contract.decision_and_route.eligible_role,
+          ...escalation.contract.decision_and_route.substitute_roles,
+        ];
+        if (responderRole === null || !eligibleRoles.includes(responderRole)) return refuse('wrong-role');
         if (!escalation.contract.permitted_dispositions.includes(disposition)) {
-          return { ops: [], result: { accepted: false, defect: 'disposition-not-permitted', recordEntryId: null } };
-        }
-        if (disposition === 'narrow-or-modify' && revisedProposal === undefined) {
-          return { ops: [], result: { accepted: false, defect: 'revision-required', recordEntryId: null } };
-        }
-        if (disposition !== 'narrow-or-modify' && revisedProposal !== undefined) {
-          return { ops: [], result: { accepted: false, defect: 'revision-not-permitted', recordEntryId: null } };
+          return refuse('disposition-not-permitted');
         }
 
         const proposalId = state.proposalByHash.get(escalation.frozen_proposal_hash);
         const originalProposal = proposalId === undefined ? undefined : state.proposals.get(proposalId);
         if (originalProposal === undefined) throw new Error(`escalation ${escalationId} lost its proposal`);
-        if (
-          revisedProposal !== undefined &&
-          (revisedProposal.world_id !== originalProposal.world_id ||
-            revisedProposal.action_id !== originalProposal.action_id ||
-            revisedProposal.revision !== originalProposal.revision + 1 ||
-            revisedProposal.proposal_id === originalProposal.proposal_id)
-        ) {
-          return { ops: [], result: { accepted: false, defect: 'revision-not-permitted', recordEntryId: null } };
-        }
-
         const recordEntryId = this.#ids.next('rec');
         const route =
           disposition === 'seek-review' ? 'review' : disposition === 'route-to-remedy' ? 'remedy' : null;
@@ -1377,7 +1414,7 @@ export class AuthorizationCore {
               payload: {
                 kind: 'disposition_recorded',
                 disposition,
-                responder_role: escalation.contract.decision_and_route.eligible_role,
+                responder_role: responderRole,
                 at,
               },
             },
@@ -1404,12 +1441,7 @@ export class AuthorizationCore {
           });
         }
 
-        const successorProposal =
-          disposition === 'allow-within-scope'
-            ? originalProposal
-            : disposition === 'narrow-or-modify'
-              ? revisedProposal
-              : undefined;
+        const successorProposal = disposition === 'allow-within-scope' ? originalProposal : undefined;
         if (successorProposal === undefined) {
           return {
             ops,
@@ -1418,27 +1450,39 @@ export class AuthorizationCore {
         }
 
         applyWorldTransaction(state, ops, at);
+        const sourceRecord = state.actionRecords.find((entry) => {
+          const recordedRuling = state.rulings.get(entry.admissibility_decision.ruling_id);
+          return (
+            entry.authenticated_actor === 'proc:orchestrator' &&
+            recordedRuling?.binding.frozen_proposal_hash === ruling.binding.frozen_proposal_hash
+          );
+        });
+        if (sourceRecord === undefined) throw new Error(`ruling ${ruling.ruling_id} lost its action record`);
+        const originalActor: TransactionActor = {
+          credential: sourceRecord.authenticated_actor,
+          claimed_role: sourceRecord.claimed_actor?.role ?? null,
+        };
         const successorBuild = this.#buildRuling(
           {
             gate: ruling.gate,
             proposal: successorProposal,
             service: ruling.binding.service,
             actionClass: ruling.binding.action_class,
-            actor: { credential: 'proc:orchestrator', claimed_role: null },
+            actor: { credential: 'proc:authz', claimed_role: null },
             context: { intervention_disposition: disposition, intervention_escalation_id: escalationId },
             signals:
-              disposition === 'allow-within-scope'
-                ? ruling.evidence_refs.filter(
-                    (entry): entry is ScreeningSignal => entry.kind === 'screening_signal',
-                  )
-                : [],
-            screeningPerformed:
-              disposition === 'allow-within-scope' &&
-              ruling.evidence_refs.some((entry) => entry.kind === 'screening_signal'),
+              ruling.evidence_refs.filter(
+                (entry): entry is ScreeningSignal => entry.kind === 'screening_signal',
+              ),
+            screeningPerformed: ruling.evidence_refs.some((entry) => entry.kind === 'screening_signal'),
           },
           state,
           at,
-          { recordActor: { credential: 'proc:authz', claimed_role: null }, extraBasis: [recordEntryId] },
+          {
+            recordActor: { credential: 'proc:authz', claimed_role: null },
+            extraBasis: [recordEntryId],
+            authorizedAgentId: this.#resolveAuthorizedAgent(originalActor),
+          },
         );
         const successorId = successorBuild.result.ruling.ruling_id;
         return {
@@ -1456,6 +1500,140 @@ export class AuthorizationCore {
             reviewObligationId,
           },
         };
+      },
+    );
+    return completed.result;
+  }
+
+  async continueEscalationRevision(
+    input: ContinueEscalationRevisionInput,
+  ): Promise<ContinueEscalationRevisionResult> {
+    if (input.actor.credential !== 'proc:orchestrator') {
+      throw new AuthorizationError(
+        'unauthorized-actor',
+        'only the orchestrator may submit a revised proposal after intervention',
+      );
+    }
+    const escalationId = id.parse(input.escalationId);
+    const proposal = frozenProposal.parse(input.proposal);
+    verifyProposalHash(proposal);
+    const completed = await this.#store.transactWithState<ContinueEscalationRevisionResult>(
+      'escalation_revision_continue',
+      input.actor,
+      (state, at) => {
+        const escalation = state.escalations.get(escalationId);
+        if (escalation === undefined) {
+          return { ops: [], result: { accepted: false, defect: 'missing-escalation', recordEntryId: null } };
+        }
+        const sourceRuling = state.rulings.get(escalation.ruling_id);
+        if (sourceRuling === undefined) throw new Error(`escalation ${escalationId} lost its ruling`);
+        const refuse = (
+          defect: 'wrong-state' | 'revision-not-permitted' | 'already-continued',
+        ): TransactionBuild<ContinueEscalationRevisionResult> => {
+          const recordEntryId = this.#ids.next('rec');
+          return {
+            ops: [
+              {
+                op: 'record.action.append',
+                entry: escalationEventRecord(state, sourceRuling, input.actor, recordEntryId, at, {
+                  event: 'human_intervention_event',
+                  escalation_id: escalationId,
+                  payload: {
+                    kind: 'revision_continuation_refused',
+                    proposal_id: proposal.proposal_id,
+                    authenticated_actor: input.actor.credential,
+                    reason_code:
+                      defect === 'wrong-state'
+                        ? 'wrong_state'
+                        : defect === 'revision-not-permitted'
+                          ? 'revision_not_permitted'
+                          : 'already_continued',
+                    at,
+                  },
+                }),
+              },
+            ],
+            result: { accepted: false, defect, recordEntryId },
+          };
+        };
+        if (escalation.state !== 'disposed' || escalation.terminal_disposition !== 'narrow-or-modify') {
+          return refuse('wrong-state');
+        }
+        if (escalation.successor_ruling_id !== null) return refuse('already-continued');
+        const originalId = state.proposalByHash.get(escalation.frozen_proposal_hash);
+        const original = originalId === undefined ? undefined : state.proposals.get(originalId);
+        if (
+          original === undefined ||
+          proposal.world_id !== original.world_id ||
+          proposal.action_id !== original.action_id ||
+          proposal.revision !== original.revision + 1 ||
+          proposal.proposal_id === original.proposal_id
+        ) {
+          return refuse('revision-not-permitted');
+        }
+        const dispositionRecord = state.actionRecords.find(
+          (entry) =>
+            entry.human_intervention_event?.event === 'human_intervention_event' &&
+            entry.human_intervention_event.escalation_id === escalationId &&
+            entry.human_intervention_event.payload.kind === 'disposition_recorded' &&
+            entry.human_intervention_event.payload.disposition === 'narrow-or-modify',
+        );
+        if (dispositionRecord === undefined) {
+          throw new Error(`escalation ${escalationId} lost its disposition record`);
+        }
+
+        const ops: WalOp[] = [];
+        const stages: RuleProposalResult[] = [];
+        for (const gate of ['authorize', 'submit', 'verify'] as const) {
+          const screened = gate === 'submit' || gate === 'verify';
+          const build = this.#buildRuling(
+            {
+              gate,
+              proposal,
+              service: sourceRuling.binding.service,
+              actionClass: sourceRuling.binding.action_class,
+              actor: input.actor,
+              context: {
+                ...(input.context ?? {}),
+                intervention_disposition: 'narrow-or-modify',
+                intervention_escalation_id: escalationId,
+              },
+              signals: screened ? input.signals ?? [] : [],
+              screeningPerformed: screened ? input.screeningPerformed ?? false : false,
+            },
+            state,
+            at,
+            { extraBasis: [dispositionRecord.entry_id] },
+          );
+          ops.push(...build.ops);
+          stages.push(build.result);
+          // #buildRuling has already projected proposal-revision invalidations into this
+          // disposable snapshot for counter evaluation. Project only the remaining ops.
+          const projectionOps = build.ops.filter(
+            (op) =>
+              !(
+                (op.op === 'ruling.invalidate' || op.op === 'reservation.release') &&
+                op.reason === 'proposal-revision'
+              ),
+          );
+          applyWorldTransaction(state, projectionOps, at);
+          if (build.result.ruling.verdict !== 'allow') break;
+        }
+        const successor = stages.at(-1);
+        if (successor === undefined) throw new Error('revision continuation produced no ruling');
+        ops.push(
+          {
+            op: 'ruling.link_successor',
+            ruling_id: sourceRuling.ruling_id,
+            successor_ruling_id: successor.ruling.ruling_id,
+          },
+          {
+            op: 'escalation.link_successor',
+            escalation_id: escalationId,
+            successor_ruling_id: successor.ruling.ruling_id,
+          },
+        );
+        return { ops, result: { accepted: true, stages, successor } };
       },
     );
     return completed.result;

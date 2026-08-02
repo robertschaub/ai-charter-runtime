@@ -18,6 +18,7 @@ import {
   loadPolicyFile,
   WalStore,
   type DisposeEscalationResult,
+  type ContinueEscalationRevisionResult,
   type Mandate,
   type RuleProposalResult,
 } from 'gate-core';
@@ -177,13 +178,12 @@ describe('M4 headless escalation slice', () => {
         authorization: `Bearer ${'2'.repeat(64)}`,
         origin: 'http://127.0.0.1:7801',
       },
-      async ({ actor }) => {
+      async ({ actor, params }) => {
         if (actor === null) throw new Error('expected case-officer actor');
         const disposed = await authorization.disposeEscalation({
-          escalationId,
+          escalationId: params.id ?? 'missing',
           disposition: 'narrow-or-modify',
           actor,
-          revisedProposal: revised,
         });
         return { status: disposed.accepted ? 200 : 422, body: disposed };
       },
@@ -191,7 +191,36 @@ describe('M4 headless escalation slice', () => {
     if ('error' in dispositionResponse.body) throw new Error(dispositionResponse.body.error);
     expect(dispositionResponse.body).toMatchObject({
       accepted: true,
-      successor: { ruling: { gate: 'verify', verdict: 'allow' } },
+      successor: null,
+    });
+
+    const continuationResponse = await adapter.dispatch<ContinueEscalationRevisionResult>(
+      {
+        method: 'POST',
+        pathname: `/w/w-demo/escalations/${escalationId}/revision`,
+        authorization: `Bearer ${'4'.repeat(64)}`,
+        origin: 'http://127.0.0.1:7801',
+      },
+      async ({ actor, params }) => {
+        if (actor === null) throw new Error('expected orchestrator actor');
+        const continued = await authorization.continueEscalationRevision({
+          escalationId: params.id ?? 'missing',
+          proposal: revised,
+          actor,
+          signals: [],
+          screeningPerformed: true,
+        });
+        return { status: continued.accepted ? 200 : 422, body: continued };
+      },
+    );
+    if ('error' in continuationResponse.body) throw new Error(continuationResponse.body.error);
+    expect(continuationResponse.body).toMatchObject({
+      accepted: true,
+      stages: [
+        { ruling: { gate: 'authorize', verdict: 'allow' } },
+        { ruling: { gate: 'submit', verdict: 'allow' } },
+        { ruling: { gate: 'verify', verdict: 'allow' } },
+      ],
     });
 
     const commitResponse = await adapter.dispatch<RuleProposalResult>(

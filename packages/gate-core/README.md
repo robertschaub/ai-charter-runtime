@@ -17,7 +17,9 @@ M3 adds server-owned signed-card verification, approved-model selection records,
 adoption, and the unknown/absent crash-reconciliation transitions. The recovery owner and six-field
 contract are pinned into the commitment before effect.
 
-The first M4 slice adds the deny-by-default authenticated route adapter with durable denial evidence,
-atomic single-use escalation dispositions and timeout races, successor rulings for revised proposals,
-and durable review obligations. Native HTTP process wrappers and browser consoles remain to be built.
+The first M4 slice adds the deny-by-default authenticated route adapter with bounded denial evidence,
+atomic single-use escalation dispositions and timeout races, orchestrator-only revised-proposal
+continuation through all pre-commit gates, enforceable substitute roles, non-overridable aggregate-ceiling
+contracts, refusal events, and durable review obligations. Native HTTP process wrappers and browser
+consoles remain to be built.
 Run `npm test` and `npm run typecheck` from the repository root.

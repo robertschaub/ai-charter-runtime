@@ -126,6 +126,13 @@ export const AUTHORIZATION_ROUTES = [
     authorityChanging: true,
   },
   {
+    id: 'escalation.revise',
+    method: 'POST',
+    template: '/w/{world_id}/escalations/{id}/revision',
+    allowed: ['proc:orchestrator'],
+    authorityChanging: true,
+  },
+  {
     id: 'records.verify',
     method: 'POST',
     template: '/w/{world_id}/records/verify',
@@ -164,6 +171,8 @@ export interface AuthorizationAdapterContext {
   readonly routeId: string;
   readonly worldId: string | null;
   readonly actor: TransactionActor | null;
+  /** Named route parameters, schema-validated by the adapter; wildcard tails are excluded. */
+  readonly params: Readonly<Record<string, string>>;
 }
 
 export interface AuthorizationOperationResult<T> {
@@ -174,7 +183,7 @@ export interface AuthorizationOperationResult<T> {
 
 export interface AuthorizationAdapterResponse<T> {
   readonly status: number;
-  readonly body: T | { readonly error: 'not-found' | 'unauthenticated' | 'forbidden' };
+  readonly body: T | { readonly error: 'not-found' | 'unauthenticated' | 'forbidden' | 'rate-limited' };
   readonly routeId: string | null;
 }
 
@@ -184,12 +193,15 @@ export interface AuthorizationHttpAdapterOptions {
   readonly demoWorldId: string;
   readonly credentials: readonly CredentialBinding[];
   readonly registeredRouteIds?: readonly string[];
+  readonly unauthenticatedDetailLimit?: number;
+  readonly unauthenticatedWindowMs?: number;
+  readonly nowMilliseconds?: () => number;
 }
 
 interface CompiledRoute {
   readonly definition: RouteDefinition;
   readonly pattern: RegExp;
-  readonly worldCapture: number | null;
+  readonly captures: readonly { readonly name: 'world_id' | 'id'; readonly index: number }[];
 }
 
 function escapeRegex(value: string): string {
@@ -198,22 +210,25 @@ function escapeRegex(value: string): string {
 
 function compileRoute(definition: RouteDefinition): CompiledRoute {
   const segments = definition.template.split('/').slice(1);
+  const wildcard = segments.at(-1) === '*';
+  const matchedSegments = wildcard ? segments.slice(0, -1) : segments;
   let capture = 0;
-  let worldCapture: number | null = null;
-  const parts = segments.map((segment, index) => {
-    if (segment === '*' && index === segments.length - 1) return '(?:.*)?';
+  const captures: { name: 'world_id' | 'id'; index: number }[] = [];
+  const parts = matchedSegments.map((segment) => {
     if (segment === '{world_id}') {
       capture += 1;
-      worldCapture = capture;
+      captures.push({ name: 'world_id', index: capture });
       return '([^/]+)';
     }
     if (segment === '{id}') {
       capture += 1;
+      captures.push({ name: 'id', index: capture });
       return '([^/]+)';
     }
     return escapeRegex(segment);
   });
-  return { definition, pattern: new RegExp(`^/${parts.join('/')}$`), worldCapture };
+  const wildcardSuffix = wildcard ? '(?:/.*)?' : '';
+  return { definition, pattern: new RegExp(`^/${parts.join('/')}${wildcardSuffix}$`), captures };
 }
 
 function bearerToken(value: string | undefined): string | null {
@@ -262,6 +277,12 @@ export class AuthorizationHttpAdapter {
   readonly #demoWorldId: string;
   readonly #credentials: readonly CredentialBinding[];
   readonly #routes = AUTHORIZATION_ROUTES.map(compileRoute);
+  readonly #unauthenticatedDetailLimit: number;
+  readonly #unauthenticatedWindowMs: number;
+  readonly #nowMilliseconds: () => number;
+  #unauthenticatedWindowStart: number;
+  #unauthenticatedDetailedCount = 0;
+  #unauthenticatedSuppressionRecorded = false;
 
   constructor(options: AuthorizationHttpAdapterOptions) {
     this.#authorization = options.authorization;
@@ -280,6 +301,19 @@ export class AuthorizationHttpAdapter {
     const tokens = options.credentials.map((binding) => binding.token.toLowerCase());
     if (new Set(tokens).size !== tokens.length) throw new Error('authorization credentials must be mutually distinct');
     this.#credentials = [...options.credentials];
+    this.#unauthenticatedDetailLimit = options.unauthenticatedDetailLimit ?? 8;
+    this.#unauthenticatedWindowMs = options.unauthenticatedWindowMs ?? 1_000;
+    this.#nowMilliseconds = options.nowMilliseconds ?? Date.now;
+    if (!Number.isSafeInteger(this.#unauthenticatedDetailLimit) || this.#unauthenticatedDetailLimit < 1) {
+      throw new RangeError('unauthenticatedDetailLimit must be a positive safe integer');
+    }
+    if (!Number.isSafeInteger(this.#unauthenticatedWindowMs) || this.#unauthenticatedWindowMs < 1) {
+      throw new RangeError('unauthenticatedWindowMs must be a positive safe integer');
+    }
+    this.#unauthenticatedWindowStart = this.#nowMilliseconds();
+    if (!Number.isSafeInteger(this.#unauthenticatedWindowStart)) {
+      throw new RangeError('nowMilliseconds must return a safe integer');
+    }
     assertAuthorizationRouteCoverage(options.registeredRouteIds ?? AUTHORIZATION_ROUTES.map((route) => route.id));
   }
 
@@ -295,12 +329,20 @@ export class AuthorizationHttpAdapter {
       return { status: 404, body: { error: 'not-found' }, routeId: null };
     }
     const route = matched.route.definition;
-    const requestedWorld =
-      matched.route.worldCapture === null ? null : matched.match[matched.route.worldCapture] ?? null;
+    const params: Record<string, string> = {};
+    for (const capture of matched.route.captures) {
+      const value = matched.match[capture.index];
+      const schema = capture.name === 'world_id' ? worldId : id;
+      const parsed = schema.safeParse(value);
+      if (!parsed.success) return { status: 404, body: { error: 'not-found' }, routeId: route.id };
+      params[capture.name] = parsed.data;
+    }
+    const validatedParams = Object.freeze(params);
+    const requestedWorld = validatedParams['world_id'] ?? null;
     const routeLabel = `${route.method} ${route.template}`;
 
     if (route.allowed === 'open') {
-      const result = await operation({ routeId: route.id, worldId: null, actor: null });
+      const result = await operation({ routeId: route.id, worldId: null, actor: null, params: validatedParams });
       return { status: result.status, body: result.body, routeId: route.id };
     }
 
@@ -324,7 +366,31 @@ export class AuthorizationHttpAdapter {
       return { status, body: { error }, routeId: route.id };
     };
 
-    if (binding === undefined || actor === null) return deny(401, 'unauthenticated');
+    if (binding === undefined || actor === null) {
+      const now = this.#nowMilliseconds();
+      if (!Number.isSafeInteger(now)) throw new RangeError('nowMilliseconds must return a safe integer');
+      if (now < this.#unauthenticatedWindowStart || now - this.#unauthenticatedWindowStart >= this.#unauthenticatedWindowMs) {
+        this.#unauthenticatedWindowStart = now;
+        this.#unauthenticatedDetailedCount = 0;
+        this.#unauthenticatedSuppressionRecorded = false;
+      }
+      if (this.#unauthenticatedDetailedCount < this.#unauthenticatedDetailLimit) {
+        this.#unauthenticatedDetailedCount += 1;
+        return deny(401, 'unauthenticated');
+      }
+      if (!this.#unauthenticatedSuppressionRecorded) {
+        this.#unauthenticatedSuppressionRecorded = true;
+        await this.#authorization.recordAccess({
+          route: 'AUTHZ unauthenticated ingress',
+          authenticatedActor: null,
+          claimedActor: null,
+          outcome: 'rate-limited',
+          httpStatus: 429,
+          recorder: { credential: 'proc:authz', claimed_role: null },
+        });
+      }
+      return { status: 429, body: { error: 'rate-limited' }, routeId: route.id };
+    }
     if (requestedWorld === null || !worldId.safeParse(requestedWorld).success) return deny(403, 'forbidden');
     if (binding.worldId !== requestedWorld || requestedWorld !== this.#demoWorldId) return deny(403, 'forbidden');
     if (!route.allowed.includes(binding.label)) return deny(403, 'forbidden');
@@ -332,7 +398,7 @@ export class AuthorizationHttpAdapter {
       return deny(403, 'forbidden');
     }
 
-    const result = await operation({ routeId: route.id, worldId: requestedWorld, actor });
+    const result = await operation({ routeId: route.id, worldId: requestedWorld, actor, params: validatedParams });
     if (result.status === 401 || result.status === 403 || result.status === 422 || route.accessLoggedOnServe === true) {
       await this.#authorization.recordAccess({
         route: routeLabel,

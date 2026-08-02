@@ -91,6 +91,11 @@ export const interventionContract = z
         /** Declared, not verified — ADR-002 §8's stated limit. */
         competence_declared: z.string().min(1),
         independence_declared: z.string().min(1),
+        /** Exact additional roles accepted by the authorization service. */
+        substitute_roles: z
+          .array(role)
+          .default([])
+          .refine((values) => new Set(values).size === values.length, 'substitute roles must be unique'),
         substitute_rule: z.string().min(1),
       })
       .strict(),
@@ -129,6 +134,13 @@ export const interventionContract = z
         code: z.ZodIssueCode.custom,
         path: ['permitted_dispositions'],
         message: 'general and dialogue dispositions must not be mixed in one escalation',
+      });
+    }
+    if (contract.decision_and_route.substitute_roles.includes(contract.decision_and_route.eligible_role)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['decision_and_route', 'substitute_roles'],
+        message: 'the eligible role must not also be listed as a substitute',
       });
     }
     const fallback = contract.response_bound_and_default.safe_default.disposition;

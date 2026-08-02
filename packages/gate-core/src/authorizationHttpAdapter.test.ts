@@ -44,7 +44,15 @@ afterEach(() => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
 
-function setup(options: { credentials?: readonly CredentialBinding[]; registeredRouteIds?: readonly string[] } = {}) {
+function setup(
+  options: {
+    credentials?: readonly CredentialBinding[];
+    registeredRouteIds?: readonly string[];
+    unauthenticatedDetailLimit?: number;
+    unauthenticatedWindowMs?: number;
+    nowMilliseconds?: () => number;
+  } = {},
+) {
   const root = mkdtempSync(join(tmpdir(), 'authz-http-m4-'));
   roots.push(root);
   const policy = loadPolicyFile(POLICY_FILE, BUILD_DIGEST);
@@ -78,6 +86,9 @@ function setup(options: { credentials?: readonly CredentialBinding[]; registered
     demoWorldId: 'w-demo',
     credentials: options.credentials ?? credentials,
     registeredRouteIds: options.registeredRouteIds,
+    unauthenticatedDetailLimit: options.unauthenticatedDetailLimit,
+    unauthenticatedWindowMs: options.unauthenticatedWindowMs,
+    nowMilliseconds: options.nowMilliseconds,
   });
   return { adapter, store };
 }
@@ -107,6 +118,28 @@ describe('ADR-002 authorization HTTP adapter', () => {
         outcome: 'unauthenticated',
         http_status: 401,
       }),
+    ]);
+  });
+
+  it('bounds unauthenticated denial evidence to detailed entries plus one suppression marker per window', async () => {
+    const { adapter, store } = setup({
+      unauthenticatedDetailLimit: 2,
+      unauthenticatedWindowMs: 1_000,
+      nowMilliseconds: () => 1_000,
+    });
+    const operation = vi.fn(async () => ({ status: 200, body: { ok: true } }));
+    const responses = await Promise.all(
+      Array.from({ length: 20 }, () =>
+        adapter.dispatch({ method: 'POST', pathname: '/w/w-demo/proposals' }, operation),
+      ),
+    );
+    expect(responses.slice(0, 2).map((response) => response.status)).toEqual([401, 401]);
+    expect(responses.slice(2).every((response) => response.status === 429)).toBe(true);
+    expect(operation).not.toHaveBeenCalled();
+    expect(store.snapshot().accessRecords).toEqual([
+      expect.objectContaining({ outcome: 'unauthenticated', http_status: 401 }),
+      expect.objectContaining({ outcome: 'unauthenticated', http_status: 401 }),
+      expect.objectContaining({ route: 'AUTHZ unauthenticated ingress', outcome: 'rate-limited', http_status: 429 }),
     ]);
   });
 
@@ -193,7 +226,7 @@ describe('ADR-002 authorization HTTP adapter', () => {
         pathname: '/w/w-demo/escalations/esc_1/disposition',
         authorization: `Bearer ${'2'.repeat(64)}`,
       },
-      async () => ({ status: 403, body: { defect: 'wrong-role' } }),
+      async ({ params }) => ({ status: 403, body: { defect: 'wrong-role', escalation_id: params.id } }),
     );
     await adapter.dispatch(
       {
@@ -207,6 +240,26 @@ describe('ADR-002 authorization HTTP adapter', () => {
       expect.objectContaining({ outcome: 'forbidden', http_status: 403 }),
       expect.objectContaining({ outcome: 'served', http_status: 200, read_lengths: { action: 0, access: 1 } }),
     ]);
+  });
+
+  it('matches the bare console path and supplies only validated named parameters', async () => {
+    const { adapter } = setup();
+    const consoleOperation = vi.fn(async ({ params }) => ({ status: 200, body: { params } }));
+    await expect(adapter.dispatch({ method: 'GET', pathname: '/console' }, consoleOperation)).resolves.toMatchObject({
+      status: 200,
+      body: { params: {} },
+    });
+    const recordOperation = vi.fn(async ({ params }) => ({ status: 200, body: { params } }));
+    await expect(
+      adapter.dispatch(
+        {
+          method: 'GET',
+          pathname: '/w/w-demo/records',
+          authorization: `Bearer ${'1'.repeat(64)}`,
+        },
+        recordOperation,
+      ),
+    ).resolves.toMatchObject({ status: 200, body: { params: { world_id: 'w-demo' } } });
   });
 
   it('returns 404 for an unregistered route without invoking or fabricating evidence', async () => {

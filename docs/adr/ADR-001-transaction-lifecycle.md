@@ -5,7 +5,9 @@
 
 **Amendment (M3 review, 2026-08-01):** a restart probe that proves the same ledger has no effect records `no-effect`, not `failed`; only an executed effect may have a `failed` outcome. Commitments pin a persistent services-ledger id so replacement storage cannot masquerade as proof of absence.
 
-**Amendment (M3 review follow-up, 2026-08-02):** M4 successor rulings use a private authorization-service entry point; terminal `no-effect` remains append-only and is corrected only by linked review evidence.
+**Amendment (M3 review follow-up, 2026-08-02):** M4's unchanged-proposal `allow within scope` successor uses a private authorization-service entry point; terminal `no-effect` remains append-only and is corrected only by linked review evidence.
+
+**Amendment (M4 authority review follow-up, 2026-08-02):** `narrow / modify` records and consumes the human disposition without accepting a replacement proposal. The authenticated orchestrator must then submit the next frozen revision through Authorize → Submit → Verify; required screening is re-performed over that hash, and only a later Commit allow may reserve counters.
 
 ## Context
 
@@ -215,7 +217,7 @@ created and the action fails closed.
 | Disposition | Next state | Effect on the transaction graph |
 |---|---|---|
 | allow within scope | `disposed` | Re-runs the evaluator against the *unchanged* frozen proposal and the *current* mandate; on `allow` it mints a **fresh** ruling with a new nonce and a new reservation, linking the human-intervention event as basis. It never bypasses evaluation and never widens the mandate; an out-of-scope approval is refused at issuance and, defence in depth, at `commit-verify` (beat 17). An `escalate` ruling never becomes a commitment. |
-| narrow / modify; dialogue confirm / correct | `disposed` | New proposal revision → all gates re-run → new frozen hash, new ruling. |
+| narrow / modify; dialogue confirm / correct | `disposed` | The disposition itself creates no authority. The orchestrator submits the next immutable revision through Authorize → Submit → Verify, with screening re-run over the new hash; the terminal pre-commit ruling is linked as successor. |
 | deny / cancel | `disposed` | Terminal; the reservation is `released`. |
 | seek review / route to remedy | `disposed` | Recorded routing obligation, case parked; reservation `released`. No independent institution exists (spec §3). |
 | timeout | `timed_out` | Only the declared fallback, which must itself lie within existing authority; if the fallback acts it is a new proposal. Otherwise the Stop remains and the reservation is `released`. |
@@ -227,6 +229,10 @@ none issues a ruling directly, and their timeout default is `abstain` or `narrow
 M4 implements the `allow within scope` successor as a private authorization-service operation invoked
 only by the authenticated disposition transaction after it consumes the escalation. It reuses the
 evaluator; the public orchestrator-only proposal endpoint is not widened to manufacture successors.
+The authorization service derives the authorized-agent check from the original authenticated submission
+record; it does not fabricate an orchestrator actor. Revised proposals use the separate orchestrator-only
+continuation route and carry the human disposition record as basis through each pre-commit gate. A
+wrong-state, malformed-sequence, or duplicate continuation is a recorded refusal, not an invisible no-op.
 
 ### 8. Time, expiry, and the sweeper
 

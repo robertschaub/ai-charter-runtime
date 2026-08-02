@@ -11,5 +11,6 @@ gate paths, and the browser consoles remain M4–M5 work; until then the keyring
 inside this test harness rather than isolated by process credentials.
 
 The first headless M4 test now exercises beat 3 through the authenticated adapter: Verify escalation,
-direct case-officer narrowing, revised Verify and Commit rulings, commitment, effect, and outcome. It is
-still an in-process test; process wrappers and the governance/case browser surfaces remain M4 work.
+direct case-officer narrowing, orchestrator continuation through Authorize, Submit, and Verify, then a
+fresh Commit ruling, commitment, effect, and outcome. It is still an in-process test; process wrappers
+and the governance/case browser surfaces remain M4 work.

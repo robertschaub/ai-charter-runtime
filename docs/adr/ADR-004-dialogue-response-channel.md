@@ -3,6 +3,8 @@
 
 **Status:** accepted (M1, 2026-08-01). **Spec:** §5 (empathy layer; dialogue triggers), §4 (intervention contract), §3 (consoles, demo authentication), §7 beat 4.
 
+**Amendment (M4 authority review follow-up, 2026-08-02):** `decision_and_route.substitute_roles` is the exact machine-enforced substitute set; `substitute_rule` remains explanatory text. Wrong-role and disposition-outside-set attempts append refusal events while leaving the escalation open.
+
 ## Context
 A dialogue trigger is an ordinary escalation routed to the conversation partner — same single-use state machine, same six-field intervention contract — but two boundary rules constrain the channel. The answer posts **directly from the browser to the authorization service** under the responder's role token, from a control served by the **authorization service's own origin**, so the orchestrator neither serves the credential-bearing control nor carries the answer. And standing is **evidentiary, not managerial**: a responder answers only within their own standing; a third party's facts are resolved by cited evidence or routed to that party, never by bare assertion.
 
@@ -47,7 +49,7 @@ Covered by ADR-002's design rather than re-solved here: no cookie authenticates 
 **Deviation, flagged:** the leaning's five-value set is extended with `route`. Beat 4 requires that confirmation of a third party's fact be satisfiable by "cited evidence **or** routing to the applicant", and `abstain` does not carry that obligation — it leaves nothing pending, whereas `route` opens a recorded routing obligation and a fresh escalation to the named role. Without it the refusal path has no affirmative exit.
 
 ### 5. Standing and the bare-confirm refusal
-The intervention contract's route field is parameterized (policy-rule level, no new record fields) with `standing_class ∈ { own-testimony, own-interpretation, own-permission, third-party-fact }`, derived when the escalation is raised: items the responder authored in the `said` store → own-testimony; inferences drawn from the responder's own statements → own-interpretation; entries in the `permitted` store → own-permission; anything asserting a fact about another party, or resting on another party's record, → third-party-fact. The derivation reads each item's `origin_actor` (ADR-005 §3): the responder's own items → the own-* classes; anything asserting a fact about, or resting on the items or records of, another actor → `third-party-fact`. Fixtures set `origin_actor` at the entry boundary.
+The intervention contract's route field is parameterized (policy-rule level, no new record fields) with `standing_class ∈ { own-testimony, own-interpretation, own-permission, third-party-fact }` and an exact `substitute_roles` list. The prose `substitute_rule` explains the constraint but grants nothing. Standing is derived when the escalation is raised: items the responder authored in the `said` store → own-testimony; inferences drawn from the responder's own statements → own-interpretation; entries in the `permitted` store → own-permission; anything asserting a fact about another party, or resting on another party's record, → third-party-fact. The derivation reads each item's `origin_actor` (ADR-005 §3): the responder's own items → the own-* classes; anything asserting a fact about, or resting on the items or records of, another actor → `third-party-fact`. Fixtures set `origin_actor` at the entry boundary.
 
 Enforcement is in the **endpoint**, not the UI, because beat 17's raw API client bypasses the console:
 

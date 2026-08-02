@@ -87,6 +87,20 @@ export const humanInterventionEvent = z.object({
       at: timestamp,
     }).strict(),
     z.object({
+      kind: z.literal('disposition_refused'),
+      attempted_disposition: disposition,
+      authenticated_actor: credentialLabel,
+      reason_code: z.enum(['wrong_role', 'disposition_not_permitted']),
+      at: timestamp,
+    }).strict(),
+    z.object({
+      kind: z.literal('revision_continuation_refused'),
+      proposal_id: id,
+      authenticated_actor: credentialLabel,
+      reason_code: z.enum(['wrong_state', 'revision_not_permitted', 'already_continued']),
+      at: timestamp,
+    }).strict(),
+    z.object({
       kind: z.literal('dialogue_trigger_raised'),
       contract: interventionContract,
       standing_class: standingClass,
@@ -216,7 +230,7 @@ export const accessEntry = z.object({
   /** Null when no bearer credential could be authenticated. */
   authenticated_actor: credentialLabel.nullable(),
   claimed_actor: claimedActor.nullable(),
-  outcome: z.enum(['served', 'unauthenticated', 'forbidden']),
+  outcome: z.enum(['served', 'unauthenticated', 'forbidden', 'rate-limited']),
   http_status: integer.min(100).max(599),
   /** ADR-003 step 6: verification records the lengths it read. */
   read_lengths: z.record(z.string(), integer.min(0)).optional(),
