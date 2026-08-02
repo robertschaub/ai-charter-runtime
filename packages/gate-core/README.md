@@ -19,7 +19,8 @@ contract are pinned into the commitment before effect.
 
 The first M4 slice adds the deny-by-default authenticated route adapter with bounded denial evidence,
 atomic single-use escalation dispositions and timeout races, orchestrator-only revised-proposal
-continuation through all pre-commit gates, enforceable substitute roles, non-overridable aggregate-ceiling
-contracts, refusal events, and durable review obligations. Native HTTP process wrappers and browser
+continuation through all pre-commit gates, authorization-core-owned screening, corrected-revision retries
+after a deny, enforceable substitute roles, non-overridable aggregate-ceiling contracts, counted denial
+suppression, refusal events, and durable review obligations. Native HTTP process wrappers and browser
 consoles remain to be built.
 Run `npm test` and `npm run typecheck` from the repository root.

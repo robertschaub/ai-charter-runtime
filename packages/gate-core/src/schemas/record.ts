@@ -222,19 +222,50 @@ export const recordEntry = z.object({
 export type RecordEntry = z.infer<typeof recordEntry>;
 
 /** ADR-002 §7: the record family writes to the access-log chain before returning. */
-export const accessEntry = z.object({
-  world_id: worldId,
-  entry_id: id,
-  at: timestamp,
-  route: z.string().min(1),
-  /** Null when no bearer credential could be authenticated. */
-  authenticated_actor: credentialLabel.nullable(),
-  claimed_actor: claimedActor.nullable(),
-  outcome: z.enum(['served', 'unauthenticated', 'forbidden', 'rate-limited']),
-  http_status: integer.min(100).max(599),
-  /** ADR-003 step 6: verification records the lengths it read. */
-  read_lengths: z.record(z.string(), integer.min(0)).optional(),
-}).strict();
+export const accessEntry = z
+  .object({
+    world_id: worldId,
+    entry_id: id,
+    at: timestamp,
+    route: z.string().min(1),
+    /** Null when no bearer credential could be authenticated. */
+    authenticated_actor: credentialLabel.nullable(),
+    claimed_actor: claimedActor.nullable(),
+    outcome: z.enum(['served', 'unauthenticated', 'forbidden', 'rate-limited']),
+    http_status: integer.min(100).max(599),
+    /** Lower-bound marker or final count for a bounded unauthenticated suppression window. */
+    suppressed_count: integer.min(1).optional(),
+    suppression_window_ms: integer.min(1).optional(),
+    suppression_final: z.boolean().optional(),
+    /** ADR-003 step 6: verification records the lengths it read. */
+    read_lengths: z.record(z.string(), integer.min(0)).optional(),
+  })
+  .strict()
+  .superRefine((entry, ctx) => {
+    const suppressionFields = [entry.suppressed_count, entry.suppression_window_ms, entry.suppression_final];
+    if (entry.outcome === 'rate-limited') {
+      if (suppressionFields.some((value) => value === undefined)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['suppressed_count'],
+          message: 'rate-limited entries require the complete suppression-window summary',
+        });
+      }
+      if (entry.authenticated_actor !== null || entry.http_status !== 429) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['outcome'],
+          message: 'rate-limited entries are unauthenticated 429 evidence',
+        });
+      }
+    } else if (suppressionFields.some((value) => value !== undefined)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['suppressed_count'],
+        message: 'suppression-window fields are only valid on rate-limited entries',
+      });
+    }
+  });
 
 export const accessChainEntry = z.union([accessEntry, anchorEvent, anchorFailedEvent]);
 

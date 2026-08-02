@@ -73,6 +73,7 @@ function setup(
     policy,
     ids: new SequentialIds(),
     resolveAuthorizedAgent: (actor) => (actor.credential === 'proc:orchestrator' ? 'agent_demo' : undefined),
+    resolveScreeningSignals: () => [],
     resolveModelEvidence: () => ({
       servedModelAccepted: true,
       cardStatus: 'current',
@@ -122,10 +123,11 @@ describe('ADR-002 authorization HTTP adapter', () => {
   });
 
   it('bounds unauthenticated denial evidence to detailed entries plus one suppression marker per window', async () => {
+    let now = 1_000;
     const { adapter, store } = setup({
       unauthenticatedDetailLimit: 2,
       unauthenticatedWindowMs: 1_000,
-      nowMilliseconds: () => 1_000,
+      nowMilliseconds: () => now,
     });
     const operation = vi.fn(async () => ({ status: 200, body: { ok: true } }));
     const responses = await Promise.all(
@@ -139,7 +141,26 @@ describe('ADR-002 authorization HTTP adapter', () => {
     expect(store.snapshot().accessRecords).toEqual([
       expect.objectContaining({ outcome: 'unauthenticated', http_status: 401 }),
       expect.objectContaining({ outcome: 'unauthenticated', http_status: 401 }),
-      expect.objectContaining({ route: 'AUTHZ unauthenticated ingress', outcome: 'rate-limited', http_status: 429 }),
+      expect.objectContaining({
+        route: 'AUTHZ unauthenticated ingress',
+        outcome: 'rate-limited',
+        http_status: 429,
+        suppressed_count: 1,
+        suppression_final: false,
+      }),
+    ]);
+    now = 2_000;
+    await expect(
+      adapter.dispatch({ method: 'POST', pathname: '/w/w-demo/proposals' }, operation),
+    ).resolves.toMatchObject({ status: 401 });
+    expect(store.snapshot().accessRecords.slice(-2)).toEqual([
+      expect.objectContaining({
+        outcome: 'rate-limited',
+        suppressed_count: 18,
+        suppression_window_ms: 1_000,
+        suppression_final: true,
+      }),
+      expect.objectContaining({ outcome: 'unauthenticated', http_status: 401 }),
     ]);
   });
 

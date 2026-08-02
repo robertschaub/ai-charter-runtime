@@ -283,6 +283,7 @@ export class AuthorizationHttpAdapter {
   #unauthenticatedWindowStart: number;
   #unauthenticatedDetailedCount = 0;
   #unauthenticatedSuppressionRecorded = false;
+  #unauthenticatedSuppressedCount = 0;
 
   constructor(options: AuthorizationHttpAdapterOptions) {
     this.#authorization = options.authorization;
@@ -317,6 +318,32 @@ export class AuthorizationHttpAdapter {
     assertAuthorizationRouteCoverage(options.registeredRouteIds ?? AUTHORIZATION_ROUTES.map((route) => route.id));
   }
 
+  async #rollUnauthenticatedWindow(now: number): Promise<void> {
+    if (
+      now >= this.#unauthenticatedWindowStart &&
+      now - this.#unauthenticatedWindowStart < this.#unauthenticatedWindowMs
+    ) {
+      return;
+    }
+    const suppressedCount = this.#unauthenticatedSuppressedCount;
+    this.#unauthenticatedWindowStart = now;
+    this.#unauthenticatedDetailedCount = 0;
+    this.#unauthenticatedSuppressionRecorded = false;
+    this.#unauthenticatedSuppressedCount = 0;
+    if (suppressedCount === 0) return;
+    await this.#authorization.recordAccess({
+      route: 'AUTHZ unauthenticated ingress',
+      authenticatedActor: null,
+      claimedActor: null,
+      outcome: 'rate-limited',
+      httpStatus: 429,
+      recorder: { credential: 'proc:authz', claimed_role: null },
+      suppressedCount,
+      suppressionWindowMs: this.#unauthenticatedWindowMs,
+      suppressionFinal: true,
+    });
+  }
+
   async dispatch<T>(
     request: AuthorizationAdapterRequest,
     operation: (context: AuthorizationAdapterContext) => Promise<AuthorizationOperationResult<T>>,
@@ -340,6 +367,9 @@ export class AuthorizationHttpAdapter {
     const validatedParams = Object.freeze(params);
     const requestedWorld = validatedParams['world_id'] ?? null;
     const routeLabel = `${route.method} ${route.template}`;
+    const now = this.#nowMilliseconds();
+    if (!Number.isSafeInteger(now)) throw new RangeError('nowMilliseconds must return a safe integer');
+    await this.#rollUnauthenticatedWindow(now);
 
     if (route.allowed === 'open') {
       const result = await operation({ routeId: route.id, worldId: null, actor: null, params: validatedParams });
@@ -367,17 +397,11 @@ export class AuthorizationHttpAdapter {
     };
 
     if (binding === undefined || actor === null) {
-      const now = this.#nowMilliseconds();
-      if (!Number.isSafeInteger(now)) throw new RangeError('nowMilliseconds must return a safe integer');
-      if (now < this.#unauthenticatedWindowStart || now - this.#unauthenticatedWindowStart >= this.#unauthenticatedWindowMs) {
-        this.#unauthenticatedWindowStart = now;
-        this.#unauthenticatedDetailedCount = 0;
-        this.#unauthenticatedSuppressionRecorded = false;
-      }
       if (this.#unauthenticatedDetailedCount < this.#unauthenticatedDetailLimit) {
         this.#unauthenticatedDetailedCount += 1;
         return deny(401, 'unauthenticated');
       }
+      this.#unauthenticatedSuppressedCount += 1;
       if (!this.#unauthenticatedSuppressionRecorded) {
         this.#unauthenticatedSuppressionRecorded = true;
         await this.#authorization.recordAccess({
@@ -387,6 +411,9 @@ export class AuthorizationHttpAdapter {
           outcome: 'rate-limited',
           httpStatus: 429,
           recorder: { credential: 'proc:authz', claimed_role: null },
+          suppressedCount: 1,
+          suppressionWindowMs: this.#unauthenticatedWindowMs,
+          suppressionFinal: false,
         });
       }
       return { status: 429, body: { error: 'rate-limited' }, routeId: route.id };

@@ -17,6 +17,7 @@ import {
   id,
   mandate,
   role,
+  screeningSignal,
   timestamp,
   worldId,
   type CommitmentRecord,
@@ -78,6 +79,11 @@ export interface AuthorizationCoreOptions {
   readonly resolveAuthorizedAgent: (actor: TransactionActor) => string | undefined;
   /** Server-owned signed-card lookup; the orchestrator cannot attest its own model. */
   readonly resolveModelEvidence: (proposal: FrozenProposal) => ModelEvidence;
+  /** Server-owned screening over the frozen hash; success, including an empty result, means performed. */
+  readonly resolveScreeningSignals: (
+    proposal: FrozenProposal,
+    gate: 'submit' | 'verify',
+  ) => readonly ScreeningSignal[] | Promise<readonly ScreeningSignal[]>;
 }
 
 export interface ModelEvidence {
@@ -96,9 +102,11 @@ export interface RuleProposalInput {
   readonly actor: TransactionActor;
   /** Authorization-service classifications only; endpoint code must not pass model-authored labels through. */
   readonly context?: Readonly<Record<string, unknown>>;
-  /** Screening-client evidence gathered by the authorization service over this frozen hash. */
-  readonly signals?: readonly ScreeningSignal[];
-  readonly screeningPerformed?: boolean;
+}
+
+interface PreparedRuleProposalInput extends RuleProposalInput {
+  readonly signals: readonly ScreeningSignal[];
+  readonly screeningPerformed: boolean;
 }
 
 export interface RuleProposalResult {
@@ -137,9 +145,6 @@ export interface ContinueEscalationRevisionInput {
   readonly escalationId: string;
   readonly proposal: FrozenProposal;
   readonly actor: TransactionActor;
-  /** Authorization-service screening evidence over the revised frozen hash. */
-  readonly signals?: readonly ScreeningSignal[];
-  readonly screeningPerformed?: boolean;
   readonly context?: Readonly<Record<string, unknown>>;
 }
 
@@ -167,6 +172,9 @@ export interface RecordAccessInput {
   readonly httpStatus: number;
   readonly recorder: TransactionActor;
   readonly readLengths?: Readonly<Record<string, number>>;
+  readonly suppressedCount?: number;
+  readonly suppressionWindowMs?: number;
+  readonly suppressionFinal?: boolean;
 }
 
 export type CommitDefect =
@@ -710,6 +718,7 @@ export class AuthorizationCore {
   readonly #ids: IdFactory;
   readonly #resolveAuthorizedAgent: (actor: TransactionActor) => string | undefined;
   readonly #resolveModelEvidence: (proposal: FrozenProposal) => ModelEvidence;
+  readonly #resolveScreeningSignals: AuthorizationCoreOptions['resolveScreeningSignals'];
 
   constructor(options: AuthorizationCoreOptions) {
     this.#store = options.store;
@@ -726,6 +735,20 @@ export class AuthorizationCore {
     this.#ids = options.ids ?? defaultIds;
     this.#resolveAuthorizedAgent = options.resolveAuthorizedAgent;
     this.#resolveModelEvidence = options.resolveModelEvidence;
+    this.#resolveScreeningSignals = options.resolveScreeningSignals;
+  }
+
+  async #screeningEvidence(
+    proposal: FrozenProposal,
+    gate: Gate,
+  ): Promise<{ readonly signals: readonly ScreeningSignal[]; readonly performed: boolean }> {
+    if (gate !== 'submit' && gate !== 'verify') return { signals: [], performed: false };
+    try {
+      const resolved = await this.#resolveScreeningSignals(proposal, gate);
+      return { signals: resolved.map((signal) => screeningSignal.parse(signal)), performed: true };
+    } catch {
+      return { signals: [], performed: false };
+    }
   }
 
   #resolveModelEvidenceFailClosed(proposal: FrozenProposal): ModelEvidence {
@@ -909,14 +932,24 @@ export class AuthorizationCore {
     }
     const proposal = frozenProposal.parse(input.proposal);
     verifyProposalHash(proposal);
+    const screening = await this.#screeningEvidence(proposal, input.gate);
     const completed = await this.#store.transactWithState('ruling_issue', input.actor, (state, at) =>
-      this.#buildRuling({ ...input, proposal }, state, at),
+      this.#buildRuling(
+        {
+          ...input,
+          proposal,
+          signals: screening.signals,
+          screeningPerformed: screening.performed,
+        },
+        state,
+        at,
+      ),
     );
     return completed.result;
   }
 
   #buildRuling(
-    input: RuleProposalInput,
+    input: PreparedRuleProposalInput,
     state: WorldState,
     at: string,
     options: {
@@ -1224,6 +1257,38 @@ export class AuthorizationCore {
   async disposeEscalation(input: DisposeEscalationInput): Promise<DisposeEscalationResult> {
     const escalationId = id.parse(input.escalationId);
     const disposition = input.disposition;
+    let allowScreening: { readonly signals: readonly ScreeningSignal[]; readonly performed: boolean } = {
+      signals: [],
+      performed: false,
+    };
+    if (disposition === 'allow-within-scope') {
+      const snapshot = this.#store.snapshot();
+      const escalation = snapshot.escalations.get(escalationId);
+      const ruling = escalation === undefined ? undefined : snapshot.rulings.get(escalation.ruling_id);
+      const proposalId =
+        escalation === undefined ? undefined : snapshot.proposalByHash.get(escalation.frozen_proposal_hash);
+      const proposal = proposalId === undefined ? undefined : snapshot.proposals.get(proposalId);
+      const actorRole = input.actor.credential.startsWith('role:')
+        ? role.parse(input.actor.credential.slice('role:'.length))
+        : null;
+      const eligibleRoles =
+        escalation === undefined
+          ? []
+          : [
+              escalation.contract.decision_and_route.eligible_role,
+              ...escalation.contract.decision_and_route.substitute_roles,
+            ];
+      if (
+        escalation?.state === 'open' &&
+        escalation.contract.permitted_dispositions.includes(disposition) &&
+        actorRole !== null &&
+        eligibleRoles.includes(actorRole) &&
+        ruling !== undefined &&
+        proposal !== undefined
+      ) {
+        allowScreening = await this.#screeningEvidence(proposal, ruling.gate);
+      }
+    }
 
     const completed = await this.#store.transactWithState<DisposeEscalationResult>(
       'escalation_dispose',
@@ -1470,11 +1535,8 @@ export class AuthorizationCore {
             actionClass: ruling.binding.action_class,
             actor: { credential: 'proc:authz', claimed_role: null },
             context: { intervention_disposition: disposition, intervention_escalation_id: escalationId },
-            signals:
-              ruling.evidence_refs.filter(
-                (entry): entry is ScreeningSignal => entry.kind === 'screening_signal',
-              ),
-            screeningPerformed: ruling.evidence_refs.some((entry) => entry.kind === 'screening_signal'),
+            signals: allowScreening.signals,
+            screeningPerformed: allowScreening.performed,
           },
           state,
           at,
@@ -1517,6 +1579,10 @@ export class AuthorizationCore {
     const escalationId = id.parse(input.escalationId);
     const proposal = frozenProposal.parse(input.proposal);
     verifyProposalHash(proposal);
+    const [submitScreening, verifyScreening] = await Promise.all([
+      this.#screeningEvidence(proposal, 'submit'),
+      this.#screeningEvidence(proposal, 'verify'),
+    ]);
     const completed = await this.#store.transactWithState<ContinueEscalationRevisionResult>(
       'escalation_revision_continue',
       input.actor,
@@ -1560,17 +1626,6 @@ export class AuthorizationCore {
           return refuse('wrong-state');
         }
         if (escalation.successor_ruling_id !== null) return refuse('already-continued');
-        const originalId = state.proposalByHash.get(escalation.frozen_proposal_hash);
-        const original = originalId === undefined ? undefined : state.proposals.get(originalId);
-        if (
-          original === undefined ||
-          proposal.world_id !== original.world_id ||
-          proposal.action_id !== original.action_id ||
-          proposal.revision !== original.revision + 1 ||
-          proposal.proposal_id === original.proposal_id
-        ) {
-          return refuse('revision-not-permitted');
-        }
         const dispositionRecord = state.actionRecords.find(
           (entry) =>
             entry.human_intervention_event?.event === 'human_intervention_event' &&
@@ -1581,11 +1636,38 @@ export class AuthorizationCore {
         if (dispositionRecord === undefined) {
           throw new Error(`escalation ${escalationId} lost its disposition record`);
         }
+        const originalId = state.proposalByHash.get(escalation.frozen_proposal_hash);
+        const original = originalId === undefined ? undefined : state.proposals.get(originalId);
+        const priorAttempts = state.actionRecords
+          .filter((entry) => entry.basis.includes(dispositionRecord.entry_id))
+          .map((entry) => state.rulings.get(entry.admissibility_decision.ruling_id))
+          .filter((ruling): ruling is GateRuling => ruling !== undefined)
+          .map((ruling) => state.proposalByHash.get(ruling.binding.frozen_proposal_hash))
+          .map((proposalId) => (proposalId === undefined ? undefined : state.proposals.get(proposalId)))
+          .filter((candidate): candidate is FrozenProposal => candidate !== undefined);
+        const latest = [original, ...priorAttempts]
+          .filter((candidate): candidate is FrozenProposal => candidate !== undefined)
+          .sort((left, right) => right.revision - left.revision)[0];
+        if (
+          original === undefined ||
+          latest === undefined ||
+          proposal.world_id !== original.world_id ||
+          proposal.action_id !== original.action_id ||
+          proposal.revision !== latest.revision + 1 ||
+          proposal.proposal_id === latest.proposal_id
+        ) {
+          return refuse('revision-not-permitted');
+        }
 
         const ops: WalOp[] = [];
         const stages: RuleProposalResult[] = [];
         for (const gate of ['authorize', 'submit', 'verify'] as const) {
-          const screened = gate === 'submit' || gate === 'verify';
+          const screening =
+            gate === 'submit'
+              ? submitScreening
+              : gate === 'verify'
+                ? verifyScreening
+                : { signals: [], performed: false };
           const build = this.#buildRuling(
             {
               gate,
@@ -1598,8 +1680,8 @@ export class AuthorizationCore {
                 intervention_disposition: 'narrow-or-modify',
                 intervention_escalation_id: escalationId,
               },
-              signals: screened ? input.signals ?? [] : [],
-              screeningPerformed: screened ? input.screeningPerformed ?? false : false,
+              signals: screening.signals,
+              screeningPerformed: screening.performed,
             },
             state,
             at,
@@ -1621,18 +1703,20 @@ export class AuthorizationCore {
         }
         const successor = stages.at(-1);
         if (successor === undefined) throw new Error('revision continuation produced no ruling');
-        ops.push(
-          {
-            op: 'ruling.link_successor',
-            ruling_id: sourceRuling.ruling_id,
-            successor_ruling_id: successor.ruling.ruling_id,
-          },
-          {
-            op: 'escalation.link_successor',
-            escalation_id: escalationId,
-            successor_ruling_id: successor.ruling.ruling_id,
-          },
-        );
+        if (successor.ruling.verdict !== 'deny') {
+          ops.push(
+            {
+              op: 'ruling.link_successor',
+              ruling_id: sourceRuling.ruling_id,
+              successor_ruling_id: successor.ruling.ruling_id,
+            },
+            {
+              op: 'escalation.link_successor',
+              escalation_id: escalationId,
+              successor_ruling_id: successor.ruling.ruling_id,
+            },
+          );
+        }
         return { ops, result: { accepted: true, stages, successor } };
       },
     );
@@ -1658,6 +1742,11 @@ export class AuthorizationCore {
             outcome: input.outcome,
             http_status: input.httpStatus,
             ...(input.readLengths === undefined ? {} : { read_lengths: input.readLengths }),
+            ...(input.suppressedCount === undefined ? {} : { suppressed_count: input.suppressedCount }),
+            ...(input.suppressionWindowMs === undefined
+              ? {}
+              : { suppression_window_ms: input.suppressionWindowMs }),
+            ...(input.suppressionFinal === undefined ? {} : { suppression_final: input.suppressionFinal }),
           }),
         },
       ],

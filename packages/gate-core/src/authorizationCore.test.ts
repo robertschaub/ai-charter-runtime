@@ -16,7 +16,7 @@ import { verifyChain } from './chain.js';
 import { digestFor } from './hash.js';
 import { Keyring, verifyEmbeddedMac } from './keyring.js';
 import { loadPolicyFile, type LoadedPolicy } from './policyLoader.js';
-import type { EffectIntent, FrozenProposal, Mandate } from './schemas/index.js';
+import type { EffectIntent, FrozenProposal, Mandate, ScreeningSignal } from './schemas/index.js';
 import { applyWorldTransaction, cloneWorldState, counterValue } from './state.js';
 import { runSweeper } from './sweeper.js';
 import { verifyCommitTokenForIntent } from './tokenVerifier.js';
@@ -51,6 +51,7 @@ interface Harness {
   readonly store: WalStore;
   readonly core: AuthorizationCore;
   setNow(value: string): void;
+  setScreening(proposalId: string, value: readonly ScreeningSignal[] | Error): void;
 }
 
 const roots: string[] = [];
@@ -83,12 +84,18 @@ function harness(initialNow = '2026-08-01T09:00:00.000Z'): Harness {
     now: () => now,
   });
   openStores.push(store);
+  const screenings = new Map<string, readonly ScreeningSignal[] | Error>();
   const core = new AuthorizationCore({
     store,
     keyring,
     policy,
     ids,
     resolveAuthorizedAgent: (actor) => (actor.credential === 'proc:orchestrator' ? 'agent_demo' : undefined),
+    resolveScreeningSignals: (proposal) => {
+      const value = screenings.get(proposal.proposal_id) ?? [];
+      if (value instanceof Error) throw value;
+      return value;
+    },
     resolveModelEvidence: () => ({
       servedModelAccepted: true,
       cardStatus: 'current',
@@ -96,7 +103,27 @@ function harness(initialNow = '2026-08-01T09:00:00.000Z'): Harness {
       cardDigest: CARD_DIGEST,
     }),
   });
-  return { root, keyring, policy, ids, store, core, setNow: (value) => (now = value) };
+  return {
+    root,
+    keyring,
+    policy,
+    ids,
+    store,
+    core,
+    setNow: (value) => (now = value),
+    setScreening: (proposalId, value) => screenings.set(proposalId, value),
+  };
+}
+
+function conflictSignal(rationale = 'Synthetic conflict.'): ScreeningSignal {
+  return {
+    kind: 'screening_signal',
+    signal: 'evidence_conflict',
+    confidence_pct: 100,
+    rationale,
+    model_id: 'screening-model',
+    model_version_reported: 'screening-model-v1',
+  };
 }
 
 function mandateBody(
@@ -703,6 +730,7 @@ describe('M2 authorization transactions', () => {
       policy: substituted.policy,
       ids: substituted.ids,
       resolveAuthorizedAgent: () => 'agent_demo',
+      resolveScreeningSignals: () => [],
       resolveModelEvidence: () => ({
         servedModelAccepted: false,
         cardStatus: 'current',
@@ -836,6 +864,7 @@ describe('M2 authorization transactions', () => {
       policy: superseded.policy,
       ids: superseded.ids,
       resolveAuthorizedAgent: () => 'agent_demo',
+      resolveScreeningSignals: () => [],
       resolveModelEvidence: () => ({
         servedModelAccepted: true,
         cardStatus: 'superseded',
@@ -856,6 +885,7 @@ describe('M2 authorization transactions', () => {
       policy: withdrawn.policy,
       ids: withdrawn.ids,
       resolveAuthorizedAgent: () => 'agent_demo',
+      resolveScreeningSignals: () => [],
       resolveModelEvidence: () => ({
         servedModelAccepted: true,
         cardStatus: 'withdrawn',
@@ -878,6 +908,7 @@ describe('M2 authorization transactions', () => {
       policy: h.policy,
       ids: h.ids,
       resolveAuthorizedAgent: () => 'agent_demo',
+      resolveScreeningSignals: () => [],
       resolveModelEvidence: () => ({
         servedModelAccepted: true,
         cardStatus,
@@ -910,6 +941,7 @@ describe('M2 authorization transactions', () => {
       policy: atRuling.policy,
       ids: atRuling.ids,
       resolveAuthorizedAgent: () => 'agent_demo',
+      resolveScreeningSignals: () => [],
       resolveModelEvidence: () => {
         throw new Error('synthetic card reload failure');
       },
@@ -933,6 +965,7 @@ describe('M2 authorization transactions', () => {
       policy: atCommit.policy,
       ids: atCommit.ids,
       resolveAuthorizedAgent: () => 'agent_demo',
+      resolveScreeningSignals: () => [],
       resolveModelEvidence: () => {
         if (!registryAvailable) throw new Error('synthetic card reload failure');
         return {
@@ -968,21 +1001,9 @@ describe('M2 authorization transactions', () => {
     const h = harness();
     await initialize(h);
     const original = proposal(11);
+    h.setScreening(original.proposal_id, [conflictSignal('Two synthetic registry records conflict.')]);
     const escalated = await h.core.ruleProposal(
-      ruleInput(original, {
-        gate: 'verify',
-        signals: [
-          {
-            kind: 'screening_signal',
-            signal: 'evidence_conflict',
-            confidence_pct: 100,
-            rationale: 'Two synthetic registry records conflict.',
-            model_id: 'screening-model',
-            model_version_reported: 'screening-model-v1',
-          },
-        ],
-        screeningPerformed: true,
-      }),
+      ruleInput(original, { gate: 'verify' }),
     );
     expect(escalated.ruling).toMatchObject({ verdict: 'escalate', matched_rule_id: 'escalate-verify-conflict' });
     if (escalated.escalationId === null) throw new Error('expected escalation');
@@ -1024,8 +1045,6 @@ describe('M2 authorization transactions', () => {
       escalationId: escalated.escalationId,
       proposal: revised,
       actor: ORCHESTRATOR,
-      signals: [],
-      screeningPerformed: true,
     });
     expect(continued).toMatchObject({
       accepted: true,
@@ -1087,21 +1106,9 @@ describe('M2 authorization transactions', () => {
     const h = harness();
     await initialize(h);
     const original = proposal(13);
+    h.setScreening(original.proposal_id, [conflictSignal()]);
     const escalated = await h.core.ruleProposal(
-      ruleInput(original, {
-        gate: 'verify',
-        signals: [
-          {
-            kind: 'screening_signal',
-            signal: 'evidence_conflict',
-            confidence_pct: 100,
-            rationale: 'Synthetic conflict.',
-            model_id: 'screening-model',
-            model_version_reported: 'screening-model-v1',
-          },
-        ],
-        screeningPerformed: true,
-      }),
+      ruleInput(original, { gate: 'verify' }),
     );
     if (escalated.escalationId === null) throw new Error('expected escalation');
     h.setNow('2026-08-01T09:15:00.000Z');
@@ -1130,25 +1137,13 @@ describe('M2 authorization transactions', () => {
     ).toContain('escalation_timeout');
   });
 
-  it('refuses to continue a revision when required screening was not performed', async () => {
+  it('ignores caller screening claims when authorization-owned screening is unavailable', async () => {
     const h = harness();
     await initialize(h);
     const original = proposal(81);
+    h.setScreening(original.proposal_id, [conflictSignal()]);
     const escalated = await h.core.ruleProposal(
-      ruleInput(original, {
-        gate: 'verify',
-        signals: [
-          {
-            kind: 'screening_signal',
-            signal: 'evidence_conflict',
-            confidence_pct: 100,
-            rationale: 'Synthetic conflict.',
-            model_id: 'screening-model',
-            model_version_reported: 'screening-model-v1',
-          },
-        ],
-        screeningPerformed: true,
-      }),
+      ruleInput(original, { gate: 'verify' }),
     );
     if (escalated.escalationId === null) throw new Error('expected escalation');
     expect(
@@ -1164,7 +1159,6 @@ describe('M2 authorization transactions', () => {
         escalationId: escalated.escalationId,
         proposal: invalidRevision,
         actor: ORCHESTRATOR,
-        screeningPerformed: true,
       }),
     ).toMatchObject({
       accepted: false,
@@ -1172,13 +1166,15 @@ describe('M2 authorization transactions', () => {
       recordEntryId: expect.any(String),
     });
     const revised = proposal(82, { action_id: original.action_id, revision: 2 });
-    const continued = await h.core.continueEscalationRevision({
+    h.setScreening(revised.proposal_id, new Error('synthetic screening outage'));
+    const untrustedContinuation = {
       escalationId: escalated.escalationId,
       proposal: revised,
       actor: ORCHESTRATOR,
       signals: [],
-      screeningPerformed: false,
-    });
+      screeningPerformed: true,
+    } as const;
+    const continued = await h.core.continueEscalationRevision(untrustedContinuation);
     expect(continued).toMatchObject({
       accepted: true,
       stages: [
@@ -1191,21 +1187,10 @@ describe('M2 authorization transactions', () => {
   it('authorizes a declared substitute role and records the actual responder', async () => {
     const h = harness();
     await initialize(h);
+    const original = proposal(83);
+    h.setScreening(original.proposal_id, [conflictSignal()]);
     const escalated = await h.core.ruleProposal(
-      ruleInput(proposal(83), {
-        gate: 'verify',
-        signals: [
-          {
-            kind: 'screening_signal',
-            signal: 'evidence_conflict',
-            confidence_pct: 100,
-            rationale: 'Synthetic conflict.',
-            model_id: 'screening-model',
-            model_version_reported: 'screening-model-v1',
-          },
-        ],
-        screeningPerformed: true,
-      }),
+      ruleInput(original, { gate: 'verify' }),
     );
     if (escalated.escalationId === null) throw new Error('expected escalation');
     const disposed = await h.core.disposeEscalation({
@@ -1223,25 +1208,72 @@ describe('M2 authorization transactions', () => {
     });
   });
 
+  it('records a denied continuation without burning the next corrected revision', async () => {
+    const h = harness();
+    await initialize(h);
+    const original = proposal(85);
+    h.setScreening(original.proposal_id, [conflictSignal()]);
+    const escalated = await h.core.ruleProposal(ruleInput(original, { gate: 'verify' }));
+    if (escalated.escalationId === null) throw new Error('expected escalation');
+    expect(
+      await h.core.disposeEscalation({
+        escalationId: escalated.escalationId,
+        disposition: 'narrow-or-modify',
+        actor: CASE_OFFICER,
+      }),
+    ).toMatchObject({ accepted: true, successor: null });
+
+    const deniedRevision = proposal(86, {
+      action_id: original.action_id,
+      revision: 2,
+      acting_model: {
+        requested_id: 'unapproved-model',
+        served_id: 'unapproved-model',
+        card_id: 'unapproved-card',
+        card_version: 1,
+      },
+    });
+    const denied = await h.core.continueEscalationRevision({
+      escalationId: escalated.escalationId,
+      proposal: deniedRevision,
+      actor: ORCHESTRATOR,
+    });
+    expect(denied).toMatchObject({
+      accepted: true,
+      stages: [{ ruling: { gate: 'authorize', verdict: 'deny', matched_rule_id: 'authority:substituted-model' } }],
+    });
+    expect(h.store.snapshot().escalations.get(escalated.escalationId)?.successor_ruling_id).toBeNull();
+
+    const correctedRevision = proposal(87, {
+      action_id: original.action_id,
+      revision: 3,
+    });
+    const corrected = await h.core.continueEscalationRevision({
+      escalationId: escalated.escalationId,
+      proposal: correctedRevision,
+      actor: ORCHESTRATOR,
+    });
+    expect(corrected).toMatchObject({
+      accepted: true,
+      stages: [
+        { ruling: { gate: 'authorize', verdict: 'allow' } },
+        { ruling: { gate: 'submit', verdict: 'allow' } },
+        { ruling: { gate: 'verify', verdict: 'allow' } },
+      ],
+    });
+    if (!corrected.accepted) throw new Error('expected corrected continuation');
+    expect(h.store.snapshot().escalations.get(escalated.escalationId)?.successor_ruling_id).toBe(
+      corrected.successor.ruling.ruling_id,
+    );
+  });
+
   it('linearizes conflicting dispositions so exactly one reviewer transition wins', async () => {
     const h = harness();
     await initialize(h);
     const original = proposal(14);
+    h.setScreening(original.proposal_id, [conflictSignal()]);
     const escalated = await h.core.ruleProposal(
-      ruleInput(original, {
-        gate: 'verify',
-        signals: [
-          {
-            kind: 'screening_signal',
-            signal: 'evidence_conflict',
-            confidence_pct: 100,
-            rationale: 'Synthetic conflict.',
-            model_id: 'screening-model',
-            model_version_reported: 'screening-model-v1',
-          },
-        ],
-        screeningPerformed: true,
-      }),
+      ruleInput(original, { gate: 'verify' }),
     );
     if (escalated.escalationId === null) throw new Error('expected escalation');
     const results = await Promise.all([
@@ -1296,21 +1328,9 @@ describe('M2 authorization transactions', () => {
     const h = harness();
     await initialize(h);
     const frozen = proposal(17);
+    h.setScreening(frozen.proposal_id, [conflictSignal()]);
     const escalated = await h.core.ruleProposal(
-      ruleInput(frozen, {
-        gate: 'verify',
-        signals: [
-          {
-            kind: 'screening_signal',
-            signal: 'evidence_conflict',
-            confidence_pct: 100,
-            rationale: 'Synthetic conflict.',
-            model_id: 'screening-model',
-            model_version_reported: 'screening-model-v1',
-          },
-        ],
-        screeningPerformed: true,
-      }),
+      ruleInput(frozen, { gate: 'verify' }),
     );
     if (escalated.escalationId === null) throw new Error('expected escalation');
     const disposed = await h.core.disposeEscalation({

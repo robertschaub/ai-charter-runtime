@@ -451,6 +451,21 @@ describe('schemas — accept the shapes the ADRs specify', () => {
       read_lengths: { action: 118, access: 42 },
     });
     expect(access.success, JSON.stringify(access.error?.issues)).toBe(true);
+    expect(
+      accessEntry.safeParse({
+        world_id: 'w-demo',
+        entry_id: 'acc_suppression_1',
+        at: '2026-08-01T09:20:01.000Z',
+        route: 'AUTHZ unauthenticated ingress',
+        authenticated_actor: null,
+        claimed_actor: null,
+        outcome: 'rate-limited',
+        http_status: 429,
+        suppressed_count: 42,
+        suppression_window_ms: 1_000,
+        suppression_final: true,
+      }).success,
+    ).toBe(true);
   });
 
   it('the policy set, the model card, and the card revocation', () => {
@@ -691,6 +706,21 @@ describe('schemas — reject what fails closed', () => {
       interventionContract.safeParse({
         ...validContract(),
         permitted_dispositions: ['confirm', 'deny', 'abstain'],
+      }).success,
+    ).toBe(false);
+  });
+
+  it('a suppression entry without its bounded-window count', () => {
+    expect(
+      accessEntry.safeParse({
+        world_id: 'w-demo',
+        entry_id: 'acc_suppression_invalid',
+        at: '2026-08-01T09:20:01.000Z',
+        route: 'AUTHZ unauthenticated ingress',
+        authenticated_actor: null,
+        claimed_actor: null,
+        outcome: 'rate-limited',
+        http_status: 429,
       }).success,
     ).toBe(false);
   });

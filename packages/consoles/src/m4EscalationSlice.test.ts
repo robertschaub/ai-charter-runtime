@@ -62,6 +62,19 @@ describe('M4 headless escalation slice', () => {
       keyring,
       policy,
       resolveAuthorizedAgent: (actor) => (actor.credential === 'proc:orchestrator' ? 'agent_demo' : undefined),
+      resolveScreeningSignals: (proposal) =>
+        proposal.proposal_id === 'prp_beat_3_1'
+          ? [
+              {
+                kind: 'screening_signal',
+                signal: 'evidence_conflict',
+                confidence_pct: 100,
+                rationale: 'Two synthetic registry records conflict.',
+                model_id: 'deterministic-screening-mock',
+                model_version_reported: 'deterministic-screening-mock-v1',
+              },
+            ]
+          : [],
       resolveModelEvidence: (proposal) => registry.resolve(proposal),
     });
     const adapter = new AuthorizationHttpAdapter({
@@ -134,17 +147,6 @@ describe('M4 headless escalation slice', () => {
           service: 'filing',
           actionClass: 'grant-filing',
           actor,
-          signals: [
-            {
-              kind: 'screening_signal',
-              signal: 'evidence_conflict',
-              confidence_pct: 100,
-              rationale: 'Two synthetic registry records conflict.',
-              model_id: 'deterministic-screening-mock',
-              model_version_reported: 'deterministic-screening-mock-v1',
-            },
-          ],
-          screeningPerformed: true,
         });
         return { status: 200, body: ruled };
       },
@@ -207,8 +209,6 @@ describe('M4 headless escalation slice', () => {
           escalationId: params.id ?? 'missing',
           proposal: revised,
           actor,
-          signals: [],
-          screeningPerformed: true,
         });
         return { status: continued.accepted ? 200 : 422, body: continued };
       },

@@ -5,7 +5,7 @@
 
 **Amendment (M3 review follow-up, 2026-08-02):** authenticated HTTP adapters, not in-process actor guards, own access-denial evidence because only the adapters can attest the route and verified credential.
 
-**Amendment (M4 authority review follow-up, 2026-08-02):** the adapter passes schema-validated named route parameters to handlers and accepts a bare wildcard root such as `/console`. Unauthenticated ingress records only a bounded number of detailed 401s plus one 429 suppression marker per process window; authenticated refusals remain individually durable.
+**Amendment (M4 authority review follow-up, 2026-08-02):** the adapter passes schema-validated named route parameters to handlers and accepts a bare wildcard root such as `/console`. Unauthenticated ingress records only a bounded number of detailed 401s, an initial 429 suppression marker, and a counted summary when the process window rolls over; authenticated refusals remain individually durable.
 
 ## Context
 
@@ -106,8 +106,9 @@ the canonical form is the world-scoped one above.
 Denials are explicit: unknown or absent credential → 401, then 429 after the bounded detailed-evidence
 allowance; valid credential without route permission → 403. Authenticated refusals are written
 individually to the access-log chain. Unauthenticated floods are globally coalesced per process window:
-up to the configured detailed limit is written, followed by one suppression marker, so an attacker cannot
-turn durable evidence into an unbounded WAL/fsync workload.
+up to the configured detailed limit is written, followed by one lower-bound suppression marker. At window
+rollover a final entry records the total suppressed count, so an attacker cannot turn durable evidence into
+an unbounded WAL/fsync workload. A crash before rollover leaves the initial marker as an honest lower bound.
 
 The authenticated HTTP adapter emits those entries because it knows the requested route and verified
 credential. Core actor guards are defence in depth and do not fabricate HTTP evidence; M4's adapter
@@ -223,6 +224,9 @@ inter-process requests — the process credential is a shared secret, and a loca
 general authenticated rate limiting beyond the body cap and the bounded unauthenticated-ingress control
 above. The v1.1 sandbox needs a token-minting path and a world lifecycle
 (create, expire, delete); this ADR reserves the seam and specifies nothing further.
+Authenticated 403s remain one durable transaction per attempt by design. The unauthenticated limiter is
+global per process, so one flooder can suppress detailed evidence for peers during the short window; this
+avoids an attacker-controlled, unbounded per-peer key map.
 
 **Implementation follow-up.** `.env.local.example` must gain the six token variables, `RUNTIME_HOST`,
 `DEMO_WORLD_ID`, and the three port variables — alongside ADR-007's `GATE_HMAC_KEY` /

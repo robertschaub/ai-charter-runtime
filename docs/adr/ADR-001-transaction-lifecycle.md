@@ -7,7 +7,7 @@
 
 **Amendment (M3 review follow-up, 2026-08-02):** M4's unchanged-proposal `allow within scope` successor uses a private authorization-service entry point; terminal `no-effect` remains append-only and is corrected only by linked review evidence.
 
-**Amendment (M4 authority review follow-up, 2026-08-02):** `narrow / modify` records and consumes the human disposition without accepting a replacement proposal. The authenticated orchestrator must then submit the next frozen revision through Authorize → Submit → Verify; required screening is re-performed over that hash, and only a later Commit allow may reserve counters.
+**Amendment (M4 authority review follow-up, 2026-08-02):** `narrow / modify` records and consumes the human disposition without accepting a replacement proposal. The authenticated orchestrator must then submit the next frozen revision through Authorize → Submit → Verify; an authorization-core-owned callback re-performs screening over that hash, and only a later Commit allow may reserve counters.
 
 ## Context
 
@@ -233,6 +233,12 @@ The authorization service derives the authorized-agent check from the original a
 record; it does not fabricate an orchestrator actor. Revised proposals use the separate orchestrator-only
 continuation route and carry the human disposition record as basis through each pre-commit gate. A
 wrong-state, malformed-sequence, or duplicate continuation is a recorded refusal, not an invisible no-op.
+An Authorize/Submit/Verify deny is recorded but does not consume the escalation's successor link: the
+orchestrator may submit only the next contiguous revision, which reruns the full sequence. An escalate or
+final Verify allow claims the link and makes later continuation attempts recorded `already_continued`
+refusals.
+Every fresh Submit or Verify ruling, including an unchanged-proposal rerule, obtains its screening result
+through the authorization core; caller-supplied screening fields are ignored.
 
 ### 8. Time, expiry, and the sweeper
 
