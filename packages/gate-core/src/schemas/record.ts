@@ -213,7 +213,8 @@ export const accessEntry = z.object({
   entry_id: id,
   at: timestamp,
   route: z.string().min(1),
-  authenticated_actor: credentialLabel,
+  /** Null when no bearer credential could be authenticated. */
+  authenticated_actor: credentialLabel.nullable(),
   claimed_actor: claimedActor.nullable(),
   outcome: z.enum(['served', 'unauthenticated', 'forbidden']),
   http_status: integer.min(100).max(599),

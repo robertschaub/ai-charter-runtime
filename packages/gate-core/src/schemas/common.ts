@@ -90,6 +90,7 @@ export const CREDENTIAL_LABELS = [
   'proc:authz',
 ] as const;
 export const credentialLabel = z.enum(CREDENTIAL_LABELS);
+export type CredentialLabel = (typeof CREDENTIAL_LABELS)[number];
 
 export const ROLES = ['principal', 'case_officer', 'applicant'] as const;
 export const role = z.enum(ROLES);

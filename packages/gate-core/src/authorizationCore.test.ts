@@ -32,6 +32,7 @@ const ORCHESTRATOR = { credential: 'proc:orchestrator', claimed_role: 'case_offi
 const SERVICES_HOST = { credential: 'proc:services_host', claimed_role: null } as const;
 const AUTHZ = { credential: 'proc:authz', claimed_role: null } as const;
 const PRINCIPAL = { credential: 'role:principal', claimed_role: 'principal' } as const;
+const CASE_OFFICER = { credential: 'role:case_officer', claimed_role: 'case_officer' } as const;
 
 class SequentialIds implements IdFactory {
   #next = 0;
@@ -960,6 +961,267 @@ describe('M2 authorization transactions', () => {
     for (const reservation of ruled.ruling.counter_reservations) {
       expect(state.reservations.get(reservation.id)?.state).toBe('released');
     }
+  });
+
+  it('atomically consumes a narrow disposition and issues the revised Verify ruling', async () => {
+    const h = harness();
+    await initialize(h);
+    const original = proposal(11);
+    const escalated = await h.core.ruleProposal(
+      ruleInput(original, {
+        gate: 'verify',
+        signals: [
+          {
+            kind: 'screening_signal',
+            signal: 'evidence_conflict',
+            confidence_pct: 100,
+            rationale: 'Two synthetic registry records conflict.',
+            model_id: 'screening-model',
+            model_version_reported: 'screening-model-v1',
+          },
+        ],
+        screeningPerformed: true,
+      }),
+    );
+    expect(escalated.ruling).toMatchObject({ verdict: 'escalate', matched_rule_id: 'escalate-verify-conflict' });
+    if (escalated.escalationId === null) throw new Error('expected escalation');
+
+    expect(
+      await h.core.disposeEscalation({
+        escalationId: escalated.escalationId,
+        disposition: 'narrow-or-modify',
+        actor: PRINCIPAL,
+      }),
+    ).toMatchObject({ accepted: false, defect: 'wrong-role' });
+    expect(
+      await h.core.disposeEscalation({
+        escalationId: escalated.escalationId,
+        disposition: 'allow-within-scope',
+        actor: CASE_OFFICER,
+      }),
+    ).toMatchObject({ accepted: false, defect: 'disposition-not-permitted' });
+    expect(
+      await h.core.disposeEscalation({
+        escalationId: escalated.escalationId,
+        disposition: 'narrow-or-modify',
+        actor: CASE_OFFICER,
+      }),
+    ).toMatchObject({ accepted: false, defect: 'revision-required' });
+    expect(h.store.snapshot().escalations.get(escalated.escalationId)?.state).toBe('open');
+
+    const revised = proposal(12, {
+      action_id: original.action_id,
+      revision: 2,
+      proposed_action: 'Submit the grant filing using the uncontested registry record.',
+    });
+    const disposed = await h.core.disposeEscalation({
+      escalationId: escalated.escalationId,
+      disposition: 'narrow-or-modify',
+      actor: CASE_OFFICER,
+      revisedProposal: revised,
+    });
+    expect(disposed).toMatchObject({
+      accepted: true,
+      status: 'disposed',
+      successor: { ruling: { gate: 'verify', verdict: 'allow', matched_rule_id: 'allow-grant-verification' } },
+    });
+    if (!disposed.accepted || disposed.successor === null) throw new Error('expected successor ruling');
+
+    const state = h.store.snapshot();
+    expect(state.escalations.get(escalated.escalationId)).toMatchObject({
+      state: 'disposed',
+      terminal_disposition: 'narrow-or-modify',
+      successor_ruling_id: disposed.successor.ruling.ruling_id,
+    });
+    expect(state.rulings.get(escalated.ruling.ruling_id)).toMatchObject({
+      status: 'invalidated',
+      successor_ruling_id: disposed.successor.ruling.ruling_id,
+    });
+    for (const reservation of escalated.ruling.counter_reservations) {
+      expect(state.reservations.get(reservation.id)?.state).toBe('released');
+    }
+    const successorRecord = state.actionRecords.find(
+      (entry) => entry.admissibility_decision.ruling_id === disposed.successor?.ruling.ruling_id,
+    );
+    expect(successorRecord?.basis).toContain(disposed.recordEntryId);
+    expect(successorRecord?.authenticated_actor).toBe('proc:authz');
+
+    expect(
+      await h.core.commitVerify({
+        rulingId: disposed.successor.ruling.ruling_id,
+        intent: intentFor(revised, disposed.successor.ruling.ruling_id),
+        servicesHostBootId: 'services_boot_1',
+        servicesLedgerId: SERVICES_LEDGER_ID,
+        actor: SERVICES_HOST,
+      }),
+    ).toEqual({ ok: false, defect: 'not-allowed' });
+
+    expect(
+      await h.core.disposeEscalation({
+        escalationId: escalated.escalationId,
+        disposition: 'deny',
+        actor: CASE_OFFICER,
+      }),
+    ).toMatchObject({ accepted: false, defect: 'late-disposition', terminalState: 'disposed' });
+  });
+
+  it('lets timeout win lazily and records a later disposition as a no-op', async () => {
+    const h = harness();
+    await initialize(h);
+    const original = proposal(13);
+    const escalated = await h.core.ruleProposal(
+      ruleInput(original, {
+        gate: 'verify',
+        signals: [
+          {
+            kind: 'screening_signal',
+            signal: 'evidence_conflict',
+            confidence_pct: 100,
+            rationale: 'Synthetic conflict.',
+            model_id: 'screening-model',
+            model_version_reported: 'screening-model-v1',
+          },
+        ],
+        screeningPerformed: true,
+      }),
+    );
+    if (escalated.escalationId === null) throw new Error('expected escalation');
+    h.setNow('2026-08-01T09:15:00.000Z');
+
+    expect(
+      await h.core.disposeEscalation({
+        escalationId: escalated.escalationId,
+        disposition: 'deny',
+        actor: CASE_OFFICER,
+      }),
+    ).toMatchObject({ accepted: false, defect: 'late-disposition', terminalState: 'timed_out' });
+    const state = h.store.snapshot();
+    expect(state.escalations.get(escalated.escalationId)).toMatchObject({
+      state: 'timed_out',
+      terminal_disposition: 'cancel',
+    });
+    expect(
+      state.actionRecords.map((entry) => entry.human_intervention_event?.event),
+    ).toContain('late_disposition_ignored');
+    expect(
+      state.actionRecords.map((entry) =>
+        entry.human_intervention_event?.event === 'human_intervention_event'
+          ? entry.human_intervention_event.payload.kind
+          : null,
+      ),
+    ).toContain('escalation_timeout');
+  });
+
+  it('linearizes conflicting dispositions so exactly one reviewer transition wins', async () => {
+    const h = harness();
+    await initialize(h);
+    const original = proposal(14);
+    const escalated = await h.core.ruleProposal(
+      ruleInput(original, {
+        gate: 'verify',
+        signals: [
+          {
+            kind: 'screening_signal',
+            signal: 'evidence_conflict',
+            confidence_pct: 100,
+            rationale: 'Synthetic conflict.',
+            model_id: 'screening-model',
+            model_version_reported: 'screening-model-v1',
+          },
+        ],
+        screeningPerformed: true,
+      }),
+    );
+    if (escalated.escalationId === null) throw new Error('expected escalation');
+    const revised = proposal(15, { action_id: original.action_id, revision: 2 });
+    const results = await Promise.all([
+      h.core.disposeEscalation({
+        escalationId: escalated.escalationId,
+        disposition: 'deny',
+        actor: CASE_OFFICER,
+      }),
+      h.core.disposeEscalation({
+        escalationId: escalated.escalationId,
+        disposition: 'narrow-or-modify',
+        actor: CASE_OFFICER,
+        revisedProposal: revised,
+      }),
+    ]);
+    expect(results.filter((result) => result.accepted)).toHaveLength(1);
+    expect(results.filter((result) => !result.accepted)).toEqual([
+      expect.objectContaining({ defect: 'late-disposition', terminalState: 'disposed' }),
+    ]);
+    expect(
+      h.store.snapshot().actionRecords.some(
+        (entry) => entry.human_intervention_event?.event === 'late_disposition_ignored',
+      ),
+    ).toBe(true);
+  });
+
+  it('re-rules allow within scope without letting human approval create a missing policy basis', async () => {
+    const h = harness();
+    await initialize(h);
+    const frozen = proposal(16);
+    const escalated = await h.core.ruleProposal(ruleInput(frozen, { gate: 'authorize' }));
+    expect(escalated.ruling).toMatchObject({ verdict: 'escalate', matched_rule_id: null });
+    if (escalated.escalationId === null) throw new Error('expected escalation');
+
+    const disposed = await h.core.disposeEscalation({
+      escalationId: escalated.escalationId,
+      disposition: 'allow-within-scope',
+      actor: PRINCIPAL,
+    });
+    expect(disposed).toMatchObject({
+      accepted: true,
+      successor: { ruling: { verdict: 'escalate', matched_rule_id: null } },
+    });
+    if (!disposed.accepted || disposed.successor === null) throw new Error('expected successor');
+    expect(h.store.snapshot().escalations.get(escalated.escalationId)).toMatchObject({
+      state: 'disposed',
+      successor_ruling_id: disposed.successor.ruling.ruling_id,
+    });
+    expect(disposed.successor.escalationId).not.toBeNull();
+  });
+
+  it('turns seek-review into a durable obligation without issuing effect authority', async () => {
+    const h = harness();
+    await initialize(h);
+    const frozen = proposal(17);
+    const escalated = await h.core.ruleProposal(
+      ruleInput(frozen, {
+        gate: 'verify',
+        signals: [
+          {
+            kind: 'screening_signal',
+            signal: 'evidence_conflict',
+            confidence_pct: 100,
+            rationale: 'Synthetic conflict.',
+            model_id: 'screening-model',
+            model_version_reported: 'screening-model-v1',
+          },
+        ],
+        screeningPerformed: true,
+      }),
+    );
+    if (escalated.escalationId === null) throw new Error('expected escalation');
+    const disposed = await h.core.disposeEscalation({
+      escalationId: escalated.escalationId,
+      disposition: 'seek-review',
+      actor: CASE_OFFICER,
+    });
+    expect(disposed).toMatchObject({ accepted: true, successor: null });
+    if (!disposed.accepted || disposed.reviewObligationId === null) throw new Error('expected review obligation');
+    const state = h.store.snapshot();
+    expect(state.reviews.get(disposed.reviewObligationId)).toMatchObject({
+      state: 'open',
+      route: 'review',
+      source_entry_id: disposed.recordEntryId,
+      recovery_owner_role: 'case_officer',
+    });
+    expect(state.actionRecords.find((entry) => entry.entry_id === disposed.recordEntryId)?.challenge_and_remedy).toEqual({
+      route: 'review',
+      opened_at: '2026-08-01T09:00:00.000Z',
+    });
   });
 
   it('escalates every cumulative ceiling before issuing unreserved allow authority', async () => {

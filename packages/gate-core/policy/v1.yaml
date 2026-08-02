@@ -135,6 +135,37 @@ rules:
         record_events: [escalation_raised, disposition_recorded]
         feedback_consequence: Increment the escalation-pattern counter.
 
+  - id: escalate-verify-conflict
+    priority: 90
+    gate: verify
+    matcher:
+      kind: signal
+      signal: evidence_conflict
+      min_confidence_pct: 1
+    verdict: escalate
+    ux_class: stop
+    reason_template: Conflicting evidence requires the case officer to narrow or revise the draft.
+    intervention_contract:
+      trigger_and_state: { trigger: evidence-conflict, state: open }
+      decision_and_route:
+        eligible_role: case_officer
+        standing_class: own-interpretation
+        competence_declared: Assigned case officer (declared, not verified).
+        independence_declared: Not independently verified in this POC.
+        substitute_rule: The principal may take the decision over without expanding authority.
+      decision_basis_shown: [conflicting-records, frozen-proposal, mandate]
+      response_bound_and_default:
+        response_bound_ms: 900000
+        safe_default:
+          kind: stop-remains
+          disposition: cancel
+          authority_basis: { kind: no-new-authority }
+          reversible: true
+      permitted_dispositions: [deny, narrow-or-modify, seek-review, cancel, route-to-remedy]
+      record_and_feedback:
+        record_events: [escalation_raised, disposition_recorded]
+        feedback_consequence: Increment the escalation-pattern counter.
+
   - id: escalate-notification-volume
     priority: 80
     gate: commit
@@ -170,6 +201,14 @@ rules:
     verdict: allow
     ux_class: silent
     reason_template: Registry retrieval is inside the current mandate.
+
+  - id: allow-grant-verification
+    priority: 20
+    gate: verify
+    matcher: { kind: field, source: mandate, path: [action_class], operator: eq, value: grant-filing }
+    verdict: allow
+    ux_class: silent
+    reason_template: The revised grant draft is within the current mandate and has no unresolved conflict signal.
 
   - id: allow-grant-filing
     priority: 20

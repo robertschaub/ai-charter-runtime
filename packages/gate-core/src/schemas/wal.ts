@@ -73,6 +73,7 @@ export const walOp = z.discriminatedUnion('op', [
 
   z.object({ op: z.literal('escalation.open'), escalation: escalationRecord }).strict(),
   z.object({ op: z.literal('escalation.dispose'), escalation_id: id, disposition }).strict(),
+  z.object({ op: z.literal('escalation.link_successor'), escalation_id: id, successor_ruling_id: id }).strict(),
   z.object({ op: z.literal('escalation.timeout'), escalation_id: id, applied_default: disposition }).strict(),
   z.object({ op: z.literal('escalation.cancel'), escalation_id: id }).strict(),
 

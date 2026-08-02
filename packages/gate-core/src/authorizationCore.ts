@@ -9,6 +9,7 @@ import { createEmbeddedMac, type Keyring, verifyEmbeddedMac } from './keyring.js
 import {
   frozenProposal,
   gateRuling,
+  accessEntry,
   commitToken,
   effectIntent,
   type CommitToken,
@@ -18,9 +19,11 @@ import {
   timestamp,
   worldId,
   type CommitmentRecord,
+  type CredentialLabel,
   type CounterName,
   type EvidenceRef,
   type EffectIntent,
+  type Disposition,
   type FrozenProposal,
   type Gate,
   type GateRuling,
@@ -33,7 +36,7 @@ import {
 } from './schemas/index.js';
 import { applyWorldTransaction, counterValue, mandateVersionKey, type WorldState } from './state.js';
 import type { LoadedPolicy } from './policyLoader.js';
-import { WalStore, type TransactionActor } from './walStore.js';
+import { WalStore, type TransactionActor, type TransactionBuild } from './walStore.js';
 
 const ZERO_DIGEST = '0'.repeat(64);
 
@@ -56,7 +59,7 @@ export class AuthorizationError extends Error {
 }
 
 export interface IdFactory {
-  next(prefix: 'rul' | 'nce' | 'rsv' | 'esc' | 'pat' | 'rec' | 'cmt' | 'eff' | 'sel'): string;
+  next(prefix: 'rul' | 'nce' | 'rsv' | 'esc' | 'pat' | 'rec' | 'acc' | 'rev' | 'cmt' | 'eff' | 'sel'): string;
 }
 
 const defaultIds: IdFactory = {
@@ -102,6 +105,45 @@ export interface RuleProposalResult {
   readonly escalationId: string | null;
   readonly recordEntryId: string;
   readonly mandateNarrowed: boolean;
+}
+
+export interface DisposeEscalationInput {
+  readonly escalationId: string;
+  readonly disposition: Disposition;
+  readonly actor: TransactionActor;
+  /** Required only for narrow-or-modify; the next immutable revision of the same action. */
+  readonly revisedProposal?: FrozenProposal;
+}
+
+export type DisposeEscalationResult =
+  | {
+      readonly accepted: true;
+      readonly status: 'disposed';
+      readonly successor: RuleProposalResult | null;
+      readonly recordEntryId: string;
+      readonly reviewObligationId: string | null;
+    }
+  | {
+      readonly accepted: false;
+      readonly defect:
+        | 'missing-escalation'
+        | 'wrong-role'
+        | 'disposition-not-permitted'
+        | 'revision-required'
+        | 'revision-not-permitted'
+        | 'late-disposition';
+      readonly terminalState?: 'disposed' | 'timed_out' | 'cancelled';
+      readonly recordEntryId: string | null;
+    };
+
+export interface RecordAccessInput {
+  readonly route: string;
+  readonly authenticatedActor: CredentialLabel | null;
+  readonly claimedActor: { readonly role: 'principal' | 'case_officer' | 'applicant' | null; readonly session?: string } | null;
+  readonly outcome: 'served' | 'unauthenticated' | 'forbidden';
+  readonly httpStatus: number;
+  readonly recorder: TransactionActor;
+  readonly readLengths?: Readonly<Record<string, number>>;
 }
 
 export type CommitDefect =
@@ -452,17 +494,20 @@ function rulingRecord(
   entryId: string,
   at: string,
   intervention: { escalationId: string; contract: InterventionContract } | null,
+  recordActor: TransactionActor = input.actor,
+  extraBasis: readonly string[] = [],
 ): RecordEntry {
   return {
     world_id: input.proposal.world_id,
     entry_id: entryId,
     at,
-    authenticated_actor: input.actor.credential,
-    claimed_actor: { role: input.actor.claimed_role },
+    authenticated_actor: recordActor.credential,
+    claimed_actor: { role: recordActor.claimed_role },
     proposed_action: input.proposal.proposed_action,
     basis: [
       ...input.proposal.material_inputs.map((item) => item.id),
       ...input.proposal.derived_claims.map((item) => item.id),
+      ...extraBasis,
     ],
     authority_chain: authorityChainIds(mandateValue),
     admissibility_decision: { ruling_id: ruling.ruling_id, verdict: ruling.verdict },
@@ -483,6 +528,45 @@ function rulingRecord(
             payload: { kind: 'escalation_raised', contract: intervention.contract, reason: ruling.reason },
           },
     challenge_and_remedy: null,
+  };
+}
+
+function escalationEventRecord(
+  state: WorldState,
+  ruling: GateRuling,
+  actor: TransactionActor,
+  entryId: string,
+  at: string,
+  event: RecordEntry['human_intervention_event'],
+  challengeRoute: string | null = null,
+): RecordEntry {
+  const proposalId = state.proposalByHash.get(ruling.binding.frozen_proposal_hash);
+  const proposal = proposalId === undefined ? undefined : state.proposals.get(proposalId);
+  if (proposal === undefined) throw new Error(`ruling ${ruling.ruling_id} lost its proposal`);
+  const mandateValue = state.mandates.get(
+    mandateVersionKey(ruling.binding.mandate_id, ruling.binding.mandate_version),
+  );
+  return {
+    world_id: state.worldId,
+    entry_id: entryId,
+    at,
+    authenticated_actor: actor.credential,
+    claimed_actor: { role: actor.claimed_role },
+    proposed_action: proposal.proposed_action,
+    basis: [...proposal.material_inputs.map((item) => item.id), ...proposal.derived_claims.map((item) => item.id)],
+    authority_chain: authorityChainIds(mandateValue),
+    admissibility_decision: { ruling_id: ruling.ruling_id, verdict: ruling.verdict },
+    policy_model_version: {
+      policy_version: ruling.policy_version,
+      policy_content_digest: ruling.policy_content_digest,
+      evaluator_build_id: ruling.evaluator_build_id,
+      acting_model_requested_id: proposal.acting_model.requested_id,
+      acting_model_served_id: proposal.acting_model.served_id,
+    },
+    commitment_and_effect: null,
+    human_intervention_event: event,
+    challenge_and_remedy:
+      challengeRoute === null ? null : { route: challengeRoute, opened_at: at },
   };
 }
 
@@ -802,8 +886,20 @@ export class AuthorizationCore {
     }
     const proposal = frozenProposal.parse(input.proposal);
     verifyProposalHash(proposal);
+    const completed = await this.#store.transactWithState('ruling_issue', input.actor, (state, at) =>
+      this.#buildRuling({ ...input, proposal }, state, at),
+    );
+    return completed.result;
+  }
+
+  #buildRuling(
+    input: RuleProposalInput,
+    state: WorldState,
+    at: string,
+    options: { readonly recordActor?: TransactionActor; readonly extraBasis?: readonly string[] } = {},
+  ): TransactionBuild<RuleProposalResult> {
+    const proposal = input.proposal;
     const policy = this.#policy;
-    const completed = await this.#store.transactWithState('ruling_issue', input.actor, (state, at) => {
       const existing = state.proposals.get(proposal.proposal_id);
       if (existing !== undefined && existing.proposal_hash !== proposal.proposal_hash) {
         throw new AuthorizationError('proposal-conflict', `proposal id ${proposal.proposal_id} is already frozen`);
@@ -1050,10 +1146,345 @@ export class AuthorizationCore {
         recordEntryId,
         at,
         escalationId === null || contract === null ? null : { escalationId, contract },
+        options.recordActor,
+        options.extraBasis,
       );
       ops.push({ op: 'record.action.append', entry });
       return { ops, result: { ruling, escalationId, recordEntryId, mandateNarrowed } };
-    });
+  }
+
+  #patternNarrowingOps(
+    state: WorldState,
+    pattern: PatternEvent,
+    at: string,
+    excludeRulingId: string,
+  ): WalOp[] {
+    const status = state.mandateStatus.get(pattern.mandate_id);
+    const current =
+      status === undefined ? undefined : state.mandates.get(mandateVersionKey(pattern.mandate_id, status.version));
+    if (
+      current === undefined ||
+      current.state !== 'active' ||
+      !escalationPatternRequiresNarrowing(
+        this.#policy.policy,
+        [...state.patternEvents, pattern],
+        pattern.mandate_id,
+        at,
+      )
+    ) {
+      return [];
+    }
+    return [
+      ...invalidationOps(
+        state,
+        (candidate) =>
+          candidate.ruling_id !== excludeRulingId && candidate.binding.mandate_id === pattern.mandate_id,
+        'escalation-pattern-narrowing',
+      ),
+      {
+        op: 'mandate.amend',
+        mandate: bindMandate(this.#keyring, {
+          ...mandateBody(current),
+          version: current.version + 1,
+          state: 'suspended',
+          issued_at: at,
+        }),
+      },
+    ];
+  }
+
+  async disposeEscalation(input: DisposeEscalationInput): Promise<DisposeEscalationResult> {
+    const escalationId = id.parse(input.escalationId);
+    const disposition = input.disposition;
+    const revisedProposal =
+      input.revisedProposal === undefined ? undefined : frozenProposal.parse(input.revisedProposal);
+    if (revisedProposal !== undefined) verifyProposalHash(revisedProposal);
+
+    const completed = await this.#store.transactWithState<DisposeEscalationResult>(
+      'escalation_dispose',
+      input.actor,
+      (state, at) => {
+        const escalation = state.escalations.get(escalationId);
+        if (escalation === undefined) {
+          return { ops: [], result: { accepted: false, defect: 'missing-escalation', recordEntryId: null } };
+        }
+        const ruling = state.rulings.get(escalation.ruling_id);
+        if (ruling === undefined) throw new Error(`escalation ${escalationId} lost its ruling`);
+
+        const lateRecord = (terminalState: 'disposed' | 'timed_out' | 'cancelled'): TransactionBuild<DisposeEscalationResult> => {
+          const recordEntryId = this.#ids.next('rec');
+          return {
+            ops: [
+              {
+                op: 'record.action.append',
+                entry: escalationEventRecord(
+                  state,
+                  ruling,
+                  input.actor,
+                  recordEntryId,
+                  at,
+                  {
+                    event: 'late_disposition_ignored',
+                    escalation_id: escalationId,
+                    attempted_disposition: disposition,
+                    authenticated_actor: input.actor.credential,
+                    terminal_state: terminalState,
+                    at,
+                  },
+                ),
+              },
+            ],
+            result: {
+              accepted: false,
+              defect: 'late-disposition',
+              terminalState,
+              recordEntryId,
+            },
+          };
+        };
+
+        if (escalation.state !== 'open') return lateRecord(escalation.state);
+
+        if (at >= escalation.expires_at) {
+          const appliedDefault = escalation.contract.response_bound_and_default.safe_default.disposition;
+          const timeoutRecordEntryId = this.#ids.next('rec');
+          const lateRecordEntryId = this.#ids.next('rec');
+          const ops: WalOp[] = [
+            { op: 'escalation.timeout', escalation_id: escalationId, applied_default: appliedDefault },
+          ];
+          if (ruling.status === 'issued') {
+            if (at >= ruling.binding.validity_window.not_after) {
+              ops.push({ op: 'ruling.expire', ruling_id: ruling.ruling_id });
+              const nonce = state.nonces.get(ruling.binding.nonce);
+              if (nonce?.state === 'issued') ops.push({ op: 'nonce.expire', nonce_id: nonce.nonce_id });
+            } else {
+              ops.push({ op: 'ruling.invalidate', ruling_id: ruling.ruling_id, reason: 'escalation-timeout' });
+            }
+            for (const reservation of ruling.counter_reservations) {
+              if (state.reservations.get(reservation.id)?.state === 'reserved') {
+                ops.push({ op: 'reservation.release', reservation_id: reservation.id, reason: 'escalation-timeout' });
+              }
+            }
+          }
+          const timeoutPattern: PatternEvent = {
+            world_id: state.worldId,
+            event_id: this.#ids.next('pat'),
+            mandate_id: ruling.binding.mandate_id,
+            escalation_id: escalationId,
+            kind: 'timeout',
+            at,
+          };
+          ops.push({ op: 'pattern.record', event: timeoutPattern });
+          ops.push(...this.#patternNarrowingOps(state, timeoutPattern, at, ruling.ruling_id));
+          ops.push({
+            op: 'record.action.append',
+            entry: escalationEventRecord(state, ruling, { credential: 'proc:authz', claimed_role: null }, timeoutRecordEntryId, at, {
+              event: 'human_intervention_event',
+              escalation_id: escalationId,
+              payload: { kind: 'escalation_timeout', applied_default: appliedDefault, at },
+            }),
+          });
+          ops.push({
+            op: 'record.action.append',
+            entry: escalationEventRecord(state, ruling, input.actor, lateRecordEntryId, at, {
+              event: 'late_disposition_ignored',
+              escalation_id: escalationId,
+              attempted_disposition: disposition,
+              authenticated_actor: input.actor.credential,
+              terminal_state: 'timed_out',
+              at,
+            }),
+          });
+          return {
+            ops,
+            result: {
+              accepted: false,
+              defect: 'late-disposition',
+              terminalState: 'timed_out',
+              recordEntryId: lateRecordEntryId,
+            },
+          };
+        }
+
+        const eligibleCredential = `role:${escalation.contract.decision_and_route.eligible_role}`;
+        if (input.actor.credential !== eligibleCredential) {
+          return { ops: [], result: { accepted: false, defect: 'wrong-role', recordEntryId: null } };
+        }
+        if (!escalation.contract.permitted_dispositions.includes(disposition)) {
+          return { ops: [], result: { accepted: false, defect: 'disposition-not-permitted', recordEntryId: null } };
+        }
+        if (disposition === 'narrow-or-modify' && revisedProposal === undefined) {
+          return { ops: [], result: { accepted: false, defect: 'revision-required', recordEntryId: null } };
+        }
+        if (disposition !== 'narrow-or-modify' && revisedProposal !== undefined) {
+          return { ops: [], result: { accepted: false, defect: 'revision-not-permitted', recordEntryId: null } };
+        }
+
+        const proposalId = state.proposalByHash.get(escalation.frozen_proposal_hash);
+        const originalProposal = proposalId === undefined ? undefined : state.proposals.get(proposalId);
+        if (originalProposal === undefined) throw new Error(`escalation ${escalationId} lost its proposal`);
+        if (
+          revisedProposal !== undefined &&
+          (revisedProposal.world_id !== originalProposal.world_id ||
+            revisedProposal.action_id !== originalProposal.action_id ||
+            revisedProposal.revision !== originalProposal.revision + 1 ||
+            revisedProposal.proposal_id === originalProposal.proposal_id)
+        ) {
+          return { ops: [], result: { accepted: false, defect: 'revision-not-permitted', recordEntryId: null } };
+        }
+
+        const recordEntryId = this.#ids.next('rec');
+        const route =
+          disposition === 'seek-review' ? 'review' : disposition === 'route-to-remedy' ? 'remedy' : null;
+        const ops: WalOp[] = [
+          { op: 'escalation.dispose', escalation_id: escalationId, disposition },
+        ];
+        if (ruling.status === 'issued') {
+          ops.push({ op: 'ruling.invalidate', ruling_id: ruling.ruling_id, reason: `escalation-${disposition}` });
+          for (const reservation of ruling.counter_reservations) {
+            if (state.reservations.get(reservation.id)?.state === 'reserved') {
+              ops.push({
+                op: 'reservation.release',
+                reservation_id: reservation.id,
+                reason: `escalation-${disposition}`,
+              });
+            }
+          }
+        }
+        if (disposition === 'allow-within-scope') {
+          const overridePattern: PatternEvent = {
+            world_id: state.worldId,
+            event_id: this.#ids.next('pat'),
+            mandate_id: ruling.binding.mandate_id,
+            escalation_id: escalationId,
+            kind: 'override',
+            at,
+          };
+          ops.push({ op: 'pattern.record', event: overridePattern });
+          ops.push(...this.#patternNarrowingOps(state, overridePattern, at, ruling.ruling_id));
+        }
+        ops.push({
+          op: 'record.action.append',
+          entry: escalationEventRecord(
+            state,
+            ruling,
+            input.actor,
+            recordEntryId,
+            at,
+            {
+              event: 'human_intervention_event',
+              escalation_id: escalationId,
+              payload: {
+                kind: 'disposition_recorded',
+                disposition,
+                responder_role: escalation.contract.decision_and_route.eligible_role,
+                at,
+              },
+            },
+            route,
+          ),
+        });
+
+        let reviewObligationId: string | null = null;
+        if (route !== null) {
+          reviewObligationId = this.#ids.next('rev');
+          ops.push({
+            op: 'review.open',
+            obligation: {
+              world_id: state.worldId,
+              obligation_id: reviewObligationId,
+              case_id: originalProposal.action_id,
+              source_entry_id: recordEntryId,
+              route,
+              recovery_owner_role: escalation.contract.decision_and_route.eligible_role,
+              opened_at: at,
+              state: 'open',
+              resolved_at: null,
+            },
+          });
+        }
+
+        const successorProposal =
+          disposition === 'allow-within-scope'
+            ? originalProposal
+            : disposition === 'narrow-or-modify'
+              ? revisedProposal
+              : undefined;
+        if (successorProposal === undefined) {
+          return {
+            ops,
+            result: { accepted: true, status: 'disposed', successor: null, recordEntryId, reviewObligationId },
+          };
+        }
+
+        applyWorldTransaction(state, ops, at);
+        const successorBuild = this.#buildRuling(
+          {
+            gate: ruling.gate,
+            proposal: successorProposal,
+            service: ruling.binding.service,
+            actionClass: ruling.binding.action_class,
+            actor: { credential: 'proc:orchestrator', claimed_role: null },
+            context: { intervention_disposition: disposition, intervention_escalation_id: escalationId },
+            signals:
+              disposition === 'allow-within-scope'
+                ? ruling.evidence_refs.filter(
+                    (entry): entry is ScreeningSignal => entry.kind === 'screening_signal',
+                  )
+                : [],
+            screeningPerformed:
+              disposition === 'allow-within-scope' &&
+              ruling.evidence_refs.some((entry) => entry.kind === 'screening_signal'),
+          },
+          state,
+          at,
+          { recordActor: { credential: 'proc:authz', claimed_role: null }, extraBasis: [recordEntryId] },
+        );
+        const successorId = successorBuild.result.ruling.ruling_id;
+        return {
+          ops: [
+            ...ops,
+            ...successorBuild.ops,
+            { op: 'ruling.link_successor', ruling_id: ruling.ruling_id, successor_ruling_id: successorId },
+            { op: 'escalation.link_successor', escalation_id: escalationId, successor_ruling_id: successorId },
+          ],
+          result: {
+            accepted: true,
+            status: 'disposed',
+            successor: successorBuild.result,
+            recordEntryId,
+            reviewObligationId,
+          },
+        };
+      },
+    );
+    return completed.result;
+  }
+
+  async recordAccess(input: RecordAccessInput): Promise<string> {
+    if (input.recorder.credential !== 'proc:authz') {
+      throw new AuthorizationError('unauthorized-actor', 'only the authorization service may record HTTP access');
+    }
+    const entryId = this.#ids.next('acc');
+    const completed = await this.#store.transactWithState('access_record', input.recorder, (state, at) => ({
+      ops: [
+        {
+          op: 'record.access.append' as const,
+          entry: accessEntry.parse({
+            world_id: state.worldId,
+            entry_id: entryId,
+            at,
+            route: input.route,
+            authenticated_actor: input.authenticatedActor,
+            claimed_actor: input.claimedActor,
+            outcome: input.outcome,
+            http_status: input.httpStatus,
+            ...(input.readLengths === undefined ? {} : { read_lengths: input.readLengths }),
+          }),
+        },
+      ],
+      result: entryId,
+    }));
     return completed.result;
   }
 
@@ -1070,7 +1501,9 @@ export class AuthorizationCore {
       if (ruling.status !== 'issued') {
         return { ops: [], result: { ok: false, defect: 'replayed-ruling' } as const };
       }
-      if (ruling.verdict !== 'allow') return { ops: [], result: { ok: false, defect: 'not-allowed' } as const };
+      if (ruling.gate !== 'commit' || ruling.verdict !== 'allow') {
+        return { ops: [], result: { ok: false, defect: 'not-allowed' } as const };
+      }
 
       const expiryOps: WalOp[] = [];
       if (at >= ruling.binding.validity_window.not_after) {

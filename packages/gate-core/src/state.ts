@@ -447,6 +447,18 @@ export function applyWorldOp(state: WorldState, op: WalOp, transactionTimestamp:
       });
       break;
     }
+    case 'escalation.link_successor': {
+      const current = requireValue(state.escalations, op.escalation_id, `escalation ${op.escalation_id}`);
+      requireValue(state.rulings, op.successor_ruling_id, `successor ruling ${op.successor_ruling_id}`);
+      if (current.state !== 'disposed') {
+        fail('illegal-transition', `escalation ${op.escalation_id} must be disposed before linking a successor`);
+      }
+      if (current.successor_ruling_id !== null) {
+        fail('illegal-transition', `escalation ${op.escalation_id} already has a successor`);
+      }
+      state.escalations.set(op.escalation_id, { ...current, successor_ruling_id: op.successor_ruling_id });
+      break;
+    }
     case 'escalation.timeout': {
       const current = requireValue(state.escalations, op.escalation_id, `escalation ${op.escalation_id}`);
       if (current.state !== 'open') fail('illegal-transition', `escalation ${op.escalation_id} is already ${current.state}`);
@@ -675,6 +687,18 @@ export function validateWorldState(state: WorldState): void {
       binding.delta !== reservation.delta
     ) {
       fail('orphan-state', `reservation ${reservation.reservation_id} has no matching owning ruling`);
+    }
+  }
+  for (const escalation of state.escalations.values()) {
+    const source = state.rulings.get(escalation.ruling_id);
+    if (source === undefined) fail('orphan-state', `escalation ${escalation.escalation_id} has no source ruling`);
+    if (escalation.successor_ruling_id !== null) {
+      if (
+        state.rulings.get(escalation.successor_ruling_id) === undefined ||
+        source.successor_ruling_id !== escalation.successor_ruling_id
+      ) {
+        fail('orphan-state', `escalation ${escalation.escalation_id} has an inconsistent successor link`);
+      }
     }
   }
   for (const ruling of state.rulings.values()) {

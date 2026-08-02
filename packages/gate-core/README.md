@@ -15,5 +15,9 @@ touching its own idempotency ledger.
 
 M3 adds server-owned signed-card verification, approved-model selection records, durable effect-outcome
 adoption, and the unknown/absent crash-reconciliation transitions. The recovery owner and six-field
-contract are pinned into the commitment before effect. Run `npm test` and `npm run typecheck` from the
-repository root.
+contract are pinned into the commitment before effect.
+
+The first M4 slice adds the deny-by-default authenticated route adapter with durable denial evidence,
+atomic single-use escalation dispositions and timeout races, successor rulings for revised proposals,
+and durable review obligations. Native HTTP process wrappers and browser consoles remain to be built.
+Run `npm test` and `npm run typecheck` from the repository root.

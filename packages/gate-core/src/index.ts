@@ -22,6 +22,7 @@ export * from './walStore.js';
 export * from './policyLoader.js';
 export * from './evaluator.js';
 export * from './authorizationCore.js';
+export * from './authorizationHttpAdapter.js';
 export * from './sweeper.js';
 export * from './tokenVerifier.js';
 export * from './cardRegistry.js';
