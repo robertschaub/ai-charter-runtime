@@ -76,8 +76,13 @@ export interface AuthorizationProcessHandle {
   close(): Promise<void>;
 }
 
+export interface AuthorizationProcessDependencies {
+  readonly runMaintenance?: typeof runRuntimeMaintenance;
+}
+
 export async function startAuthorizationProcess(
   env: NodeJS.ProcessEnv = process.env,
+  dependencies: AuthorizationProcessDependencies = {},
 ): Promise<AuthorizationProcessHandle> {
   const host = loopbackHost(env);
   const port = portFrom(env, 'AUTHZ_PORT', 7801);
@@ -132,6 +137,7 @@ export async function startAuthorizationProcess(
   const failure = new Promise<Error>((resolveFailurePromise) => {
     resolveFailure = resolveFailurePromise;
   });
+  const runMaintenance = dependencies.runMaintenance ?? runRuntimeMaintenance;
   try {
     await servicesProbe.requireHealthy();
     const authorization = new AuthorizationCore({
@@ -145,7 +151,7 @@ export async function startAuthorizationProcess(
     });
     await authorization.activatePolicy();
     const maintain = async () => {
-      await runRuntimeMaintenance({
+      await runMaintenance({
         authorization,
         store,
         keyring,
@@ -198,7 +204,10 @@ export async function startAuthorizationProcess(
   }
 }
 
-async function main(): Promise<void> {
+export async function runAuthorizationProcess(
+  env: NodeJS.ProcessEnv = process.env,
+  dependencies: AuthorizationProcessDependencies = {},
+): Promise<void> {
   let handle: AuthorizationProcessHandle | undefined;
   let stopRequested = false;
   let closePromise: Promise<void> | undefined;
@@ -230,7 +239,7 @@ async function main(): Promise<void> {
   process.once('disconnect', requestStop);
   process.on('message', onMessage);
   try {
-    handle = await startAuthorizationProcess();
+    handle = await startAuthorizationProcess(env, dependencies);
     if (stopRequested) {
       await close();
       return;
@@ -262,7 +271,7 @@ async function main(): Promise<void> {
 
 const invokedPath = process.argv[1];
 if (invokedPath !== undefined && pathToFileURL(resolve(invokedPath)).href === import.meta.url) {
-  main().catch((error: unknown) => {
+  runAuthorizationProcess().catch((error: unknown) => {
     const message = error instanceof Error ? error.message : 'unknown startup error';
     process.stderr.write(`authorization startup failed: ${message}\n`);
     process.exitCode = 1;
