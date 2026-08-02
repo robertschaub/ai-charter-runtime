@@ -26,7 +26,7 @@ plan change before implementation continues.
 
 ## Reviewed implementation baseline
 
-The latest adversarially reviewed implementation baseline is
+The latest maintainer-run, cross-model adversarially reviewed runtime implementation baseline is
 `ff0ada625d059dbf9c018f661b59c448c9494a98` (`ff0ada6`), with a GO verdict and no open findings.
 At that baseline, `npm run typecheck` passed, the Git-safety hook suite passed 4 tests, and Vitest passed
 229 tests across 22 files. The work remained unpushed at review time; branch publication remains a
@@ -79,7 +79,11 @@ review. Test-family coverage continues to be reported as exercised, partial, or 
 5. Resolve the browser credential-handoff gate below before shipping a case-console session. Then implement
    the case-console model picker, authoritative dialogue deep link, two-hop outcome polling, and the HTTP-level
    raw-API bypass beat without moving authority into the UI.
-6. Exercise the M4 demo beats and adversarial families named by specification §10, update honest coverage
+6. Implement ADR-003 checkpoint anchoring before claiming beats 15–16: a write-only checkpoint writer,
+   composite-head and checkpoint-chain verification, `npm run verify:records` with an explicit local mode,
+   rollback/tamper detector tests, and latest-pushed-checkpoint fields in receipts. Deterministic tests must
+   create only synthetic checkpoint fixtures and must never commit or push them.
+7. Exercise the M4 demo beats and adversarial families named by specification §10, update honest coverage
    statements, and obtain an exact-SHA adversarial review. Only then may planning advance to M5.
 
 ## Browser credential-handoff decision gate
@@ -98,11 +102,15 @@ without resolving this gate.
 
 1. **Maintenance fail-stop test** — the smallest remaining lifecycle gap; tests and only the minimum injection
    seam required to make the failure deterministic.
-2. **Read-side projections and handlers** — complete the server contract before building UI consumers.
-3. **Authorization-origin governance console** — static shell and principal/applicant surfaces, excluding the
+2. **ADR-003 local checkpoint detector** — implement the write-only writer, composite/checkpoint verifier,
+   `verify:records --local`, beat-15 tamper and rollback tests, and receipt checkpoint references; no commit,
+   push, or remote probe is part of this slice.
+3. **Read-side projections and handlers** — complete the server contract, including checkpoint/open-window
+   facts required by the record viewer and applicant receipt, before building UI consumers.
+4. **Authorization-origin governance console** — static shell and principal/applicant surfaces, excluding the
    unresolved case-browser handoff.
-4. **Upstream handoff decision** — separately approved specification change followed by ADR alignment.
-5. **Case console and M4 acceptance pass** — model picker, dialogue link/polling, raw-API beat, coverage ledger,
+5. **Upstream handoff decision** — separately approved specification change followed by ADR alignment.
+6. **Case console and M4 acceptance pass** — model picker, dialogue link/polling, raw-API beat, coverage ledger,
    and exact-SHA review.
 
 Each slice is committed and reviewed independently. No slice authorizes live probes, key generation or rotation,
