@@ -70,6 +70,7 @@ export const AUTHORIZATION_ROUTES = [
     authorityChanging: true,
   },
   {
+    // Reporting changes the durable access chain, so the foreign-Origin guard is intentional.
     id: 'access.report',
     method: 'POST',
     template: '/w/{world_id}/access-events',

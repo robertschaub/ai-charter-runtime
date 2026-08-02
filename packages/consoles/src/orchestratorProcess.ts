@@ -124,21 +124,52 @@ export async function startOrchestratorProcess(
 }
 
 async function main(): Promise<void> {
-  const handle = await startOrchestratorProcess();
-  process.stdout.write(`${JSON.stringify({ event: 'ready', service: 'orchestrator', ...handle.address })}\n`);
-  let stopping = false;
-  const stop = async () => {
-    if (stopping) return;
-    stopping = true;
-    await handle.close();
-    if (process.connected) process.disconnect();
-    process.exitCode ??= 0;
+  let handle: OrchestratorProcessHandle | undefined;
+  let stopRequested = false;
+  let closePromise: Promise<void> | undefined;
+  const onMessage = (message: unknown) => {
+    if (message === 'runtime-shutdown') requestStop();
   };
-  process.once('SIGINT', () => void stop());
-  process.once('SIGTERM', () => void stop());
-  process.on('message', (message: unknown) => {
-    if (message === 'runtime-shutdown') void stop();
-  });
+  const cleanup = () => {
+    process.off('SIGINT', requestStop);
+    process.off('SIGTERM', requestStop);
+    process.off('disconnect', requestStop);
+    process.off('message', onMessage);
+  };
+  const close = (): Promise<void> => {
+    if (closePromise !== undefined) return closePromise;
+    closePromise = (async () => {
+      cleanup();
+      await handle?.close();
+      if (process.connected) process.disconnect();
+      process.exitCode ??= 0;
+    })();
+    return closePromise;
+  };
+  function requestStop(): void {
+    stopRequested = true;
+    if (handle !== undefined) void close().catch(() => (process.exitCode = 1));
+  }
+  process.once('SIGINT', requestStop);
+  process.once('SIGTERM', requestStop);
+  process.once('disconnect', requestStop);
+  process.on('message', onMessage);
+  try {
+    handle = await startOrchestratorProcess();
+    if (stopRequested) {
+      await close();
+      return;
+    }
+    process.stdout.write(`${JSON.stringify({ event: 'ready', service: 'orchestrator', ...handle.address })}\n`);
+  } catch (error) {
+    cleanup();
+    if (process.connected) process.disconnect();
+    if (stopRequested) {
+      process.exitCode ??= 0;
+      return;
+    }
+    throw error;
+  }
 }
 
 const invokedPath = process.argv[1];

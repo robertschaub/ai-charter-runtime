@@ -95,6 +95,7 @@ async function startChild(
   script: string,
   service: 'authorization' | 'services' | 'orchestrator',
   env: NodeJS.ProcessEnv,
+  onSpawn: (child: RuntimeChild) => void,
 ): Promise<RuntimeChild> {
   const child = spawn(process.execPath, [script], {
     cwd: process.cwd(),
@@ -102,6 +103,7 @@ async function startChild(
     stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
     windowsHide: true,
   });
+  onSpawn(child);
   const childStdout = child.stdout;
   const childStderr = child.stderr;
   if (childStdout === null || childStderr === null) throw new Error(`${service} stdio was not piped`);
@@ -186,68 +188,107 @@ export async function runRuntimeSupervisor(env: NodeJS.ProcessEnv = process.env)
   const childEnvironments = runtimeChildEnvironments(env);
   const children: RuntimeChild[] = [];
   let stopping = false;
-  const stop = async () => {
-    if (stopping) return;
+  let stopPromise: Promise<void> | undefined;
+  let shutdownRequested = false;
+  let unexpectedExit: Error | undefined;
+  let resolveDone: (() => void) | undefined;
+  let rejectDone: ((error: unknown) => void) | undefined;
+  const stop = (): Promise<void> => {
+    if (stopPromise !== undefined) return stopPromise;
     stopping = true;
-    for (const child of [...children].reverse()) await stopChild(child);
+    stopPromise = (async () => {
+      for (const child of [...children].reverse()) await stopChild(child);
+    })();
+    return stopPromise;
   };
+  const settle = () => {
+    if (!children.every(hasExited) || resolveDone === undefined || rejectDone === undefined) return;
+    if (unexpectedExit === undefined) resolveDone();
+    else rejectDone(unexpectedExit);
+  };
+  const trackChild = (child: RuntimeChild) => {
+    children.push(child);
+    child.once('exit', (code) => {
+      if (!stopping) {
+        unexpectedExit ??= new Error(`runtime child exited unexpectedly with code ${code}`);
+        void stop().then(settle, (error: unknown) => rejectDone?.(error));
+        return;
+      }
+      settle();
+    });
+  };
+  const requestStop = () => {
+    shutdownRequested = true;
+    void stop().catch((error: unknown) => rejectDone?.(error));
+  };
+  const onMessage = (message: unknown) => {
+    if (message === SHUTDOWN_MESSAGE) requestStop();
+  };
+  process.once('SIGINT', requestStop);
+  process.once('SIGTERM', requestStop);
+  process.once('disconnect', requestStop);
+  process.on('message', onMessage);
 
   try {
-    children.push(
+    try {
       await startChild(
         resolve(root, 'packages/services-mock/dist/servicesProcess.js'),
         'services',
         childEnvironments.services,
-      ),
-    );
-    children.push(
+        trackChild,
+      );
+      if (stopping) {
+        await stop();
+        if (unexpectedExit !== undefined) throw unexpectedExit;
+        return;
+      }
       await startChild(
         resolve(root, 'packages/gate-core/dist/authorizationProcess.js'),
         'authorization',
         childEnvironments.authorization,
-      ),
-    );
-    children.push(
+        trackChild,
+      );
+      if (stopping) {
+        await stop();
+        if (unexpectedExit !== undefined) throw unexpectedExit;
+        return;
+      }
       await startChild(
         resolve(root, 'packages/consoles/dist/orchestratorProcess.js'),
         'orchestrator',
         childEnvironments.orchestrator,
-      ),
-    );
-  } catch (error) {
-    await stop();
-    throw error;
-  }
-
-  await new Promise<void>((resolveDone, reject) => {
-    let unexpectedExit: Error | undefined;
-    const finish = () => {
-      if (!children.every(hasExited)) return;
-      if (unexpectedExit === undefined) resolveDone();
-      else reject(unexpectedExit);
-    };
-    for (const child of children) {
-      let handled = false;
-      const onExit = (code: number | null) => {
-        if (handled) return;
-        handled = true;
-        if (stopping) {
-          finish();
-          return;
-        }
-        unexpectedExit = new Error(`runtime child exited unexpectedly with code ${code}`);
-        void stop().then(finish, reject);
-      };
-      child.once('exit', onExit);
-      if (hasExited(child)) onExit(child.exitCode);
+        trackChild,
+      );
+    } catch (error) {
+      await stop();
+      if (shutdownRequested) return;
+      if (unexpectedExit !== undefined) throw unexpectedExit;
+      throw error;
     }
-    if (unexpectedExit !== undefined) return;
-    process.once('SIGINT', () => void stop().catch(reject));
-    process.once('SIGTERM', () => void stop().catch(reject));
-    process.stdout.write(
-      `${JSON.stringify({ event: 'ready', services: ['authorization', 'services', 'orchestrator'] })}\n`,
-    );
-  });
+    if (stopping || shutdownRequested) {
+      await stop();
+      if (unexpectedExit !== undefined) throw unexpectedExit;
+      return;
+    }
+    if (unexpectedExit !== undefined) {
+      await stop();
+      throw unexpectedExit;
+    }
+    await new Promise<void>((resolve, reject) => {
+      resolveDone = resolve;
+      rejectDone = reject;
+      process.stdout.write(
+        `${JSON.stringify({ event: 'ready', services: ['authorization', 'services', 'orchestrator'] })}\n`,
+      );
+    });
+  } finally {
+    resolveDone = undefined;
+    rejectDone = undefined;
+    process.off('SIGINT', requestStop);
+    process.off('SIGTERM', requestStop);
+    process.off('disconnect', requestStop);
+    process.off('message', onMessage);
+  }
 }
 
 async function main(): Promise<void> {

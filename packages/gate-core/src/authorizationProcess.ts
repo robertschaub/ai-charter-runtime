@@ -199,27 +199,65 @@ export async function startAuthorizationProcess(
 }
 
 async function main(): Promise<void> {
-  const handle = await startAuthorizationProcess();
-  process.stdout.write(`${JSON.stringify({ event: 'ready', service: 'authorization', ...handle.address })}\n`);
-  void handle.failure.then(async (error) => {
-    process.stderr.write(`authorization maintenance failed: ${error.message}\n`);
-    await handle.close();
-    if (process.connected) process.disconnect();
-    process.exitCode = 1;
-  });
-  let stopping = false;
-  const stop = async () => {
-    if (stopping) return;
-    stopping = true;
-    await handle.close();
-    if (process.connected) process.disconnect();
-    process.exitCode ??= 0;
+  let handle: AuthorizationProcessHandle | undefined;
+  let stopRequested = false;
+  let closePromise: Promise<void> | undefined;
+  const onMessage = (message: unknown) => {
+    if (message === 'runtime-shutdown') requestStop();
   };
-  process.once('SIGINT', () => void stop());
-  process.once('SIGTERM', () => void stop());
-  process.on('message', (message: unknown) => {
-    if (message === 'runtime-shutdown') void stop();
-  });
+  const cleanup = () => {
+    process.off('SIGINT', requestStop);
+    process.off('SIGTERM', requestStop);
+    process.off('disconnect', requestStop);
+    process.off('message', onMessage);
+  };
+  const close = (): Promise<void> => {
+    if (closePromise !== undefined) return closePromise;
+    closePromise = (async () => {
+      cleanup();
+      await handle?.close();
+      if (process.connected) process.disconnect();
+      process.exitCode ??= 0;
+    })();
+    return closePromise;
+  };
+  function requestStop(): void {
+    stopRequested = true;
+    if (handle !== undefined) void close().catch(() => (process.exitCode = 1));
+  }
+  process.once('SIGINT', requestStop);
+  process.once('SIGTERM', requestStop);
+  process.once('disconnect', requestStop);
+  process.on('message', onMessage);
+  try {
+    handle = await startAuthorizationProcess();
+    if (stopRequested) {
+      await close();
+      return;
+    }
+    process.stdout.write(`${JSON.stringify({ event: 'ready', service: 'authorization', ...handle.address })}\n`);
+    void handle.failure
+      .then(async (error) => {
+        cleanup();
+        process.stderr.write(`authorization maintenance failed: ${error.message}\n`);
+        await handle?.close();
+        if (process.connected) process.disconnect();
+        process.exitCode = 1;
+      })
+      .catch(() => {
+        cleanup();
+        if (process.connected) process.disconnect();
+        process.exitCode = 1;
+      });
+  } catch (error) {
+    cleanup();
+    if (process.connected) process.disconnect();
+    if (stopRequested) {
+      process.exitCode ??= 0;
+      return;
+    }
+    throw error;
+  }
 }
 
 const invokedPath = process.argv[1];

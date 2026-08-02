@@ -413,11 +413,118 @@ describe('M4 native three-process boundary', () => {
 
       const { proposal_hash: ignoredProposalHash, ...proposalBody } = proposal;
       void ignoredProposalHash;
+      const unknownProposal = freezeProposal({
+        ...proposalBody,
+        proposal_id: 'prp_process_unknown',
+        action_id: 'act_process_unknown',
+        created_at: new Date(now + 1).toISOString(),
+        exact_parameters: { amount_minor_units: 0, reference: 'case-process-unknown' },
+        cost_obligation: { amount_minor_units: 0, description: 'No synthetic cost.' },
+      });
+      const unknownSubmission = await postJson(
+        authorizationOrigin,
+        '/w/w-demo/proposals',
+        tokens.orchestratorAtAuthz,
+        { gate: 'commit', proposal: unknownProposal, service: 'filing', action_class: 'grant-filing' },
+      );
+      expect(unknownSubmission.status).toBe(200);
+      const unknownRuling = (await unknownSubmission.json()) as { ruling?: { ruling_id?: string } };
+      const unknownRulingId = unknownRuling.ruling?.ruling_id;
+      if (unknownRulingId === undefined) throw new Error('unknown fixture did not receive a ruling id');
+
+      const identityProbe = await requestJson(
+        servicesOrigin,
+        'GET',
+        `/w/w-demo/effects/${'b'.repeat(64)}`,
+        tokens.authzAtServices,
+      );
+      expect(identityProbe.status).toBe(200);
+      const servicesIdentity = (await identityProbe.json()) as { boot_id?: string; ledger_id?: string };
+      if (servicesIdentity.boot_id === undefined || servicesIdentity.ledger_id === undefined) {
+        throw new Error('services identity probe was incomplete');
+      }
+      const unknownIntent = effectIntent.parse({
+        world_id: unknownProposal.world_id,
+        ruling_id: unknownRulingId,
+        frozen_proposal_hash: unknownProposal.proposal_hash,
+        service: 'filing',
+        action_class: 'grant-filing',
+        target: unknownProposal.target,
+        exact_parameters: unknownProposal.exact_parameters,
+        data_to_be_disclosed: unknownProposal.data_to_be_disclosed,
+      });
+      const unknownCommitmentResponse = await postJson(
+        authorizationOrigin,
+        '/w/w-demo/commit-verify',
+        tokens.servicesAtAuthz,
+        {
+          ruling_id: unknownRulingId,
+          intent: unknownIntent,
+          services_host_boot_id: servicesIdentity.boot_id,
+          services_ledger_id: servicesIdentity.ledger_id,
+        },
+      );
+      expect(unknownCommitmentResponse.status).toBe(200);
+      const unknownCommitment = (await unknownCommitmentResponse.json()) as {
+        ok?: boolean;
+        token?: { effect_id?: string };
+      };
+      expect(unknownCommitment.ok).toBe(true);
+      if (unknownCommitment.token?.effect_id === undefined) {
+        throw new Error('unknown fixture did not bind a commitment');
+      }
+
+      await crashProcess(authz);
+      rmSync(join(recordsRoot, 'w-demo', '.writer.lock'), { force: true });
+      authz = await startProcess(
+        join(ROOT, 'packages', 'gate-core', 'dist', 'authorizationProcess.js'),
+        'authorization',
+        authorizationEnvironment,
+      );
+      runtimeProcesses.push(authz);
+      const sameBootProbe = await requestJson(
+        servicesOrigin,
+        'GET',
+        `/w/w-demo/effects/${'c'.repeat(64)}`,
+        tokens.authzAtServices,
+      );
+      expect(sameBootProbe.status).toBe(200);
+      await expect(sameBootProbe.json()).resolves.toMatchObject({
+        state: 'absent',
+        boot_id: servicesIdentity.boot_id,
+        ledger_id: servicesIdentity.ledger_id,
+      });
+      const unknownActionFile = join(recordsRoot, 'w-demo', 'action.jsonl');
+      expect(verifyChain(unknownActionFile, 'record-entry').ok).toBe(true);
+      const unknownActionEntries = readFileSync(unknownActionFile, 'utf8')
+        .trimEnd()
+        .split('\n')
+        .map((line) => JSON.parse(line) as Record<string, unknown>);
+      expect(unknownActionEntries).toContainEqual(
+        expect.objectContaining({
+          authenticated_actor: 'proc:authz',
+          commitment_and_effect: expect.objectContaining({
+            event: 'effect_outcome',
+            effect_id: unknownCommitment.token.effect_id,
+            outcome: 'unknown-reconciliation-required',
+            recovery_owner_role: 'principal',
+          }),
+          human_intervention_event: expect.objectContaining({
+            payload: expect.objectContaining({
+              kind: 'escalation_raised',
+              contract: expect.objectContaining({
+                decision_and_route: expect.objectContaining({ eligible_role: 'principal' }),
+              }),
+            }),
+          }),
+        }),
+      );
+
       const crashProposal = freezeProposal({
         ...proposalBody,
         proposal_id: 'prp_process_crash',
         action_id: 'act_process_crash',
-        created_at: new Date(now + 1).toISOString(),
+        created_at: new Date(now + 2).toISOString(),
         exact_parameters: { amount_minor_units: 5000, reference: 'case-process-crash' },
       });
       const crashSubmission = await postJson(
@@ -433,17 +540,6 @@ describe('M4 native three-process boundary', () => {
       const crashRulingId = crashRuling.ruling?.ruling_id;
       if (crashRulingId === undefined) throw new Error('crash fixture did not receive a ruling id');
 
-      const identityProbe = await requestJson(
-        servicesOrigin,
-        'GET',
-        `/w/w-demo/effects/${'b'.repeat(64)}`,
-        tokens.authzAtServices,
-      );
-      expect(identityProbe.status).toBe(200);
-      const servicesIdentity = (await identityProbe.json()) as { boot_id?: string; ledger_id?: string };
-      if (servicesIdentity.boot_id === undefined || servicesIdentity.ledger_id === undefined) {
-        throw new Error('services identity probe was incomplete');
-      }
       const crashIntent = effectIntent.parse({
         world_id: crashProposal.world_id,
         ruling_id: crashRulingId,

@@ -262,6 +262,8 @@ export class AuthorizationHttpServer {
       },
       'access.report': async (request) => {
         const parsed = servicesAccessReportRequest.parse(await body(request));
+        // Authorization remains the chain writer; the closed services.* route namespace
+        // and this route's services-only ACL preserve the reporter boundary.
         const entryId = await options.authorization.recordAccess({
           route: ACCESS_ROUTE_LABELS[parsed.route],
           authenticatedActor: parsed.authenticated_actor,

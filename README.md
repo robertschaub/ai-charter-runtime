@@ -69,6 +69,7 @@ npm run runtime:start
 
 The supervisor passes each child only its scoped credentials and derives narrower audience tokens in
 memory. Services recovers its ledger first so authorization can replay, sweep, and reconcile before its
-own listener binds; the orchestrator binds last. All listeners use `127.0.0.1` by default. This is the
-headless transport slice: the
+own listener binds; the orchestrator binds last. Shutdown handlers are installed before the first spawn,
+and supervised children close when their IPC parent disconnects. All listeners use `127.0.0.1` by default.
+This is the headless transport slice: the
 governance console, case console, dialogue control, record viewer, and applicant extract remain M4 work.

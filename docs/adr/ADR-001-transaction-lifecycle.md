@@ -13,7 +13,9 @@
 exposes the authenticated read-only probe before authorization starts. Its execute path still fails closed
 while authorization is absent. Authorization then replays, sweeps, probes every non-terminal commitment,
 and binds its listener only after those passes; the orchestrator binds last. Maintenance repeats without
-overlapping at `SWEEP_INTERVAL_MS`.
+overlapping at `SWEEP_INTERVAL_MS`. The supervisor installs shutdown handlers before spawning and every
+child closes on IPC disconnect; a hard process-tree death may still leave the deliberately crash-visible
+writer lease, which is cleared only after confirming its owner is gone.
 
 ## Context
 
