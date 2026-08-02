@@ -11,6 +11,8 @@ sealed before effect.
 The authoritative build specification lives in the documentation repository:
 [runtime-gates-poc-spec.md](https://github.com/robertschaub/our-ai-charter/blob/main/docs/wip/runtime-gates-poc-spec.md).
 On any divergence, the specification and its linked Charter source documents prevail.
+The exact upstream revision, digest, reviewed runtime baseline, and remaining milestone work are tracked in
+[docs/implementation-plan.md](docs/implementation-plan.md).
 
 ## Honest limits — read this first
 
