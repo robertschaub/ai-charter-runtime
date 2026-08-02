@@ -27,6 +27,10 @@ Schemas keep the subset true: amounts and ceilings are **integers in minor units
 ### Hashes, MACs, encodings — one convention
 - **SHA-256 everywhere** from `node:crypto`; digests are **lowercase hex**, unprefixed, over the UTF-8 bytes of the canonical string. Keys and signatures are **base64**; ids are lowercase ASCII; times are RFC 3339 UTC as above.
 - **Domain separation.** Every digest and MAC is taken over `"ai-charter-runtime/v1/<context>\n"` followed by the canonical bytes, `<context>` ∈ {`proposal`, `effect-intent`, `record-entry`, `access-entry`, `wal-entry`, `mandate-binding`, `commit-token`, `policy-set`, `evaluator-build`, `checkpoint`, `checkpoint-composite`, `model-card`, `card-revocation`}. A digest is therefore never valid in a context other than the one it was computed for. The tag frames the hash input; it is not part of the canonical JSON.
+- **Audience-credential derivation** is the one non-artifact framing family:
+  `SHA-256(UTF-8("ai-charter-runtime/v1/credential-audience/<audience>\n" + lowercase_source_hex))`.
+  The source is high-entropy credential text, not canonical JSON or decoded raw bytes; the output is a
+  lowercase 64-character hex bearer credential. It is never stored or accepted outside the named audience.
 - **Chain rule** (all three streams of ADR-003): `entry_hash = H(domain ‖ canonical(entry without entry_hash))`, the entry including its `prev_hash`; the first entry's `prev_hash` is 64 zeros.
 - Digest and MAC comparisons use `crypto.timingSafeEqual` on equal-length buffers.
 - Artifacts verified on their own — mandate binding, checkpoint, card signature — name their `alg` explicitly. Chain entries do not: the chain algorithm is a repo constant, restated in every checkpoint.

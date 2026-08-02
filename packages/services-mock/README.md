@@ -11,4 +11,6 @@ report the current boot id plus a persistent ledger id, so replacement storage c
 M4 adds a native loopback HTTP process. It accepts effect requests only from the orchestrator's
 services-audience credential, obtains `commit-verify` directly from the authorization service, verifies
 the returned token locally, executes once, and reports the outcome itself. The commit token never returns
-to the orchestrator.
+to the orchestrator. The process recovers and exposes its authenticated read-only ledger probe before
+authorization starts; execute still fails closed while authorization is unavailable. Authenticated denials
+and bounded unauthenticated suppression evidence are appended through the authorization-owned access chain.

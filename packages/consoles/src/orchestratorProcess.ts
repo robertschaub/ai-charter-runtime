@@ -126,12 +126,19 @@ export async function startOrchestratorProcess(
 async function main(): Promise<void> {
   const handle = await startOrchestratorProcess();
   process.stdout.write(`${JSON.stringify({ event: 'ready', service: 'orchestrator', ...handle.address })}\n`);
+  let stopping = false;
   const stop = async () => {
+    if (stopping) return;
+    stopping = true;
     await handle.close();
-    process.exitCode = 0;
+    if (process.connected) process.disconnect();
+    process.exitCode ??= 0;
   };
   process.once('SIGINT', () => void stop());
   process.once('SIGTERM', () => void stop());
+  process.on('message', (message: unknown) => {
+    if (message === 'runtime-shutdown') void stop();
+  });
 }
 
 const invokedPath = process.argv[1];

@@ -1,13 +1,17 @@
 // SPDX-License-Identifier: MIT
 /** Local supervisor: derives audience credentials, then boots the three data-path processes in order. */
-import { spawn, type ChildProcessByStdio } from 'node:child_process';
+import { spawn, type ChildProcess } from 'node:child_process';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import type { Readable } from 'node:stream';
 
 import { deriveAudienceToken } from 'gate-core';
 
-type RuntimeChild = ChildProcessByStdio<null, Readable, Readable>;
+type RuntimeChild = ChildProcess;
+const SHUTDOWN_MESSAGE = 'runtime-shutdown';
+
+function hasExited(child: RuntimeChild): boolean {
+  return child.exitCode !== null || child.signalCode !== null;
+}
 
 function required(env: NodeJS.ProcessEnv, name: string): string {
   const value = env[name];
@@ -34,8 +38,57 @@ function runtimeSettings(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
     'RUNTIME_CARDS_ROOT',
     'RUNTIME_AUTHORIZED_AGENT_ID',
     'GATE_KEYRING_PATH',
+    'SWEEP_INTERVAL_MS',
   ];
   return Object.fromEntries(names.flatMap((name) => (env[name] === undefined ? [] : [[name, env[name]]])));
+}
+
+export interface RuntimeChildEnvironments {
+  readonly authorization: NodeJS.ProcessEnv;
+  readonly services: NodeJS.ProcessEnv;
+  readonly orchestrator: NodeJS.ProcessEnv;
+}
+
+/** Build the exact child custody sets without spawning, so partitioning is directly testable. */
+export function runtimeChildEnvironments(env: NodeJS.ProcessEnv): RuntimeChildEnvironments {
+  const base = { ...systemEnvironment(env), ...runtimeSettings(env) };
+  const caseAtOrchestrator = deriveAudienceToken(
+    required(env, 'AUTHZ_TOKEN_CASE_OFFICER'),
+    'orchestrator-case-officer',
+  );
+  const orchestratorAtServices = deriveAudienceToken(
+    required(env, 'AUTHZ_TOKEN_PROC_ORCHESTRATOR'),
+    'services-proc-orchestrator',
+  );
+  const hmac = {
+    GATE_HMAC_KEY: required(env, 'GATE_HMAC_KEY'),
+    GATE_HMAC_KEY_ID: required(env, 'GATE_HMAC_KEY_ID'),
+  };
+  return {
+    authorization: {
+      ...base,
+      ...hmac,
+      AUTHZ_TOKEN_PRINCIPAL: required(env, 'AUTHZ_TOKEN_PRINCIPAL'),
+      AUTHZ_TOKEN_CASE_OFFICER: required(env, 'AUTHZ_TOKEN_CASE_OFFICER'),
+      AUTHZ_TOKEN_APPLICANT: required(env, 'AUTHZ_TOKEN_APPLICANT'),
+      AUTHZ_TOKEN_PROC_ORCHESTRATOR: required(env, 'AUTHZ_TOKEN_PROC_ORCHESTRATOR'),
+      AUTHZ_TOKEN_PROC_SERVICES_HOST: required(env, 'AUTHZ_TOKEN_PROC_SERVICES_HOST'),
+      SERVICES_TOKEN_PROC_AUTHZ: required(env, 'SERVICES_TOKEN_PROC_AUTHZ'),
+    },
+    services: {
+      ...base,
+      ...hmac,
+      AUTHZ_TOKEN_PROC_SERVICES_HOST: required(env, 'AUTHZ_TOKEN_PROC_SERVICES_HOST'),
+      SERVICES_TOKEN_PROC_AUTHZ: required(env, 'SERVICES_TOKEN_PROC_AUTHZ'),
+      SERVICES_TOKEN_PROC_ORCHESTRATOR: orchestratorAtServices,
+    },
+    orchestrator: {
+      ...base,
+      AUTHZ_TOKEN_PROC_ORCHESTRATOR: required(env, 'AUTHZ_TOKEN_PROC_ORCHESTRATOR'),
+      SERVICES_TOKEN_PROC_ORCHESTRATOR: orchestratorAtServices,
+      ORCHESTRATOR_TOKEN_CASE_OFFICER: caseAtOrchestrator,
+    },
+  };
 }
 
 async function startChild(
@@ -46,13 +99,16 @@ async function startChild(
   const child = spawn(process.execPath, [script], {
     cwd: process.cwd(),
     env,
-    stdio: ['ignore', 'pipe', 'pipe'],
+    stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
     windowsHide: true,
   });
-  child.stdout.setEncoding('utf8');
-  child.stderr.setEncoding('utf8');
+  const childStdout = child.stdout;
+  const childStderr = child.stderr;
+  if (childStdout === null || childStderr === null) throw new Error(`${service} stdio was not piped`);
+  childStdout.setEncoding('utf8');
+  childStderr.setEncoding('utf8');
   let stderr = '';
-  child.stderr.on('data', (chunk: string) => {
+  childStderr.on('data', (chunk: string) => {
     stderr = `${stderr}${chunk}`.slice(-8_192);
   });
   await new Promise<void>((resolveReady, reject) => {
@@ -60,7 +116,7 @@ async function startChild(
     let lineBuffer = '';
     const cleanup = () => {
       clearTimeout(timer);
-      child.stdout.off('data', inspect);
+      childStdout.off('data', inspect);
       child.off('error', onError);
       child.off('exit', onExit);
     };
@@ -68,7 +124,7 @@ async function startChild(
       if (ready) return;
       ready = true;
       cleanup();
-      if (child.exitCode === null) child.kill('SIGTERM');
+      if (!hasExited(child)) child.kill('SIGTERM');
       reject(error);
     };
     const inspect = (chunk: string) => {
@@ -97,95 +153,100 @@ async function startChild(
           `${service} exited during startup with code ${code}${stderr.length === 0 ? '' : `: ${stderr.trim()}`}`,
         ),
       );
-    const timer = setTimeout(() => fail(new Error(`${service} startup timed out`)), 10_000);
-    child.stdout.on('data', inspect);
+    const timer = setTimeout(
+      () => fail(new Error(`${service} startup timed out`)),
+      service === 'authorization' ? 60_000 : 10_000,
+    );
+    childStdout.on('data', inspect);
     child.once('error', onError);
     child.once('exit', onExit);
   });
   return child;
 }
 
+async function stopChild(child: RuntimeChild): Promise<void> {
+  if (hasExited(child)) return;
+  const exited = new Promise<void>((resolveExit) => child.once('exit', () => resolveExit()));
+  const hardStop = () => {
+    if (!hasExited(child)) child.kill('SIGTERM');
+  };
+  try {
+    if (child.connected) child.send(SHUTDOWN_MESSAGE, (error) => error && hardStop());
+    else hardStop();
+  } catch {
+    hardStop();
+  }
+  const fallback = setTimeout(hardStop, 5_000);
+  await exited;
+  clearTimeout(fallback);
+}
+
 export async function runRuntimeSupervisor(env: NodeJS.ProcessEnv = process.env): Promise<void> {
   const root = process.cwd();
-  const base = { ...systemEnvironment(env), ...runtimeSettings(env) };
-  const caseAtOrchestrator = deriveAudienceToken(
-    required(env, 'AUTHZ_TOKEN_CASE_OFFICER'),
-    'orchestrator-case-officer',
-  );
-  const orchestratorAtServices = deriveAudienceToken(
-    required(env, 'AUTHZ_TOKEN_PROC_ORCHESTRATOR'),
-    'services-proc-orchestrator',
-  );
-  const hmac = {
-    GATE_HMAC_KEY: required(env, 'GATE_HMAC_KEY'),
-    GATE_HMAC_KEY_ID: required(env, 'GATE_HMAC_KEY_ID'),
-  };
+  const childEnvironments = runtimeChildEnvironments(env);
   const children: RuntimeChild[] = [];
   let stopping = false;
   const stop = async () => {
     if (stopping) return;
     stopping = true;
-    for (const child of [...children].reverse()) {
-      if (child.exitCode === null) child.kill('SIGTERM');
-    }
-    await Promise.all(
-      children.map(
-        (child) =>
-          new Promise<void>((resolveExit) => {
-            if (child.exitCode !== null) return resolveExit();
-            child.once('exit', () => resolveExit());
-          }),
-      ),
-    );
+    for (const child of [...children].reverse()) await stopChild(child);
   };
 
   try {
     children.push(
-      await startChild(resolve(root, 'packages/gate-core/dist/authorizationProcess.js'), 'authorization', {
-        ...base,
-        ...hmac,
-        AUTHZ_TOKEN_PRINCIPAL: required(env, 'AUTHZ_TOKEN_PRINCIPAL'),
-        AUTHZ_TOKEN_CASE_OFFICER: required(env, 'AUTHZ_TOKEN_CASE_OFFICER'),
-        AUTHZ_TOKEN_APPLICANT: required(env, 'AUTHZ_TOKEN_APPLICANT'),
-        AUTHZ_TOKEN_PROC_ORCHESTRATOR: required(env, 'AUTHZ_TOKEN_PROC_ORCHESTRATOR'),
-        AUTHZ_TOKEN_PROC_SERVICES_HOST: required(env, 'AUTHZ_TOKEN_PROC_SERVICES_HOST'),
-      }),
+      await startChild(
+        resolve(root, 'packages/services-mock/dist/servicesProcess.js'),
+        'services',
+        childEnvironments.services,
+      ),
     );
     children.push(
-      await startChild(resolve(root, 'packages/services-mock/dist/servicesProcess.js'), 'services', {
-        ...base,
-        ...hmac,
-        AUTHZ_TOKEN_PROC_SERVICES_HOST: required(env, 'AUTHZ_TOKEN_PROC_SERVICES_HOST'),
-        SERVICES_TOKEN_PROC_AUTHZ: required(env, 'SERVICES_TOKEN_PROC_AUTHZ'),
-        SERVICES_TOKEN_PROC_ORCHESTRATOR: orchestratorAtServices,
-      }),
+      await startChild(
+        resolve(root, 'packages/gate-core/dist/authorizationProcess.js'),
+        'authorization',
+        childEnvironments.authorization,
+      ),
     );
     children.push(
-      await startChild(resolve(root, 'packages/consoles/dist/orchestratorProcess.js'), 'orchestrator', {
-        ...base,
-        AUTHZ_TOKEN_PROC_ORCHESTRATOR: required(env, 'AUTHZ_TOKEN_PROC_ORCHESTRATOR'),
-        SERVICES_TOKEN_PROC_ORCHESTRATOR: orchestratorAtServices,
-        ORCHESTRATOR_TOKEN_CASE_OFFICER: caseAtOrchestrator,
-      }),
+      await startChild(
+        resolve(root, 'packages/consoles/dist/orchestratorProcess.js'),
+        'orchestrator',
+        childEnvironments.orchestrator,
+      ),
     );
   } catch (error) {
     await stop();
     throw error;
   }
 
-  process.stdout.write(`${JSON.stringify({ event: 'ready', services: ['authorization', 'services', 'orchestrator'] })}\n`);
-  process.once('SIGINT', () => void stop());
-  process.once('SIGTERM', () => void stop());
   await new Promise<void>((resolveDone, reject) => {
+    let unexpectedExit: Error | undefined;
+    const finish = () => {
+      if (!children.every(hasExited)) return;
+      if (unexpectedExit === undefined) resolveDone();
+      else reject(unexpectedExit);
+    };
     for (const child of children) {
-      child.once('exit', (code) => {
+      let handled = false;
+      const onExit = (code: number | null) => {
+        if (handled) return;
+        handled = true;
         if (stopping) {
-          if (children.every((candidate) => candidate.exitCode !== null)) resolveDone();
+          finish();
           return;
         }
-        void stop().then(() => reject(new Error(`runtime child exited unexpectedly with code ${code}`)));
-      });
+        unexpectedExit = new Error(`runtime child exited unexpectedly with code ${code}`);
+        void stop().then(finish, reject);
+      };
+      child.once('exit', onExit);
+      if (hasExited(child)) onExit(child.exitCode);
     }
+    if (unexpectedExit !== undefined) return;
+    process.once('SIGINT', () => void stop().catch(reject));
+    process.once('SIGTERM', () => void stop().catch(reject));
+    process.stdout.write(
+      `${JSON.stringify({ event: 'ready', services: ['authorization', 'services', 'orchestrator'] })}\n`,
+    );
   });
 }
 

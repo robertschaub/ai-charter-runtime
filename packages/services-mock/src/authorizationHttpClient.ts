@@ -4,6 +4,7 @@ import {
   AUTHORITY_DEFECTS,
   commitToken,
   id,
+  worldId as worldIdSchema,
   type AuthorizationCore,
   type CommitVerifyInput,
   type CommitVerifyResult,
@@ -44,6 +45,33 @@ const outcomeResult = z.discriminatedUnion('accepted', [
     })
     .strict(),
 ]);
+const accessReportResult = z.object({ entry_id: id }).strict();
+
+export type ServicesDataAccessRoute = 'services.execute' | 'services.effect-probe';
+export type ServicesAccessRoute = ServicesDataAccessRoute | 'services.unauthenticated-ingress';
+
+export type ServicesAccessDenial =
+  | {
+      readonly route: ServicesDataAccessRoute;
+      readonly authenticated_actor: null;
+      readonly outcome: 'unauthenticated';
+      readonly http_status: 401;
+    }
+  | {
+      readonly route: ServicesDataAccessRoute;
+      readonly authenticated_actor: 'proc:orchestrator' | 'proc:authz';
+      readonly outcome: 'forbidden';
+      readonly http_status: 403;
+    }
+  | {
+      readonly route: 'services.unauthenticated-ingress';
+      readonly authenticated_actor: null;
+      readonly outcome: 'rate-limited';
+      readonly http_status: 429;
+      readonly suppressed_count: number;
+      readonly suppression_window_ms: number;
+      readonly suppression_final: boolean;
+    };
 
 async function responseJson(response: Response, maxBytes: number): Promise<unknown> {
   const declared = response.headers.get('content-length');
@@ -130,5 +158,11 @@ export class ServicesAuthorizationHttpClient
         delivery: input.delivery,
       }),
     ) as EffectOutcomeReportResult;
+  }
+
+  async recordAccessDenial(worldId: string, denial: ServicesAccessDenial): Promise<string> {
+    const world = worldIdSchema.parse(worldId);
+    const parsed = accessReportResult.parse(await this.#post(`/w/${world}/access-events`, denial));
+    return parsed.entry_id;
   }
 }

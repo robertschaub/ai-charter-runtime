@@ -19,6 +19,7 @@ import {
   type AuthorizationAdapterContext,
   type AuthorizationOperationResult,
 } from './authorizationHttpAdapter.js';
+import { proposalRulingProjection } from './authorizationProjection.js';
 import type { Keyring } from './keyring.js';
 import {
   classToken,
@@ -71,6 +72,42 @@ const dispositionRequest = z.object({ disposition }).strict();
 const revisionRequest = z
   .object({ proposal: frozenProposal, context: jsonObject.optional() })
   .strict();
+const servicesAccessRoute = z.enum(['services.execute', 'services.effect-probe']);
+const servicesAccessReportRequest = z.discriminatedUnion('outcome', [
+  z
+    .object({
+      route: servicesAccessRoute,
+      authenticated_actor: z.null(),
+      outcome: z.literal('unauthenticated'),
+      http_status: z.literal(401),
+    })
+    .strict(),
+  z
+    .object({
+      route: servicesAccessRoute,
+      authenticated_actor: z.enum(['proc:orchestrator', 'proc:authz']),
+      outcome: z.literal('forbidden'),
+      http_status: z.literal(403),
+    })
+    .strict(),
+  z
+    .object({
+      route: z.literal('services.unauthenticated-ingress'),
+      authenticated_actor: z.null(),
+      outcome: z.literal('rate-limited'),
+      http_status: z.literal(429),
+      suppressed_count: integer.min(1),
+      suppression_window_ms: integer.min(1),
+      suppression_final: z.boolean(),
+    })
+    .strict(),
+]);
+
+const ACCESS_ROUTE_LABELS = {
+  'services.execute': 'POST /w/{world_id}/services/{service}/execute',
+  'services.effect-probe': 'GET /w/{world_id}/effects/{idempotency_key}',
+  'services.unauthenticated-ingress': 'SERVICES unauthenticated ingress',
+} as const;
 
 class HttpInputError extends Error {
   constructor(readonly status: 400 | 413 | 415, readonly responseCode: string) {
@@ -175,7 +212,21 @@ export class AuthorizationHttpServer {
           actor: requireActor(context),
           ...(parsed.context === undefined ? {} : { context: parsed.context }),
         });
-        return { status: 200, body: result };
+        return {
+          status: 200,
+          body: proposalRulingProjection.parse({
+            ruling: {
+              ruling_id: result.ruling.ruling_id,
+              verdict: result.ruling.verdict,
+              ux_class: result.ruling.ux_class,
+              reason: result.ruling.reason,
+              status: result.ruling.status,
+              successor_ruling_id: result.ruling.successor_ruling_id ?? null,
+              validity_window: result.ruling.binding.validity_window,
+            },
+            escalation_id: result.escalationId,
+          }),
+        };
       },
       'commit.verify': async (request, context) => {
         const parsed = commitVerifyRequest.parse(await body(request));
@@ -208,6 +259,25 @@ export class AuthorizationHttpServer {
           actor: requireActor(context),
         });
         return { status: 200, body: result };
+      },
+      'access.report': async (request) => {
+        const parsed = servicesAccessReportRequest.parse(await body(request));
+        const entryId = await options.authorization.recordAccess({
+          route: ACCESS_ROUTE_LABELS[parsed.route],
+          authenticatedActor: parsed.authenticated_actor,
+          claimedActor: null,
+          outcome: parsed.outcome,
+          httpStatus: parsed.http_status,
+          recorder: { credential: 'proc:authz', claimed_role: null },
+          ...(parsed.outcome === 'rate-limited'
+            ? {
+                suppressedCount: parsed.suppressed_count,
+                suppressionWindowMs: parsed.suppression_window_ms,
+                suppressionFinal: parsed.suppression_final,
+              }
+            : {}),
+        });
+        return { status: 201, body: { entry_id: entryId } };
       },
       'mandate.grant': async (request, context) => {
         const raw = jsonObject.parse(await body(request));

@@ -17,4 +17,6 @@ The native M4 transport test starts three OS processes over loopback HTTP. The o
 frozen proposal, the authorization process alone rules, and the services process obtains and verifies its
 own commit token before effect. Audience-scoped child environments prevent the orchestrator from receiving
 human authorization credentials and prevent the services host from replaying its orchestrator-facing
-credential at the authorization service. Governance/case browser surfaces remain M4 work.
+credential at the authorization service. The supervisor starts services recovery first, authorization
+replay/sweep/reconciliation second, and the orchestrator last. Governance/case browser surfaces remain M4
+work; in particular, the headless derived case credential has no browser handoff yet.

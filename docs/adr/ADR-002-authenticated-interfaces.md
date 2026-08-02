@@ -9,6 +9,12 @@
 
 **Amendment (M4 native-process slice, 2026-08-02):** the local supervisor passes credential subsets rather than the whole environment. It one-way derives distinct case-console and orchestrator→services audience tokens from the existing high-entropy base credentials; the derived values are never stored. A receiving process therefore cannot replay its narrower credential at the authorization service.
 
+**Amendment (M4 native-process review, 2026-08-02):** proposal submission returns only the §7 ruling
+projection; internal bindings, nonces, evidence, reservations, and record-entry ids do not cross into the
+orchestrator. Services-host HTTP denials are reported over a services-only authorization endpoint; each
+authenticated denial and detailed unauthenticated denial is durably appended before its response, and a
+durable suppression marker precedes the first coalesced 429.
+
 ## Context
 
 Three OS processes make "the model proposes, a component outside the model decides, the executing service
@@ -43,7 +49,7 @@ by a tooling script and written to the gitignored `.env.local`:
 | Env var | Kind | Held by |
 |---|---|---|
 | `AUTHZ_TOKEN_PRINCIPAL` | role `principal` | a human, pasted into the governance console |
-| `AUTHZ_TOKEN_CASE_OFFICER` | role `case_officer` | a human, pasted into the case console / dialogue control |
+| `AUTHZ_TOKEN_CASE_OFFICER` | role `case_officer` | a human, pasted only into authorization-origin governance / dialogue controls |
 | `AUTHZ_TOKEN_APPLICANT` | role `applicant` | a human, pasted into the extract view |
 | `AUTHZ_TOKEN_PROC_ORCHESTRATOR` | process `proc:orchestrator` | orchestrator process only |
 | `AUTHZ_TOKEN_PROC_SERVICES_HOST` | process `proc:services_host` | services-host process only |
@@ -54,8 +60,9 @@ target child process: `ORCHESTRATOR_TOKEN_CASE_OFFICER = H("orchestrator-case-of
 and `SERVICES_TOKEN_PROC_ORCHESTRATOR = H("services-proc-orchestrator", AUTHZ_TOKEN_PROC_ORCHESTRATOR)`.
 Here `H` is the domain-prefixed SHA-256 derivation implemented by `deriveAudienceToken`; the source tokens
 are random 256-bit values, so a derived value does not reveal the authorization-service credential. These
-are protocol credentials, not new stored secrets. The authorization process receives the five credentials
-it verifies and the HMAC pair; services receives its authorization credential, the derived execute
+are protocol credentials, not new stored secrets. The authorization process receives the five inbound
+credentials it verifies, its services-probe credential, and the HMAC pair; services receives its
+authorization credential, the derived execute
 credential, its probe credential, and the HMAC pair; the orchestrator receives only its authorization
 process credential and the two narrower credentials it must verify or present. Model API keys are not
 passed by this M4 headless supervisor.
@@ -86,6 +93,7 @@ Authorization service, all data routes under `/w/{world_id}/…`:
 | `GET /mandates/{id}/approved-models` (picker source, card-verified) | `proc:orchestrator`, `role:case_officer` |
 | `POST /commit-verify` | **`proc:services_host` only** |
 | `POST /effects/{effect_id}/outcome` | **`proc:services_host` only** |
+| `POST /access-events` (narrow services-host denial evidence) | **`proc:services_host` only** |
 | `POST /mandates` · `POST /mandates/{id}/amend` · `POST /mandates/{id}/revoke` | **`role:principal` only** |
 | `GET /mandates` (read) | `role:principal`, `role:case_officer` (envelope they work under) |
 | `GET /escalations` (inbox) | `role:principal`, `role:case_officer` — each sees only escalations routed to it |
@@ -132,6 +140,9 @@ The authenticated HTTP adapter emits those entries because it knows the requeste
 credential. Core actor guards are defence in depth and do not fabricate HTTP evidence; M4's adapter
 must append the denial before returning 401/403 without calling the core operation.
 For the coalesced unauthenticated case it appends the suppression marker before the first 429.
+The services adapter uses its process credential to report only a closed denial shape and canonical
+services route id to authorization; it cannot append arbitrary record content. If that append is unavailable,
+services fails the request without returning an unrecorded 401/403.
 
 ### 4. On-behalf-of is provenance, never authority
 
@@ -171,6 +182,12 @@ mirror (§7) and links the responder to the governance origin to answer. It lear
 proceed from `GET /rulings/{id}`: that projection reports the ruling's status and, when an escalation's
 "allow within scope" disposition mints a successor, its `successor_ruling_id`.
 
+The headless M4 slice has no browser delivery path for `ORCHESTRATOR_TOKEN_CASE_OFFICER`; injecting it into
+the orchestrator child is sufficient only for synthetic HTTP tests. The browser console must not ship until
+an authorization-origin, one-time handoff is specified and implemented. That handoff may deliver a narrow
+case-console session but must never send the authorization-service role token to the orchestrator, print
+either credential, or persist the derived static credential in a repository or runtime record.
+
 Token custody in the browser is demo-grade and explicit: a token-entry field on the governance origin,
 held in that origin's `localStorage` (not `sessionStorage` — ADR-004's deep link opens a new tab, which
 would start empty), sent as a bearer header. No login, no session exchange, no cookie.
@@ -204,6 +221,8 @@ Route permission alone would still leak: a "ruling read" that returned the whole
 orchestrator the evidence refs and the screening rationale. Every response is therefore a **fixed
 allowlist projection**, decided per route and per credential:
 
+- proposal submission → `{ruling: {ruling_id, verdict, ux_class, reason, status,
+  successor_ruling_id, validity_window}, escalation_id}`;
 - ruling → `{ruling_id, verdict, ux_class, reason, status, successor_ruling_id, validity_window}`;
 - escalation mirror → `{escalation_id, status, question_text, contract (the six fields),
   proposal_revision_ref, response_bound, terminal_disposition?}` — no record entries, no evidence
@@ -229,8 +248,8 @@ testable; identity is not established.
 ## Consequences
 
 **Testable now.** A route-coverage test enumerates every registered route and fails if any lacks an ACL
-entry. A negative-authorization test replays the orchestrator's credential against every
-authority-changing route and asserts 403 plus an access-log entry — the mechanical form of the "no bypass
+entry. A negative-authorization test replays the orchestrator's credential with the declared HTTP method
+against every route it is denied and asserts 403 plus an access-log entry — the mechanical form of the "no bypass
 path exists" invariant (criterion 4). A forged `X-On-Behalf-Of-Role: principal` from the orchestrator on a
 disposition route is rejected and recorded. Cross-world token use is 403. A duplicate or short token in
 `.env.local` fails startup. Beat 17's raw-API client works precisely because the ACL and the console are

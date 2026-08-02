@@ -22,6 +22,8 @@ atomic single-use escalation dispositions and timeout races, orchestrator-only r
 continuation through all pre-commit gates, authorization-core-owned screening, corrected-revision retries
 after a deny, enforceable substitute roles, non-overridable aggregate-ceiling contracts, counted denial
 suppression, refusal events, and durable review obligations. The authorization service now boots its WAL,
-policy, cards, and credentials before binding a native HTTP listener, using a closed route-to-handler table.
+policy, cards, credentials, observable-expiry sweep, and commitment reconciliation before binding a native
+HTTP listener, using a closed route-to-handler table. Periodic maintenance repeats without overlapping;
+checkpoint anchoring remains separate ADR-003 work.
 Browser consoles and the remaining read-side route implementations remain to be built.
 Run `npm test` and `npm run typecheck` from the repository root.

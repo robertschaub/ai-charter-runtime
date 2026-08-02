@@ -57,25 +57,6 @@ function loopbackOrigin(input: string, name: string): string {
   return parsed.origin;
 }
 
-async function requireHealthy(origin: string): Promise<void> {
-  let response: Response;
-  try {
-    response = await fetch(new URL('/healthz', origin), {
-      redirect: 'error',
-      signal: AbortSignal.timeout(2_000),
-    });
-  } catch {
-    throw new Error('authorization service is not reachable at startup');
-  }
-  if (!response.ok) throw new Error('authorization service is not ready at startup');
-  try {
-    const body = (await response.json()) as { status?: unknown; service?: unknown };
-    if (body.status !== 'ready' || body.service !== 'authorization') throw new Error('wrong health identity');
-  } catch {
-    throw new Error('authorization service returned an invalid startup health response');
-  }
-}
-
 export interface ServicesProcessHandle {
   readonly address: ServicesListeningAddress;
   close(): Promise<void>;
@@ -96,7 +77,6 @@ export async function startServicesProcess(env: NodeJS.ProcessEnv = process.env)
     env['AUTHZ_ORIGIN'] ?? `http://${host}:${authzPort}`,
     'AUTHZ_ORIGIN',
   );
-  await requireHealthy(authorizationOrigin);
   const world = worldId.parse(env['DEMO_WORLD_ID'] ?? 'w-demo');
   const keyring = loadKeyring({ env });
   const ledger = new EffectLedger({
@@ -113,6 +93,7 @@ export async function startServicesProcess(env: NodeJS.ProcessEnv = process.env)
   const server = new ServicesHttpServer({
     services,
     ledger,
+    accessRecorder: authorization,
     worldId: world,
     orchestratorToken,
     authorizationToken: authorizationProbeToken,
@@ -126,12 +107,19 @@ export async function startServicesProcess(env: NodeJS.ProcessEnv = process.env)
 async function main(): Promise<void> {
   const handle = await startServicesProcess();
   process.stdout.write(`${JSON.stringify({ event: 'ready', service: 'services', ...handle.address })}\n`);
+  let stopping = false;
   const stop = async () => {
+    if (stopping) return;
+    stopping = true;
     await handle.close();
-    process.exitCode = 0;
+    if (process.connected) process.disconnect();
+    process.exitCode ??= 0;
   };
   process.once('SIGINT', () => void stop());
   process.once('SIGTERM', () => void stop());
+  process.on('message', (message: unknown) => {
+    if (message === 'runtime-shutdown') void stop();
+  });
 }
 
 const invokedPath = process.argv[1];

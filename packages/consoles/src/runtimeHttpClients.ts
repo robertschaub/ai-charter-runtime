@@ -4,23 +4,14 @@ import {
   classToken,
   effectIntent,
   frozenProposal,
-  gateRuling,
   id,
+  proposalRulingProjection,
   type EffectIntent,
   type FrozenProposal,
-  type RuleProposalResult,
+  type ProposalRulingProjection,
 } from 'gate-core';
 import type { ServicesHostExecution } from 'services-mock';
 import { z } from 'zod';
-
-const ruleResult = z
-  .object({
-    ruling: gateRuling,
-    escalationId: id.nullable(),
-    recordEntryId: id,
-    mandateNarrowed: z.boolean(),
-  })
-  .strict();
 
 async function responseJson(response: Response, maxBytes: number): Promise<unknown> {
   const declared = response.headers.get('content-length');
@@ -87,18 +78,18 @@ export class OrchestratorAuthorizationHttpClient extends JsonHttpClient {
     readonly proposal: FrozenProposal;
     readonly service: string;
     readonly actionClass: string;
-  }): Promise<RuleProposalResult> {
+  }): Promise<ProposalRulingProjection> {
     const proposal = frozenProposal.parse(input.proposal);
     const service = id.parse(input.service);
     const actionClass = classToken.parse(input.actionClass);
-    return ruleResult.parse(
+    return proposalRulingProjection.parse(
       await this.post(`/w/${proposal.world_id}/proposals`, {
         gate: 'commit',
         proposal,
         service,
         action_class: actionClass,
       }),
-    ) as RuleProposalResult;
+    );
   }
 }
 

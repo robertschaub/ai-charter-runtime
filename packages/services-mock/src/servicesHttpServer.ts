@@ -6,6 +6,11 @@ import { effectIntent, hexDigest, id, timingSafeEqualUtf8, worldId } from 'gate-
 import { z, ZodError } from 'zod';
 
 import type { EffectLedger } from './effectLedger.js';
+import type {
+  ServicesAccessDenial,
+  ServicesDataAccessRoute,
+  ServicesAuthorizationHttpClient,
+} from './authorizationHttpClient.js';
 import type { MockServicesHost } from './servicesHost.js';
 
 const executeRequest = z.object({ ruling_id: id, intent: effectIntent }).strict();
@@ -46,9 +51,13 @@ export interface ServicesHttpServerOptions {
   readonly worldId: string;
   readonly orchestratorToken: string;
   readonly authorizationToken: string;
+  readonly accessRecorder: Pick<ServicesAuthorizationHttpClient, 'recordAccessDenial'>;
   readonly host: string;
   readonly port: number;
   readonly maxBodyBytes?: number;
+  readonly unauthenticatedDetailLimit?: number;
+  readonly unauthenticatedWindowMs?: number;
+  readonly nowMilliseconds?: () => number;
 }
 
 export interface ServicesListeningAddress {
@@ -61,10 +70,34 @@ export class ServicesHttpServer {
   readonly #server: Server;
   readonly #host: string;
   readonly #port: number;
+  readonly #worldId: string;
+  readonly #accessRecorder: Pick<ServicesAuthorizationHttpClient, 'recordAccessDenial'>;
+  readonly #unauthenticatedDetailLimit: number;
+  readonly #unauthenticatedWindowMs: number;
+  readonly #nowMilliseconds: () => number;
+  #unauthenticatedWindowStart: number;
+  #unauthenticatedDetailedCount = 0;
+  #unauthenticatedSuppressionRecorded = false;
+  #unauthenticatedSuppressedCount = 0;
 
   constructor(options: ServicesHttpServerOptions) {
     const configuredWorld = worldId.parse(options.worldId);
     const maxBodyBytes = options.maxBodyBytes ?? 1024 * 1024;
+    this.#worldId = configuredWorld;
+    this.#accessRecorder = options.accessRecorder;
+    this.#unauthenticatedDetailLimit = options.unauthenticatedDetailLimit ?? 8;
+    this.#unauthenticatedWindowMs = options.unauthenticatedWindowMs ?? 1_000;
+    this.#nowMilliseconds = options.nowMilliseconds ?? Date.now;
+    if (!Number.isSafeInteger(this.#unauthenticatedDetailLimit) || this.#unauthenticatedDetailLimit < 1) {
+      throw new RangeError('unauthenticatedDetailLimit must be a positive safe integer');
+    }
+    if (!Number.isSafeInteger(this.#unauthenticatedWindowMs) || this.#unauthenticatedWindowMs < 1) {
+      throw new RangeError('unauthenticatedWindowMs must be a positive safe integer');
+    }
+    this.#unauthenticatedWindowStart = this.#nowMilliseconds();
+    if (!Number.isSafeInteger(this.#unauthenticatedWindowStart)) {
+      throw new RangeError('nowMilliseconds must return a safe integer');
+    }
     if (!/^[0-9a-fA-F]{64,}$/.test(options.orchestratorToken)) throw new Error('invalid orchestrator credential');
     if (!/^[0-9a-fA-F]{64,}$/.test(options.authorizationToken)) throw new Error('invalid authorization credential');
     if (timingSafeEqualUtf8(options.orchestratorToken, options.authorizationToken)) {
@@ -89,7 +122,12 @@ export class ServicesHttpServer {
             presented !== null && timingSafeEqualUtf8(presented, options.authorizationToken);
           if (execute !== null && request.method === 'POST') {
             if (!knownOrchestrator) {
-              sendJson(response, knownAuthorization ? 403 : 401, { error: knownAuthorization ? 'forbidden' : 'unauthenticated' });
+              const denial = knownAuthorization
+                ? await this.#recordForbidden('services.execute', 'proc:authz')
+                : await this.#recordUnauthenticated('services.execute');
+              sendJson(response, denial.http_status, {
+                error: denial.outcome === 'rate-limited' ? 'rate-limited' : denial.outcome,
+              });
               return;
             }
             const requestedWorld = worldId.safeParse(execute[1]);
@@ -112,7 +150,12 @@ export class ServicesHttpServer {
           }
           if (probe !== null && request.method === 'GET') {
             if (!knownAuthorization) {
-              sendJson(response, knownOrchestrator ? 403 : 401, { error: knownOrchestrator ? 'forbidden' : 'unauthenticated' });
+              const denial = knownOrchestrator
+                ? await this.#recordForbidden('services.effect-probe', 'proc:orchestrator')
+                : await this.#recordUnauthenticated('services.effect-probe');
+              sendJson(response, denial.http_status, {
+                error: denial.outcome === 'rate-limited' ? 'rate-limited' : denial.outcome,
+              });
               return;
             }
             const requestedWorld = worldId.safeParse(probe[1]);
@@ -133,6 +176,74 @@ export class ServicesHttpServer {
         }
       })();
     });
+  }
+
+  async #recordForbidden(
+    route: ServicesDataAccessRoute,
+    actor: 'proc:orchestrator' | 'proc:authz',
+  ): Promise<Extract<ServicesAccessDenial, { outcome: 'forbidden' }>> {
+    const denial = {
+      route,
+      authenticated_actor: actor,
+      outcome: 'forbidden',
+      http_status: 403,
+    } as const;
+    await this.#accessRecorder.recordAccessDenial(this.#worldId, denial);
+    return denial;
+  }
+
+  async #recordUnauthenticated(
+    route: ServicesDataAccessRoute,
+  ): Promise<Extract<ServicesAccessDenial, { outcome: 'unauthenticated' | 'rate-limited' }>> {
+    const now = this.#nowMilliseconds();
+    if (!Number.isSafeInteger(now)) throw new RangeError('nowMilliseconds must return a safe integer');
+    if (
+      now < this.#unauthenticatedWindowStart ||
+      now - this.#unauthenticatedWindowStart >= this.#unauthenticatedWindowMs
+    ) {
+      const suppressedCount = this.#unauthenticatedSuppressedCount;
+      this.#unauthenticatedWindowStart = now;
+      this.#unauthenticatedDetailedCount = 0;
+      this.#unauthenticatedSuppressionRecorded = false;
+      this.#unauthenticatedSuppressedCount = 0;
+      if (suppressedCount > 0) {
+        await this.#accessRecorder.recordAccessDenial(this.#worldId, {
+          route: 'services.unauthenticated-ingress',
+          authenticated_actor: null,
+          outcome: 'rate-limited',
+          http_status: 429,
+          suppressed_count: suppressedCount,
+          suppression_window_ms: this.#unauthenticatedWindowMs,
+          suppression_final: true,
+        });
+      }
+    }
+    if (this.#unauthenticatedDetailedCount < this.#unauthenticatedDetailLimit) {
+      this.#unauthenticatedDetailedCount += 1;
+      const denial = {
+        route,
+        authenticated_actor: null,
+        outcome: 'unauthenticated',
+        http_status: 401,
+      } as const;
+      await this.#accessRecorder.recordAccessDenial(this.#worldId, denial);
+      return denial;
+    }
+    this.#unauthenticatedSuppressedCount += 1;
+    const denial = {
+      route: 'services.unauthenticated-ingress',
+      authenticated_actor: null,
+      outcome: 'rate-limited',
+      http_status: 429,
+      suppressed_count: 1,
+      suppression_window_ms: this.#unauthenticatedWindowMs,
+      suppression_final: false,
+    } as const;
+    if (!this.#unauthenticatedSuppressionRecorded) {
+      this.#unauthenticatedSuppressionRecorded = true;
+      await this.#accessRecorder.recordAccessDenial(this.#worldId, denial);
+    }
+    return denial;
   }
 
   listen(): Promise<ServicesListeningAddress> {

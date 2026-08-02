@@ -61,12 +61,14 @@ Results land in `docs/m0-probe-results.json` (gitignored); conclusions go into
 ## M4 native process boundary
 
 After `.env.local` contains the ADR-002 credentials and ADR-007 HMAC pair, start the local
-authorization, services, and orchestrator processes in fail-closed order with:
+services, authorization, and orchestrator processes in fail-closed recovery order with:
 
 ```powershell
 npm run runtime:start
 ```
 
 The supervisor passes each child only its scoped credentials and derives narrower audience tokens in
-memory. All three listeners bind to `127.0.0.1` by default. This is the headless transport slice: the
+memory. Services recovers its ledger first so authorization can replay, sweep, and reconcile before its
+own listener binds; the orchestrator binds last. All listeners use `127.0.0.1` by default. This is the
+headless transport slice: the
 governance console, case console, dialogue control, record viewer, and applicant extract remain M4 work.

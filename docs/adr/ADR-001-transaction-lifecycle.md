@@ -9,6 +9,12 @@
 
 **Amendment (M4 authority review follow-up, 2026-08-02):** `narrow / modify` records and consumes the human disposition without accepting a replacement proposal. The authenticated orchestrator must then submit the next frozen revision through Authorize → Submit → Verify; an authorization-core-owned callback re-performs screening over that hash, and only a later Commit allow may reserve counters.
 
+**Amendment (M4 native-recovery review, 2026-08-02):** the services host recovers its local ledger and
+exposes the authenticated read-only probe before authorization starts. Its execute path still fails closed
+while authorization is absent. Authorization then replays, sweeps, probes every non-terminal commitment,
+and binds its listener only after those passes; the orchestrator binds last. Maintenance repeats without
+overlapping at `SWEEP_INTERVAL_MS`.
+
 ## Context
 
 The authorization service is the single serialization point. Commitment is two-phase: `commit-verify`

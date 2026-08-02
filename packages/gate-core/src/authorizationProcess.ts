@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-/** Authorization-service process bootstrap. All durable recovery completes before listen. */
+/** Authorization process: replay, sweep, and service reconciliation complete before listen. */
 import { randomUUID } from 'node:crypto';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -11,7 +11,9 @@ import { CardRegistry } from './cardRegistry.js';
 import { digestFileSet } from './fileSetDigest.js';
 import { loadKeyring } from './keyring.js';
 import { loadPolicyFile } from './policyLoader.js';
+import { runRuntimeMaintenance } from './runtimeMaintenance.js';
 import { worldId } from './schemas/index.js';
+import { ServicesProbeHttpClient } from './servicesProbeHttpClient.js';
 import { WalStore } from './walStore.js';
 
 function required(env: NodeJS.ProcessEnv, name: string): string {
@@ -40,12 +42,37 @@ function loopbackHost(env: NodeJS.ProcessEnv): string {
   return host;
 }
 
+function loopbackOrigin(input: string, name: string): string {
+  const parsed = new URL(input);
+  if (
+    parsed.protocol !== 'http:' ||
+    parsed.hostname !== '127.0.0.1' ||
+    parsed.username !== '' ||
+    parsed.password !== '' ||
+    parsed.pathname !== '/' ||
+    parsed.search !== '' ||
+    parsed.hash !== ''
+  ) {
+    throw new Error(`${name} must be an http://127.0.0.1 origin for the local POC`);
+  }
+  return parsed.origin;
+}
+
+function intervalFrom(env: NodeJS.ProcessEnv): number {
+  const raw = env['SWEEP_INTERVAL_MS'];
+  if (raw === undefined || raw === '') return 5_000;
+  const value = Number(raw);
+  if (!Number.isSafeInteger(value) || value < 1) throw new Error('SWEEP_INTERVAL_MS must be positive');
+  return value;
+}
+
 function runtimeId(prefix: string): string {
   return `${prefix}_${randomUUID().replaceAll('-', '')}`;
 }
 
 export interface AuthorizationProcessHandle {
   readonly address: ListeningAddress;
+  readonly failure: Promise<Error>;
   close(): Promise<void>;
 }
 
@@ -54,7 +81,14 @@ export async function startAuthorizationProcess(
 ): Promise<AuthorizationProcessHandle> {
   const host = loopbackHost(env);
   const port = portFrom(env, 'AUTHZ_PORT', 7801);
+  const servicesPort = portFrom(env, 'SERVICES_PORT', 7803);
+  const servicesOrigin = loopbackOrigin(
+    env['SERVICES_ORIGIN'] ?? `http://${host}:${servicesPort}`,
+    'SERVICES_ORIGIN',
+  );
+  const maintenanceIntervalMs = intervalFrom(env);
   const world = worldId.parse(env['DEMO_WORLD_ID'] ?? 'w-demo');
+  const servicesProbeToken = credential(env, 'SERVICES_TOKEN_PROC_AUTHZ');
   const credentials: CredentialBinding[] = [
     { label: 'role:principal', token: credential(env, 'AUTHZ_TOKEN_PRINCIPAL'), worldId: world },
     { label: 'role:case_officer', token: credential(env, 'AUTHZ_TOKEN_CASE_OFFICER'), worldId: world },
@@ -62,7 +96,8 @@ export async function startAuthorizationProcess(
     { label: 'proc:orchestrator', token: credential(env, 'AUTHZ_TOKEN_PROC_ORCHESTRATOR'), worldId: world },
     { label: 'proc:services_host', token: credential(env, 'AUTHZ_TOKEN_PROC_SERVICES_HOST'), worldId: world },
   ];
-  if (new Set(credentials.map((binding) => binding.token.toLowerCase())).size !== credentials.length) {
+  const allCredentials = [...credentials.map((binding) => binding.token), servicesProbeToken];
+  if (new Set(allCredentials.map((value) => value.toLowerCase())).size !== allCredentials.length) {
     throw new Error('authorization runtime credentials must be mutually distinct');
   }
   const recordsRoot = resolve(env['RUNTIME_RECORDS_ROOT'] ?? 'records');
@@ -74,6 +109,11 @@ export async function startAuthorizationProcess(
   const loadedPolicy = loadPolicyFile(policyFile, digestFileSet(sourceRoot, 'evaluator-build'));
   const policy = { ...loadedPolicy, policyContentDigest: digestFileSet(policyRoot, 'policy-set') };
   const cards = CardRegistry.load(cardsRoot);
+  const servicesProbe = new ServicesProbeHttpClient({
+    origin: servicesOrigin,
+    token: servicesProbeToken,
+    worldId: world,
+  });
   const bootId = runtimeId('authz_boot');
   const store = WalStore.open({
     recordsRoot,
@@ -85,7 +125,15 @@ export async function startAuthorizationProcess(
     evaluatorBuildDigest: policy.evaluatorBuildDigest,
   });
   let server: AuthorizationHttpServer | undefined;
+  let maintenanceTimer: NodeJS.Timeout | undefined;
+  let maintenancePromise: Promise<void> | undefined;
+  let closed = false;
+  let resolveFailure: (error: Error) => void = () => undefined;
+  const failure = new Promise<Error>((resolveFailurePromise) => {
+    resolveFailure = resolveFailurePromise;
+  });
   try {
+    await servicesProbe.requireHealthy();
     const authorization = new AuthorizationCore({
       store,
       keyring,
@@ -96,6 +144,16 @@ export async function startAuthorizationProcess(
       resolveModelEvidence: (proposal) => cards.resolve(proposal),
     });
     await authorization.activatePolicy();
+    const maintain = async () => {
+      await runRuntimeMaintenance({
+        authorization,
+        store,
+        keyring,
+        policy,
+        probe: (idempotencyKey) => servicesProbe.probe(idempotencyKey),
+      });
+    };
+    await maintain();
     const adapter = new AuthorizationHttpAdapter({
       authorization,
       ownOrigin: `http://${host}:${port}`,
@@ -104,9 +162,31 @@ export async function startAuthorizationProcess(
     });
     server = new AuthorizationHttpServer({ authorization, adapter, keyring, host, port });
     const address = await server.listen();
+    const scheduleMaintenance = () => {
+      if (maintenancePromise !== undefined || closed) return;
+      maintenancePromise = maintain()
+        .catch(async (error: unknown) => {
+          if (closed) return;
+          if (maintenanceTimer !== undefined) clearInterval(maintenanceTimer);
+          maintenanceTimer = undefined;
+          await server?.close().catch(() => undefined);
+          resolveFailure(error instanceof Error ? error : new Error('unknown maintenance error'));
+        })
+        .finally(() => {
+          maintenancePromise = undefined;
+        });
+    };
+    maintenanceTimer = setInterval(scheduleMaintenance, maintenanceIntervalMs);
+    maintenanceTimer.unref();
     return {
       address,
+      failure,
       close: async () => {
+        if (closed) return;
+        closed = true;
+        if (maintenanceTimer !== undefined) clearInterval(maintenanceTimer);
+        maintenanceTimer = undefined;
+        await maintenancePromise;
         await server?.close();
         store.close();
       },
@@ -121,12 +201,25 @@ export async function startAuthorizationProcess(
 async function main(): Promise<void> {
   const handle = await startAuthorizationProcess();
   process.stdout.write(`${JSON.stringify({ event: 'ready', service: 'authorization', ...handle.address })}\n`);
-  const stop = async () => {
+  void handle.failure.then(async (error) => {
+    process.stderr.write(`authorization maintenance failed: ${error.message}\n`);
     await handle.close();
-    process.exitCode = 0;
+    if (process.connected) process.disconnect();
+    process.exitCode = 1;
+  });
+  let stopping = false;
+  const stop = async () => {
+    if (stopping) return;
+    stopping = true;
+    await handle.close();
+    if (process.connected) process.disconnect();
+    process.exitCode ??= 0;
   };
   process.once('SIGINT', () => void stop());
   process.once('SIGTERM', () => void stop());
+  process.on('message', (message: unknown) => {
+    if (message === 'runtime-shutdown') void stop();
+  });
 }
 
 const invokedPath = process.argv[1];

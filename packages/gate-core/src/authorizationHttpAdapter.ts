@@ -70,6 +70,13 @@ export const AUTHORIZATION_ROUTES = [
     authorityChanging: true,
   },
   {
+    id: 'access.report',
+    method: 'POST',
+    template: '/w/{world_id}/access-events',
+    allowed: ['proc:services_host'],
+    authorityChanging: true,
+  },
+  {
     id: 'mandate.grant',
     method: 'POST',
     template: '/w/{world_id}/mandates',
