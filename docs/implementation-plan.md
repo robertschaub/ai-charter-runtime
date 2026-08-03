@@ -19,26 +19,27 @@ the source document is linked here and is never copied into this repository.
 | Specification path | `docs/wip/runtime-gates-poc-spec.md` |
 | Immutable URL | `https://github.com/robertschaub/our-ai-charter/blob/00c32f521d550800990c795c9a38d5a83f2daf01/docs/wip/runtime-gates-poc-spec.md` |
 | SHA-256 | `33014caab9831674225fd77d711f06065c02ee65839d278c036331e8aa27bf60` |
-| Publication status | Charter commit exists locally and passed adversarial review; remote URL verification awaits a maintainer-authorized upstream push |
+| Publication status | Published upstream; the immutable URL resolves to the pinned path and digest |
 
 The provenance row changes only after an approved upstream specification change. Update the Charter commit
-and digest together. Before either repository is published, push the Charter commit first under separate
-maintainer approval, verify that the immutable URL resolves to the named path and digest, then publish the
-runtime change. The local exact-SHA review may proceed before that publication step.
-Until the upstream push occurs, the canonical `main` URL still presents the previous published revision and
-must not be treated as matching this local pin.
+and digest together. The required publication sequence was completed: the pinned Charter commit was
+published and its immutable URL verified before the runtime M4 baseline was published. The canonical `main`
+URL is a moving reference and may now serve a newer revision; reproducibility relies on the immutable URL,
+commit, path, and digest above. A later upstream change does not silently move this pin.
 
 ## Reviewed implementation baseline
 
 The latest maintainer-run, cross-model adversarially reviewed runtime implementation baseline is
-`e326562f6c29fe2fc625a18127517163d5665dcd` (`e326562`). The final M4 acceptance review returned
-**GO — M4 acceptance complete; no findings**. Review of `d25f366` had found one Medium asymmetric
+`c1b5eb0667f26e6722397d9cdf1d9896db00edf3` (`c1b5eb0`). Its M5.1 review found no code findings and
+reproduced `npm run typecheck`, 4 Git-safety hook tests, 277 Vitest tests across 32 files, and verification of
+both unchanged signed cards. The reviewer found one Low stale publication-status statement in this plan;
+this documentation-only follow-up corrects it without changing the provenance pin or implementation.
+
+The final M4 acceptance review at `e326562f6c29fe2fc625a18127517163d5665dcd` returned **GO — M4
+acceptance complete; no findings**. Review of `d25f366` had found one Medium asymmetric
 disposition-route guard; the focused `7f2e153` correction was re-reviewed **GO — finding closed, no new
 findings** before the acceptance tranche was added.
-One earlier Low finding remains deliberately deferred to the anchoring-flow slice below. At this baseline,
-`npm run typecheck` passed, the Git-safety hook suite passed 4 tests, Vitest passed 267 tests across 31 files,
-and both signed cards verified. The branch remained unpushed at review time; branch publication remains a
-maintainer decision.
+One separate earlier Low finding remains deliberately deferred to the anchoring-flow slice below.
 
 **Deferred anchoring-flow finding:** remote verification currently classifies an honest failed push—where
 the latest local checkpoint commit has not reached the remote—as `remote-mismatch` and fails stop. Preserve
@@ -54,7 +55,7 @@ distinguish an uncommitted latest checkpoint from confirmed remote rollback or m
 | M2 — transactional core | Implemented and fault-tested | Authorization remains the single durable serialization point; authority defects fail closed. |
 | M3 — vertical slice | Implemented | Deterministic authorize → propose → rule → commit-verify → effect → receipt path, adapters, service ledger, and signed cards are present. |
 | M4 — escalation + governance console | **Complete** | Final exact-SHA review of `e326562` returned GO with no findings; the offline acceptance ledger preserves the remaining partial and not-assessed boundaries. |
-| M5 — screening + empathy + switching | **In progress** | M5.1 implements the authorization-owned, case-scoped conversation transition and deterministic projection core while model ingress remains closed. |
+| M5 — screening + empathy + switching | **In progress** | M5.1 is implemented and reviewed at `c1b5eb0`; model ingress remains closed and M5.2 requires separate approval. |
 | M6–M7 | Not started | Full capture/publication work follows the implementation milestones. |
 
 These labels describe repository implementation status, not assurance, certification, or independent
@@ -175,7 +176,7 @@ cycle and permits M5 planning; it does not itself start M5 implementation.
 
 ## M5 implementation ledger
 
-### M5.1 review candidate — authoritative conversation transition and projection core
+### M5.1 implemented and reviewed at `c1b5eb0` — authoritative conversation transition and projection core
 
 - Authorization owns the durable, case-scoped four-store state. Its process startup may seed only the
   checked-in synthetic fixture through an authorization-process-only core seam; no HTTP route accepts store
@@ -192,12 +193,11 @@ cycle and permits M5 planning; it does not itself start M5 implementation.
 - The browser case-message route remains `501 model-interaction-not-active`. M5.1 makes no provider call,
   performs no live screening, and does not implement model switching or red-line output control.
 
-This is an implementation candidate, not a reviewed baseline or M5 completion claim. It becomes the next
-reviewed integration point only after the full local checks pass and an independent reviewer returns GO on
-the exact committed SHA.
-
-Candidate validation before commit: `npm run typecheck` passed; `npm test` passed 4 Git-safety hook tests and
-277 Vitest tests across 32 files; `npm run cards:verify` verified both signed cards unchanged.
+Exact-SHA cross-model adversarial review found no code findings across the twelve requested axes and
+reproduced the candidate validation: `npm run typecheck`; 4 Git-safety hook tests and 277 Vitest tests across
+32 files; and both signed cards verified unchanged. The sole Low finding was the stale publication-status
+wording corrected in this documentation-only follow-up. M5.1 is a reviewed integration point, not an M5
+completion claim.
 
 ## Resolved browser credential-handoff protocol
 
@@ -216,13 +216,10 @@ authorization route. The bounded handoff and session implementation was independ
 
 ## Ordered next slices
 
-1. **M5.1 exact-SHA review** — adversarially verify the case/item binding, authorization-only custody,
-   single-transaction transition, replay behaviour, deterministic tag propagation and projection, historical
-   M4 replay compatibility, and the still-closed model-ingress boundary.
-2. **M5.2 planning after GO** — define the smallest authenticated cross-process projection and deterministic
-   screening slice. Keep mandate/card clearance resolution inside authorization, preserve the rule that a
-   screening signal can only flag or escalate, and leave governed model switching and output red-line checks
-   for separately approved slices.
+1. **M5.2 approval and planning** — define the smallest authenticated cross-process projection and
+   deterministic screening slice. Keep mandate/card clearance resolution inside authorization, preserve the
+   rule that a screening signal can only flag or escalate, and leave governed model switching and output
+   red-line checks for separately approved slices. Do not implement M5.2 without maintainer approval.
 
 Substantive tranches are committed and reviewed at bounded integration points. A documentation-only status
 acknowledgement does not trigger a recursive review round; changes to ADRs, gates, invariants, ACLs,

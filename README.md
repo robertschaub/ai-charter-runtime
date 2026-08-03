@@ -94,7 +94,8 @@ authorization origin, where the responder's own role token reads the question/co
 directly. Raw clients still face the same ACL, Origin guard, evidence resolution, and single-use state machine.
 The browser message route remains explicitly closed until the later M5 model/screening/empathy loop is
 implemented. M4 acceptance is complete at reviewed runtime commit `e326562`; the M5.1 conversation-state
-and pure projection core is an unreviewed implementation candidate and does not make a provider call.
+and pure projection core was cross-model adversarially reviewed at `c1b5eb0` with no code findings. It does
+not make a provider call, M5 remains in progress, and M5.2 requires separate approval.
 
 Offline and deterministic verification uses synthetic records and skips only the remote-presence step:
 
