@@ -26,6 +26,7 @@ export * from './evaluator.js';
 export * from './authorizationCore.js';
 export * from './authorizationHttpAdapter.js';
 export * from './authorizationProjection.js';
+export * from './authorizationReadSide.js';
 export * from './authorizationHttpServer.js';
 export * from './authorizationProcess.js';
 export * from './runtimeCredentials.js';

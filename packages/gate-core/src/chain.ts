@@ -328,6 +328,31 @@ export function verifyChain(file: string, domainTag: ChainDomainTag): ChainVerif
   return { ok: true, length: lines.length, head_hash: prevHash };
 }
 
+/**
+ * Read the exact verified chain envelopes, including their sequence and hash links.
+ * Record-view projections use this rather than replay state so the viewer can show the
+ * integrity evidence it is meant to inspect.
+ */
+export function readVerifiedChainEntries(
+  file: string,
+  domainTag: ChainDomainTag,
+): readonly Readonly<Record<string, unknown>>[] {
+  const verified = verifyChain(file, domainTag);
+  if (!verified.ok) {
+    throw new ChainError(
+      verified.torn_tail ? 'torn-tail' : 'verification-failed',
+      `chain: ${file} failed verification at ${verified.index} (${verified.reason})`,
+    );
+  }
+  if (!existsSync(file)) return [];
+  const raw = readFileSync(file, 'utf8');
+  if (raw.length === 0) return [];
+  return raw
+    .split('\n')
+    .slice(0, -1)
+    .map((line) => Object.freeze(JSON.parse(line) as Record<string, unknown>));
+}
+
 /** Truncate only a verifier-confirmed torn tail; any earlier damage fails closed. */
 export function repairTornTail(file: string, domainTag: ChainDomainTag): ChainHead & { repaired: boolean } {
   const result = verifyChain(file, domainTag);

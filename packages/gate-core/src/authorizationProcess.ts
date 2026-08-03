@@ -7,6 +7,7 @@ import { pathToFileURL } from 'node:url';
 import { AuthorizationCore } from './authorizationCore.js';
 import { AuthorizationHttpAdapter, type CredentialBinding } from './authorizationHttpAdapter.js';
 import { AuthorizationHttpServer, type ListeningAddress } from './authorizationHttpServer.js';
+import { AuthorizationReadSide } from './authorizationReadSide.js';
 import { CardRegistry } from './cardRegistry.js';
 import {
   recordVerificationAccess,
@@ -157,18 +158,20 @@ export async function startAuthorizationProcess(
   const runMaintenance = dependencies.runMaintenance ?? runRuntimeMaintenance;
   const verifyRecordLayer = dependencies.verifyRecordLayer ?? verifyRecords;
   try {
-    const recordVerification = await verifyRecordLayer({
-      recordsRoot,
-      checkpointsRoot,
-      local: verifyLocally,
-      repoRoot: process.cwd(),
-      ...(env['RUNTIME_CHECKPOINT_BRANCH'] === undefined
-        ? {}
-        : { branch: env['RUNTIME_CHECKPOINT_BRANCH'] }),
-      ...(env['RUNTIME_CHECKPOINT_REPO_URL'] === undefined
-        ? {}
-        : { repoUrl: env['RUNTIME_CHECKPOINT_REPO_URL'] }),
-    });
+    const verifyCurrentRecords = () =>
+      verifyRecordLayer({
+        recordsRoot,
+        checkpointsRoot,
+        local: verifyLocally,
+        repoRoot: process.cwd(),
+        ...(env['RUNTIME_CHECKPOINT_BRANCH'] === undefined
+          ? {}
+          : { branch: env['RUNTIME_CHECKPOINT_BRANCH'] }),
+        ...(env['RUNTIME_CHECKPOINT_REPO_URL'] === undefined
+          ? {}
+          : { repoUrl: env['RUNTIME_CHECKPOINT_REPO_URL'] }),
+      });
+    const recordVerification = await verifyCurrentRecords();
     store.beginRun();
     await recordVerificationAccess(store, recordVerification.readLengths);
     await servicesProbe.requireHealthy();
@@ -198,7 +201,14 @@ export async function startAuthorizationProcess(
       demoWorldId: world,
       credentials,
     });
-    server = new AuthorizationHttpServer({ authorization, adapter, keyring, host, port });
+    const reads = new AuthorizationReadSide({
+      store,
+      cards,
+      recordsRoot,
+      worldId: world,
+      verifyRecordLayer: verifyCurrentRecords,
+    });
+    server = new AuthorizationHttpServer({ authorization, reads, adapter, keyring, host, port });
     const address = await server.listen();
     const scheduleMaintenance = () => {
       if (maintenancePromise !== undefined || closed) return;

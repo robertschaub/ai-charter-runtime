@@ -45,6 +45,15 @@ export interface CardResolution extends ModelEvidence {
   readonly integrityAlarm: boolean;
 }
 
+export interface CardInspection {
+  readonly card: ModelCard;
+  readonly digest: string;
+  readonly keyId: string;
+  readonly signatureValid: boolean;
+  readonly withdrawn: boolean;
+  readonly integrityAlarm: boolean;
+}
+
 function readJson(file: string): unknown {
   try {
     return JSON.parse(readFileSync(file, 'utf8'));
@@ -213,10 +222,17 @@ export class CardRegistry {
     };
   }
 
-  get(cardIdInput: string): { readonly card: ModelCard; readonly digest: string; readonly keyId: string } | undefined {
+  get(cardIdInput: string): CardInspection | undefined {
     this.#reload();
     const entry = this.#cards.get(cardSlug.parse(cardIdInput));
     if (entry === undefined) return undefined;
-    return { card: entry.card, digest: entry.digest, keyId: entry.keyId };
+    return {
+      card: entry.card,
+      digest: entry.digest,
+      keyId: entry.keyId,
+      signatureValid: entry.keyUsable,
+      withdrawn: entry.withdrawn,
+      integrityAlarm: entry.integrityAlarm,
+    };
   }
 }

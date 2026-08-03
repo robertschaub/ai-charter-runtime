@@ -15,6 +15,12 @@ orchestrator. Services-host HTTP denials are reported over a services-only autho
 authenticated denial and detailed unauthenticated denial is durably appended before its response, and a
 durable suppression marker precedes the first coalesced 429.
 
+**Amendment (M4 read-side slice, 2026-08-03):** every previously reserved read route now has an
+authorization-owned fixed projection. Record and extract routes read verified materialized chains, append
+their access evidence before returning, and expose checkpoint/open-window facts without turning them into
+an assurance signal. The orchestrator's escalation read is a status mirror only; intervention contracts
+remain confined to the authoritative origin and the role to which they are routed.
+
 ## Context
 
 Three OS processes make "the model proposes, a component outside the model decides, the executing service
@@ -224,11 +230,30 @@ allowlist projection**, decided per route and per credential:
 - proposal submission → `{ruling: {ruling_id, verdict, ux_class, reason, status,
   successor_ruling_id, validity_window}, escalation_id}`;
 - ruling → `{ruling_id, verdict, ux_class, reason, status, successor_ruling_id, validity_window}`;
-- escalation mirror → `{escalation_id, status, question_text, contract (the six fields),
-  proposal_revision_ref, response_bound, terminal_disposition?}` — no record entries, no evidence
-  payloads, no responder identity beyond the role.
+- approved models → the mandate id/version/state and acting-role entries only, each carrying its pinned
+  approval, current signed public card, current digest and verifying key id, factual
+  `current | superseded | withdrawn` and signature/integrity states, and the effective data-class
+  intersection. This is the find → check evidence view, not a green-light or aggregate trust signal;
+- mandate list → current-version envelope fields including authority chain, limits, substitution rules,
+  and approved-model references, but no HMAC binding, replay mechanics, or mutation endpoint;
+- escalation list → only escalations routed to the authenticated role, with route, state, response bound,
+  permitted dispositions, terminal disposition, and proposal-revision reference;
+- routed escalation detail on a role credential → the list fields plus ruling projection, question text
+  where a dialogue event supplies one, and the six-field contract. The orchestrator credential receives
+  only `{escalation_id, status, proposal_revision_ref, response_bound, terminal_disposition}` — never the
+  question, contract, route, ruling, record entries, evidence payloads, or responder identity;
+- record view → verified action- and access-chain envelopes (`seq`, `prev_hash`, `entry_hash`) with their
+  schema-validated entries. The principal sees the world; the case-officer token sees the single demo
+  world's case scope. Their disk heads must equal the current durable writer heads, so a same-boot valid-prefix
+  rollback is an alarm rather than an apparently valid shorter view. No route reads across worlds;
+- record verification → `no-divergence-detected | alarm`, the named checkpoint and only this world's
+  stream rows, latest remotely confirmed checkpoint facts when available, and explicit open-window facts;
+- applicant extract → server-side action, authority/ruling, effect, intervention-summary, challenge route,
+  and local-receipt projections for the single synthetic applicant world. It excludes evidence payloads,
+  bindings, nonces, reservations, idempotency keys, and full internal records.
 
-Neither carries record content or applicant data.
+The orchestrator-facing ruling, model, and escalation-status projections carry neither record content nor
+applicant extract data.
 
 Every route in the record family (`/records…`, `/records/verify`, `/extract`) appends an entry to the
 **access-log chain** before returning, so verification never mutates the chain it verifies, and the

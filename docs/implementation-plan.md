@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: CC-BY-4.0 -->
 # Runtime implementation plan
 
-**Status date:** 2026-08-02
+**Status date:** 2026-08-03
 
 **Current milestone:** M4 in progress; M5 is blocked.
 
@@ -27,9 +27,9 @@ plan change before implementation continues.
 ## Reviewed implementation baseline
 
 The latest maintainer-run, cross-model adversarially reviewed runtime implementation baseline is
-`2421ae9c7a59b49c8d4ea273883e1d1b89eafb1b` (`2421ae9`), with a GO verdict and no open findings.
+`7f7baa0b8526547cb78d42be2c583bb468e80c8c` (`7f7baa0`), with a GO verdict and no open findings.
 At that baseline, `npm run typecheck` passed, the Git-safety hook suite passed 4 tests, and Vitest passed
-229 tests across 22 files. The work remained unpushed at review time; branch publication remains a
+239 tests across 24 files. The branch remained unpushed at review time; branch publication remains a
 maintainer decision.
 
 ## Milestone status
@@ -40,7 +40,7 @@ maintainer decision.
 | M1 — protocol before schemas | Implemented | ADRs, schemas, canonicalization, key handling, record chains, and authenticated-interface contracts are present. |
 | M2 — transactional core | Implemented and fault-tested | Authorization remains the single durable serialization point; authority defects fail closed. |
 | M3 — vertical slice | Implemented | Deterministic authorize → propose → rule → commit-verify → effect → receipt path, adapters, service ledger, and signed cards are present. |
-| M4 — escalation + governance console | **In progress** | Escalation/core and native-process lifecycle are implemented; browser and read-side work listed below remains. |
+| M4 — escalation + governance console | **In progress** | Escalation/core, native-process lifecycle, and read-side handlers are implemented; browser work remains. |
 | M5 — screening + empathy + switching | **Blocked** | Do not begin until M4 is complete and reviewed. |
 | M6–M7 | Not started | Full capture/publication work follows the implementation milestones. |
 
@@ -63,9 +63,6 @@ review. Test-family coverage continues to be reported as exercised, partial, or 
   method-correct negative-authorization sweep over every route denied to the orchestrator.
 - Startup-window, graceful-stop, IPC-disconnect, hard-parent-death, port-release, and writer-lease lifecycle
   coverage for the native supervisor.
-
-### Implemented in the current combined review tranche
-
 - Authorization maintenance fail-stop coverage through a deterministic injection seam: listener closure,
   failure resolution, non-zero exit, port and clean-path writer-lease release, and no credential output.
 - ADR-003 local checkpoint detection: write-only composite checkpoints, checkpoint-chain and local-chain
@@ -73,11 +70,18 @@ review. Test-family coverage continues to be reported as exercised, partial, or 
   remote-unavailability asymmetry, beat-15 tamper/rollback tests, and latest-pushed-checkpoint receipt fields.
   Synthetic tests do not commit, push, or contact a remote.
 
+### Implemented in the current review tranche
+
+- Fixed read-side projections and native HTTP handlers for ruling status, approved signed-card evidence,
+  current mandate envelopes, role-routed escalation lists/detail, verified action/access-chain views,
+  record verification with checkpoint/open-window facts, and the server-side applicant extract/local receipt.
+- Defence-in-depth role filters, orchestrator-minimal escalation status, fixed leakage allowlists, durable
+  record-family access evidence, in-line-tamper and same-boot valid-prefix rollback refusal against the live
+  writer heads, and real-listener integration coverage.
+
 ### Remaining before M4 can be called complete
 
-1. Implement the read-side HTTP handlers behind the frozen ACLs and strict ADR-002 projections:
-   ruling status; approved models; filtered mandate and escalation lists; routed escalation detail; record
-   and access-chain views/verification; and the applicant's server-side scoped extract.
+1. Obtain an exact-SHA adversarial review of the current read-side tranche.
 2. Serve the governance-console shell from the authorization origin with `frame-ancestors 'none'`, no CORS,
    strict same-origin authority-changing requests, and no third-party script or content dependency.
 3. Implement the principal surfaces: mandate grant/amend/revoke, escalation inbox with only contract-permitted
@@ -102,17 +106,16 @@ without resolving this gate.
 
 ## Ordered next slices
 
-1. **Combined runtime review** — one exact-SHA adversarial review of the maintenance fail-stop and ADR-003
-   local detector tranche; documentation-only acknowledgements do not trigger another review loop.
-2. **Read-side projections and handlers** — complete the server contract, including checkpoint/open-window
-   facts required by the record viewer and applicant receipt, before building UI consumers.
-3. **Authorization-origin governance console** — static shell and principal/applicant surfaces, excluding the
+1. **Read-side review** — one exact-SHA adversarial review of the projection/handler tranche.
+2. **Authorization-origin governance console** — static shell and principal/applicant surfaces, excluding the
    unresolved case-browser handoff.
-4. **Upstream handoff decision** — separately approved specification change followed by ADR alignment.
-5. **Case console and M4 acceptance pass** — model picker, dialogue link/polling, raw-API beat, coverage ledger,
+3. **Upstream handoff decision** — separately approved specification change followed by ADR alignment.
+4. **Case console and M4 acceptance pass** — model picker, dialogue link/polling, raw-API beat, coverage ledger,
    and exact-SHA review.
 
-Substantive tranches are committed and reviewed at bounded integration points. Documentation-only
-acknowledgements do not trigger recursive review rounds. No tranche authorizes live probes, key generation or
+Substantive tranches are committed and reviewed at bounded integration points. A documentation-only status
+acknowledgement does not trigger a recursive review round; changes to ADRs, gates, invariants, ACLs,
+projections, provenance pins, or safety restrictions are substantive and remain reviewable. No tranche
+authorizes live probes, key generation or
 rotation, model-card signing, editing generated or append-only records outside a synthetic test harness,
 pushing, or starting M5.

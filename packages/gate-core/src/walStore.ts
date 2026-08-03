@@ -5,7 +5,7 @@ import { join } from 'node:path';
 
 import { canonicalize } from './canonicalize.js';
 import { DurableChainWriter, repairTornTail } from './chain.js';
-import type { AppendedEntry } from './chain.js';
+import type { AppendedEntry, ChainHead } from './chain.js';
 import type { ChainDomainTag } from './domain.js';
 import {
   applyWorldTransaction,
@@ -61,6 +61,12 @@ export interface TransactionResult<T> {
   /** Null when a state-dependent transaction found no transition to record. */
   readonly appended: AppendedEntry | null;
   readonly result: T;
+}
+
+export interface WalStoreChainHeads {
+  readonly wal: ChainHead;
+  readonly action: ChainHead;
+  readonly access: ChainHead;
 }
 
 export class WalStoreError extends Error {
@@ -265,6 +271,15 @@ export class WalStore {
 
   snapshot(): WorldState {
     return cloneWorldState(this.#state);
+  }
+
+  /** In-memory durable heads used to detect a same-boot valid-prefix rollback. */
+  chainHeads(): WalStoreChainHeads {
+    return {
+      wal: this.#walWriter.head,
+      action: this.#actionWriter.head,
+      access: this.#accessWriter.head,
+    };
   }
 
   /** Append genesis if needed and the new run header only after startup verification succeeds. */

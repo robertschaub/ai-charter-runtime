@@ -20,6 +20,7 @@ import {
   type AuthorizationOperationResult,
 } from './authorizationHttpAdapter.js';
 import { proposalRulingProjection } from './authorizationProjection.js';
+import { AuthorizationReadSide, AuthorizationReadSideError } from './authorizationReadSide.js';
 import type { Keyring } from './keyring.js';
 import {
   classToken,
@@ -160,6 +161,7 @@ type Handler = (
 
 export interface AuthorizationHttpServerOptions {
   readonly authorization: AuthorizationCore;
+  readonly reads: AuthorizationReadSide;
   readonly adapter: AuthorizationHttpAdapter;
   readonly keyring: Keyring;
   readonly host: string;
@@ -227,6 +229,22 @@ export class AuthorizationHttpServer {
             escalation_id: result.escalationId,
           }),
         };
+      },
+      'ruling.read': async (_request, context) => {
+        const rulingId = context.params['id'];
+        if (rulingId === undefined) return { status: 404, body: { error: 'not-found' } };
+        const result = options.reads.ruling(rulingId, requireActor(context));
+        return result === null
+          ? { status: 404, body: { error: 'not-found' } }
+          : { status: 200, body: result };
+      },
+      'models.read': async (_request, context) => {
+        const mandateId = context.params['id'];
+        if (mandateId === undefined) return { status: 404, body: { error: 'not-found' } };
+        const result = options.reads.approvedModels(mandateId, requireActor(context));
+        return result === null
+          ? { status: 404, body: { error: 'not-found' } }
+          : { status: 200, body: result };
       },
       'commit.verify': async (request, context) => {
         const parsed = commitVerifyRequest.parse(await body(request));
@@ -303,6 +321,22 @@ export class AuthorizationHttpServer {
         await options.authorization.revokeMandate(mandateId, parsed.version, requireActor(context));
         return { status: 200, body: { mandate_id: mandateId, version: parsed.version, state: 'revoked' } };
       },
+      'mandate.list': async (_request, context) => ({
+        status: 200,
+        body: options.reads.mandates(requireActor(context)),
+      }),
+      'escalation.list': async (_request, context) => ({
+        status: 200,
+        body: options.reads.escalations(requireActor(context)),
+      }),
+      'escalation.read': async (_request, context) => {
+        const escalationId = context.params['id'];
+        if (escalationId === undefined) return { status: 404, body: { error: 'not-found' } };
+        const result = options.reads.escalation(escalationId, requireActor(context));
+        return result === null
+          ? { status: 404, body: { error: 'not-found' } }
+          : { status: 200, body: result };
+      },
       'escalation.dispose': async (request, context) => {
         const parsed = dispositionRequest.parse(await body(request));
         const escalationId = context.params['id'];
@@ -325,6 +359,22 @@ export class AuthorizationHttpServer {
           ...(parsed.context === undefined ? {} : { context: parsed.context }),
         });
         return { status: result.accepted ? 200 : 422, body: result };
+      },
+      'records.verify': async (_request, context) => {
+        const result = await options.reads.verification(requireActor(context));
+        return {
+          status: result.body.status === 'alarm' ? 409 : 200,
+          body: result.body,
+          readLengths: result.readLengths,
+        };
+      },
+      'records.read': async (_request, context) => {
+        const result = options.reads.records(requireActor(context));
+        return { status: 200, body: result.body, readLengths: result.readLengths };
+      },
+      'extract.read': async (_request, context) => {
+        const result = await options.reads.applicantExtract(requireActor(context));
+        return { status: 200, body: result.body, readLengths: result.readLengths };
       },
     };
     const unsupported: Handler = async () => ({ status: 501, body: { error: 'not-implemented' } });
@@ -366,6 +416,12 @@ export class AuthorizationHttpServer {
             if (error instanceof HttpInputError) return { status: error.status, body: { error: error.responseCode } };
             if (error instanceof ZodError) return { status: 422, body: { error: 'invalid-request' } };
             if (error instanceof AuthorizationError) return { status: 422, body: { error: error.code } };
+            if (error instanceof AuthorizationReadSideError) {
+              return {
+                status: error.code === 'forbidden' ? 403 : 409,
+                body: { error: error.code },
+              };
+            }
             throw error;
           }
         },

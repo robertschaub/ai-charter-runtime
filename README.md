@@ -76,8 +76,9 @@ appending the new run header; detected tampering or rollback halts startup, whil
 reported without being confused with missing authority. The orchestrator binds last. Shutdown handlers are
 installed before the first spawn, and supervised children close when their IPC parent disconnects. All listeners
 use `127.0.0.1` by default.
-This is the headless transport slice: the
-governance console, case console, dialogue control, record viewer, and applicant extract remain M4 work.
+The authorization-origin read-side APIs now serve strict ruling, model-card, mandate, escalation,
+record-verification, chain-view, and applicant-extract projections. Browser surfaces remain M4 work: the
+governance console, case console, dialogue control, record viewer UI, and applicant extract UI are not yet built.
 
 Offline and deterministic verification uses synthetic records and skips only the remote-presence step:
 

@@ -28,5 +28,7 @@ ADR-003 run-start verification now precedes the run header, maintenance, and lis
 detector provides the write-only composite writer, checkpoint-chain and record-chain verification,
 rollback alarms, receipt references, and `npm run verify:records -- --local`; operational commit/push
 anchoring remains outside this deterministic M4 slice.
-Browser consoles and the remaining read-side route implementations remain to be built.
+The authorization-owned read model now implements fixed ruling, approved-card, mandate, routed-escalation,
+verified-chain, record-verification, and applicant-extract projections behind those ACLs. Browser consoles
+remain to be built.
 Run `npm test` and `npm run typecheck` from the repository root.

@@ -361,6 +361,68 @@ describe('M4 native three-process boundary', () => {
           new Set(['binding', 'nonce', 'evidence_refs', 'counter_reservations', 'recordEntryId', 'record_entry_id']),
         ),
       ).toBe(false);
+      const submittedRulingId = (submittedBody['ruling'] as { ruling_id?: string }).ruling_id;
+      if (submittedRulingId === undefined) throw new Error('submitted fixture did not receive a ruling id');
+
+      const rulingRead = await requestJson(
+        authorizationOrigin,
+        'GET',
+        `/w/w-demo/rulings/${submittedRulingId}`,
+        tokens.orchestratorAtAuthz,
+      );
+      expect(rulingRead.status).toBe(200);
+      const rulingReadBody = (await rulingRead.json()) as unknown;
+      expect(rulingReadBody).toMatchObject({ ruling_id: submittedRulingId, verdict: 'allow', status: 'issued' });
+      expect(
+        hasAnyKey(
+          rulingReadBody,
+          new Set(['binding', 'nonce', 'evidence_refs', 'counter_reservations', 'record_entry_id']),
+        ),
+      ).toBe(false);
+
+      const approvedModelsRead = await requestJson(
+        authorizationOrigin,
+        'GET',
+        '/w/w-demo/mandates/mdt_demo_grant/approved-models',
+        tokens.orchestratorAtAuthz,
+      );
+      expect(approvedModelsRead.status).toBe(200);
+      const approvedModelsBody = (await approvedModelsRead.json()) as unknown;
+      expect(approvedModelsBody).toMatchObject({
+        mandate_id: 'mdt_demo_grant',
+        mandate_version: 1,
+        models: [
+          expect.objectContaining({
+            card_status: 'current',
+            signature_status: 'valid',
+            integrity_alarm: false,
+            current_card: expect.objectContaining({
+              attestation: 'self-declared or probe-tested — never independently attested',
+            }),
+          }),
+          expect.objectContaining({
+            card_status: 'current',
+            signature_status: 'valid',
+            integrity_alarm: false,
+          }),
+        ],
+      });
+      for (const token of Object.values(tokens)) expect(JSON.stringify(approvedModelsBody)).not.toContain(token);
+
+      const mandateRead = await requestJson(
+        authorizationOrigin,
+        'GET',
+        '/w/w-demo/mandates',
+        tokens.caseOfficer,
+      );
+      expect(mandateRead.status).toBe(200);
+      const mandateReadBody = (await mandateRead.json()) as unknown;
+      expect(mandateReadBody).toMatchObject({
+        mandates: [expect.objectContaining({ mandate_id: 'mdt_demo_grant', state: 'active' })],
+      });
+      expect(hasAnyKey(mandateReadBody, new Set(['binding', 'replay_protection', 'revocation_endpoint']))).toBe(
+        false,
+      );
       const action = await postJson(
         orchestratorOrigin,
         '/w/w-demo/actions/execute',
@@ -374,6 +436,69 @@ describe('M4 native three-process boundary', () => {
         execution: { ok: true, effect: { outcome: 'success' }, report: { accepted: true } },
       });
       expect(hasTokenKey(actionBody)).toBe(false);
+
+      const recordView = await requestJson(
+        authorizationOrigin,
+        'GET',
+        '/w/w-demo/records',
+        tokens.principal,
+      );
+      expect(recordView.status).toBe(200);
+      const recordViewBody = (await recordView.json()) as {
+        action_chain?: { length?: number; entries?: unknown[] };
+        access_chain?: { length?: number; entries?: unknown[] };
+      };
+      expect(recordViewBody).toMatchObject({
+        world_id: 'w-demo',
+        action_chain: { length: expect.any(Number), entries: expect.any(Array) },
+        access_chain: { length: expect.any(Number), entries: expect.any(Array) },
+      });
+      expect(recordViewBody.action_chain?.length).toBeGreaterThan(0);
+      for (const token of Object.values(tokens)) expect(JSON.stringify(recordViewBody)).not.toContain(token);
+
+      const recordVerification = await requestJson(
+        authorizationOrigin,
+        'POST',
+        '/w/w-demo/records/verify',
+        tokens.principal,
+      );
+      expect(recordVerification.status).toBe(200);
+      await expect(recordVerification.json()).resolves.toMatchObject({
+        status: 'no-divergence-detected',
+        checkpoint: null,
+        latest_pushed_checkpoint: null,
+        open_window: { entries: expect.any(Number), minutes: null },
+      });
+
+      const applicantExtract = await requestJson(
+        authorizationOrigin,
+        'GET',
+        '/w/w-demo/extract',
+        tokens.applicant,
+      );
+      expect(applicantExtract.status).toBe(200);
+      const applicantExtractBody = (await applicantExtract.json()) as unknown;
+      expect(applicantExtractBody).toMatchObject({
+        world_id: 'w-demo',
+        scope: { role: 'applicant', resources: ['application-42'] },
+        actions: [
+          expect.objectContaining({
+            action_id: 'act_process_1',
+            ruling: expect.objectContaining({ verdict: 'allow' }),
+          }),
+        ],
+        receipt: {
+          kind: 'local-record-receipt',
+          latest_pushed_checkpoint: null,
+          action_entries: expect.any(Array),
+        },
+      });
+      expect(
+        hasAnyKey(
+          applicantExtractBody,
+          new Set(['binding', 'nonce', 'evidence_refs', 'counter_reservations', 'idempotency_key']),
+        ),
+      ).toBe(false);
 
       const deniedRoutes = AUTHORIZATION_ROUTES.filter(
         (route) =>
@@ -408,6 +533,22 @@ describe('M4 native three-process boundary', () => {
           authenticated_actor: 'proc:authz',
           outcome: 'forbidden',
           http_status: 403,
+        }),
+      );
+      expect(accessEntries).toContainEqual(
+        expect.objectContaining({
+          route: 'GET /w/{world_id}/records/*',
+          authenticated_actor: 'role:principal',
+          outcome: 'served',
+          http_status: 200,
+        }),
+      );
+      expect(accessEntries).toContainEqual(
+        expect.objectContaining({
+          route: 'GET /w/{world_id}/extract',
+          authenticated_actor: 'role:applicant',
+          outcome: 'served',
+          http_status: 200,
         }),
       );
 
@@ -519,6 +660,73 @@ describe('M4 native three-process boundary', () => {
           }),
         }),
       );
+
+      const principalEscalations = await requestJson(
+        authorizationOrigin,
+        'GET',
+        '/w/w-demo/escalations',
+        tokens.principal,
+      );
+      expect(principalEscalations.status).toBe(200);
+      const principalEscalationsBody = (await principalEscalations.json()) as {
+        escalations?: { escalation_id?: string; eligible_role?: string }[];
+      };
+      const recoveryEscalation = principalEscalationsBody.escalations?.find(
+        (escalation) => escalation.eligible_role === 'principal',
+      );
+      if (recoveryEscalation?.escalation_id === undefined) {
+        throw new Error('recovery fixture did not expose its routed escalation');
+      }
+
+      const officerEscalations = await requestJson(
+        authorizationOrigin,
+        'GET',
+        '/w/w-demo/escalations',
+        tokens.caseOfficer,
+      );
+      expect(officerEscalations.status).toBe(200);
+      expect(await officerEscalations.json()).toEqual({ escalations: [] });
+      const officerEscalationDetail = await requestJson(
+        authorizationOrigin,
+        'GET',
+        `/w/w-demo/escalations/${recoveryEscalation.escalation_id}`,
+        tokens.caseOfficer,
+      );
+      expect(officerEscalationDetail.status).toBe(404);
+
+      const principalEscalationDetail = await requestJson(
+        authorizationOrigin,
+        'GET',
+        `/w/w-demo/escalations/${recoveryEscalation.escalation_id}`,
+        tokens.principal,
+      );
+      expect(principalEscalationDetail.status).toBe(200);
+      await expect(principalEscalationDetail.json()).resolves.toMatchObject({
+        escalation_id: recoveryEscalation.escalation_id,
+        eligible_role: 'principal',
+        contract: expect.objectContaining({
+          decision_and_route: expect.objectContaining({ eligible_role: 'principal' }),
+        }),
+      });
+
+      const orchestratorEscalationStatus = await requestJson(
+        authorizationOrigin,
+        'GET',
+        `/w/w-demo/escalations/${recoveryEscalation.escalation_id}`,
+        tokens.orchestratorAtAuthz,
+      );
+      expect(orchestratorEscalationStatus.status).toBe(200);
+      const orchestratorEscalationBody = (await orchestratorEscalationStatus.json()) as unknown;
+      expect(orchestratorEscalationBody).toMatchObject({
+        escalation_id: recoveryEscalation.escalation_id,
+        status: 'open',
+      });
+      expect(
+        hasAnyKey(
+          orchestratorEscalationBody,
+          new Set(['contract', 'question_text', 'ruling', 'eligible_role', 'substitute_roles']),
+        ),
+      ).toBe(false);
 
       const crashProposal = freezeProposal({
         ...proposalBody,
