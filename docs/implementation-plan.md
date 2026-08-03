@@ -221,8 +221,14 @@ completion claim.
   output red-line controls remain deferred.
 
 This is a review candidate, not a reviewed baseline or M5 completion claim.
-Candidate validation is `npm run typecheck` clean, 4 Git-safety hook tests plus 285 Vitest tests across
+Candidate validation is `npm run typecheck` clean, 4 Git-safety hook tests plus 286 Vitest tests across
 33 files passing, `git diff --check` clean, and both unchanged signed cards verified.
+
+The exact-SHA review of `750e380` returned two non-blocking Low findings. This focused follow-up closes both:
+acting projection now rejects worlds with anything other than one active mandate and cross-checks the
+request against that sole envelope, while the publicly exported M3 vertical-slice harness reports screening
+unavailable instead of treating an empty result as a performed check. This is a correction to M5.2, not a
+new M5 slice.
 
 ## Resolved browser credential-handoff protocol
 

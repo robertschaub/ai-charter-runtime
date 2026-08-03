@@ -14,6 +14,8 @@ authorization process now resolves the active mandate, exact role approval, and 
 card before every acting or screening projection. The acting HTTP request cannot name projection scope.
 Offline screening accepts only checked-in synthetic fixture results keyed by exact frozen proposal hash and
 gate, minimizes to fixture-named suspect proposal items, and revalidates the result under the world lock.
+Because the bounded POC has no case-to-mandate relation, acting projection also requires exactly one active
+mandate in the world and rejects ambiguity; the request's mandate reference must match that sole envelope.
 
 ## Context
 Derived content inherits the **union of the restriction tags** of its inputs — a set over confidentiality, purpose and recipient, not a scalar level. Projection to a provider is a subset check against the mandate ∩ card permissions for that provider's **role** (acting or screening); membership in the approved-model set authorizes acting, not blanket disclosure.

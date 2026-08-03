@@ -45,7 +45,9 @@ not rewrite the contested entry, reverse an effect, or claim an independent reme
 authenticated read-only acting-projection route to `proc:orchestrator`. Its strict request names only the
 pinned mandate and acting-card approval; authorization injects the configured case and acting role, reloads
 the signed card, computes the mandate/card clearance intersection, projects whole items, and access-records
-the disclosure. No caller may supply case, role, items, tags, or effective clearances.
+the disclosure. No caller may supply case, role, items, tags, or effective clearances. The bounded POC has no
+case-to-mandate relation, so the route fails closed unless exactly one mandate is active in the world and the
+request's mandate id/version names that sole envelope; the orchestrator cannot choose among active mandates.
 
 ## Context
 

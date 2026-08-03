@@ -99,7 +99,7 @@ async function setup(extraFixtures: readonly ScreeningFixture[] = []) {
     now: () => '2026-08-01T09:00:00.000Z',
   });
   const proposal = frozenProposal.parse(readJson(join(DEMO, 'screening-proposal.json')));
-  return { core, service, proposal };
+  return { core, keyring, service, proposal };
 }
 
 describe('M5.2 authorization-resolved conversation projections', () => {
@@ -180,7 +180,30 @@ describe('M5.2 authorization-resolved conversation projections', () => {
         requestedId: 'swiss-ai/apertus-v1.5-70b',
         actor: ORCHESTRATOR,
       }),
-    ).toThrowError(/current and active/);
+    ).toThrowError(/active mandate/);
+  });
+
+  it('refuses to let the orchestrator choose among multiple active mandate clearance envelopes', async () => {
+    const { core, keyring, service } = await setup();
+    const second = readJson(join(DEMO, 'mandate.json')) as Omit<Mandate, 'binding'>;
+    await core.grantMandate(
+      bindMandate(keyring, {
+        ...second,
+        mandate_id: 'mdt_second_active',
+        revocation_endpoint: '/w/w-demo/mandates/mdt_second_active/revoke',
+      }),
+      PRINCIPAL,
+    );
+    expect(() =>
+      service.acting({
+        mandateId: 'mdt_demo_grant',
+        mandateVersion: 1,
+        cardId: 'publicai-apertus-v1.5-70b',
+        cardVersion: 1,
+        requestedId: 'swiss-ai/apertus-v1.5-70b',
+        actor: ORCHESTRATOR,
+      }),
+    ).toThrowError(/exactly one active mandate/);
   });
 
   it('uses only exact hash-and-gate fixtures and records projection and signal evidence', async () => {

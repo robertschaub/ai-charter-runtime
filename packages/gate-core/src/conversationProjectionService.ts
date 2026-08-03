@@ -110,9 +110,18 @@ export class ConversationProjectionService {
     if (input.actor.credential !== 'proc:orchestrator') {
       throw new ConversationProjectionServiceError('forbidden', 'only the orchestrator process may read acting projection');
     }
+    const mandateId = id.parse(input.mandateId);
+    const mandateVersion = integer.min(1).parse(input.mandateVersion);
+    const governingMandate = this.#singleActiveMandate();
+    if (governingMandate.mandate_id !== mandateId || governingMandate.version !== mandateVersion) {
+      throw new ConversationProjectionServiceError(
+        'invalid-scope',
+        'acting projection mandate does not match the sole active mandate',
+      );
+    }
     return this.#project({
-      mandateId: id.parse(input.mandateId),
-      mandateVersion: integer.min(1).parse(input.mandateVersion),
+      mandateId,
+      mandateVersion,
       cardId: cardSlug.parse(input.cardId),
       cardVersion: integer.min(1).parse(input.cardVersion),
       requestedId: modelId.parse(input.requestedId),
@@ -234,6 +243,20 @@ export class ConversationProjectionService {
       throw new ConversationProjectionServiceError('mandate-unavailable', 'mandate is not current and active');
     }
     return mandateValue;
+  }
+
+  #singleActiveMandate(): Mandate {
+    const active = [...this.#store.snapshot().mandateStatus.entries()].filter(
+      ([, status]) => status.state === 'active',
+    );
+    if (active.length !== 1) {
+      throw new ConversationProjectionServiceError(
+        'mandate-unavailable',
+        'acting projection requires exactly one active mandate in the bounded POC world',
+      );
+    }
+    const [mandateId, status] = active[0] as (typeof active)[number];
+    return this.#currentMandate(mandateId, status.version);
   }
 
   #approvedVersion(mandateId: string, cardId: string, role: ModelRole): number {
