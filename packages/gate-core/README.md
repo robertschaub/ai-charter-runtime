@@ -36,4 +36,7 @@ The M4 dialogue transaction records the routed role's direct response, refuses b
 unless the cited retrieval resolves over the authenticated services boundary, invalidates the stopped ruling,
 and treats replay as a recorded no-op. The orchestrator receives only ruling status; it cannot read the
 question, contract, response, evidence payload, or responder identity.
+The applicant challenge path binds one extract-visible record entry to its action, appends the synthetic
+correction, marks reliance withdrawn pending review, and opens one principal-owned routing obligation. It
+never edits the contested record or claims that the POC supplies an independent remedy decision.
 Run `npm test` and `npm run typecheck` from the repository root.

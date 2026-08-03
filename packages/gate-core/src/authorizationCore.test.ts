@@ -1201,6 +1201,35 @@ describe('M2 authorization transactions', () => {
     ).toContain('escalation_timeout');
   });
 
+  it('cancels an uncommitted escalated action and records the contract recovery owner', async () => {
+    const h = harness();
+    await initialize(h);
+    const frozen = proposal(131, { action_id: 'act_cancel_mid_workflow' });
+    h.setScreening(frozen.proposal_id, [conflictSignal()]);
+    const ruled = await h.core.ruleProposal(ruleInput(frozen, { gate: 'verify' }));
+    if (ruled.escalationId === null) throw new Error('expected escalation');
+    expect(h.store.snapshot().escalations.get(ruled.escalationId)?.contract.decision_and_route.eligible_role).toBe(
+      'case_officer',
+    );
+
+    const cancelled = await h.core.disposeEscalation({
+      escalationId: ruled.escalationId,
+      disposition: 'cancel',
+      actor: CASE_OFFICER,
+    });
+    expect(cancelled).toMatchObject({ accepted: true, successor: null, reviewObligationId: null });
+    const state = h.store.snapshot();
+    expect(state.escalations.get(ruled.escalationId)).toMatchObject({
+      state: 'disposed',
+      terminal_disposition: 'cancel',
+      successor_ruling_id: null,
+    });
+    expect(state.rulings.get(ruled.ruling.ruling_id)?.status).toBe('invalidated');
+    expect(state.commitments.size).toBe(0);
+    expect(state.actionRecords.find((entry) => entry.entry_id === cancelled.recordEntryId)?.human_intervention_event)
+      .toMatchObject({ payload: { kind: 'disposition_recorded', disposition: 'cancel' } });
+  });
+
   it('ignores caller screening claims when authorization-owned screening is unavailable', async () => {
     const h = harness();
     await initialize(h);
@@ -1388,6 +1417,44 @@ describe('M2 authorization transactions', () => {
     expect(disposed.successor.escalationId).not.toBeNull();
   });
 
+  it('blocks a raw above-ceiling human approval at commitment verification', async () => {
+    const h = harness();
+    await initialize(h);
+    const proposals = [172, 173, 174].map((sequence) =>
+      proposal(sequence, {
+        action_id: `act_aggregate_ceiling_${sequence}`,
+        exact_parameters: { amount_minor_units: 40, reference: `case-aggregate-${sequence}` },
+        cost_obligation: { amount_minor_units: 40, description: 'Synthetic cumulative amount.' },
+      }),
+    );
+    const first = proposals[0];
+    const second = proposals[1];
+    const aboveCeiling = proposals[2];
+    if (first === undefined || second === undefined || aboveCeiling === undefined) throw new Error('missing fixtures');
+    expect((await h.core.ruleProposal(ruleInput(first))).ruling.verdict).toBe('allow');
+    expect((await h.core.ruleProposal(ruleInput(second))).ruling.verdict).toBe('allow');
+    const escalated = await h.core.ruleProposal(ruleInput(aboveCeiling));
+    expect(escalated.ruling).toMatchObject({ verdict: 'escalate', matched_rule_id: 'default:aggregate-ceiling' });
+    if (escalated.escalationId === null) throw new Error('expected aggregate-ceiling escalation');
+
+    const attemptedApproval = await h.core.disposeEscalation({
+      escalationId: escalated.escalationId,
+      disposition: 'allow-within-scope',
+      actor: PRINCIPAL,
+    });
+    expect(attemptedApproval).toMatchObject({ accepted: false, defect: 'disposition-not-permitted' });
+    await expect(
+      h.core.commitVerify({
+        rulingId: escalated.ruling.ruling_id,
+        intent: intentFor(aboveCeiling, escalated.ruling.ruling_id),
+        servicesHostBootId: 'services_boot_1',
+        servicesLedgerId: SERVICES_LEDGER_ID,
+        actor: SERVICES_HOST,
+      }),
+    ).resolves.toEqual({ ok: false, defect: 'not-allowed' });
+    expect(h.store.snapshot().commitments.size).toBe(0);
+  });
+
   it('turns seek-review into a durable obligation without issuing effect authority', async () => {
     const h = harness();
     await initialize(h);
@@ -1415,6 +1482,72 @@ describe('M2 authorization transactions', () => {
       route: 'review',
       opened_at: '2026-08-01T09:00:00.000Z',
     });
+  });
+
+  it('records an applicant correction and withdraws reliance into a single routed challenge obligation', async () => {
+    const h = harness();
+    await initialize(h);
+    const frozen = proposal(171, { action_id: 'act_challenge' });
+    const ruled = await h.core.ruleProposal(ruleInput(frozen, { gate: 'commit' }));
+    expect(ruled.ruling.verdict).toBe('allow');
+    const correctionText = 'The synthetic registration date is 2024-06-01, not 2023-06-01.';
+
+    await expect(
+      h.core.submitChallenge({
+        actionId: frozen.action_id,
+        contestedEntryId: ruled.recordEntryId,
+        correctionText,
+        actor: CASE_OFFICER,
+      }),
+    ).resolves.toMatchObject({ accepted: false, defect: 'wrong-role' });
+    const other = proposal(175, { action_id: 'act_other_challenge' });
+    const otherRuled = await h.core.ruleProposal(ruleInput(other, { gate: 'commit' }));
+    expect(otherRuled.ruling.verdict).toBe('allow');
+    await expect(
+      h.core.submitChallenge({
+        actionId: other.action_id,
+        contestedEntryId: ruled.recordEntryId,
+        correctionText,
+        actor: APPLICANT,
+      }),
+    ).resolves.toMatchObject({ accepted: false, defect: 'entry-not-in-action' });
+
+    const concurrent = await Promise.all([
+      h.core.submitChallenge({
+        actionId: frozen.action_id,
+        contestedEntryId: ruled.recordEntryId,
+        correctionText,
+        actor: APPLICANT,
+      }),
+      h.core.submitChallenge({
+        actionId: frozen.action_id,
+        contestedEntryId: ruled.recordEntryId,
+        correctionText,
+        actor: APPLICANT,
+      }),
+    ]);
+    const opened = concurrent.find((result) => result.accepted);
+    const refused = concurrent.find((result) => !result.accepted);
+    expect(opened).toMatchObject({ accepted: true, status: 'opened' });
+    expect(refused).toMatchObject({ accepted: false, defect: 'already-open' });
+    if (opened === undefined || !opened.accepted) throw new Error('expected challenge to open');
+    const state = h.store.snapshot();
+    expect(state.reviews.get(opened.reviewObligationId)).toMatchObject({
+      case_id: frozen.action_id,
+      source_entry_id: opened.recordEntryId,
+      route: 'challenge',
+      recovery_owner_role: 'principal',
+      state: 'open',
+    });
+    expect(state.actionRecords.find((entry) => entry.entry_id === opened.recordEntryId)?.challenge_and_remedy).toEqual({
+      route: 'challenge',
+      opened_at: '2026-08-01T09:00:00.000Z',
+      contested_entry_id: ruled.recordEntryId,
+      correction_text: correctionText,
+      reliance_state: 'withdrawn-pending-review',
+      recovery_owner_role: 'principal',
+    });
+    expect(refused).toMatchObject({ reviewObligationId: opened.reviewObligationId });
   });
 
   it('escalates every cumulative ceiling before issuing unreserved allow authority', async () => {

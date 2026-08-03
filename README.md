@@ -12,7 +12,8 @@ The authoritative build specification lives in the documentation repository:
 [runtime-gates-poc-spec.md](https://github.com/robertschaub/our-ai-charter/blob/main/docs/wip/runtime-gates-poc-spec.md).
 On any divergence, the specification and its linked Charter source documents prevail.
 The exact upstream revision, digest, reviewed runtime baseline, and remaining milestone work are tracked in
-[docs/implementation-plan.md](docs/implementation-plan.md).
+[docs/implementation-plan.md](docs/implementation-plan.md); the offline M4 beat and adversarial mapping is in
+[docs/m4-acceptance.md](docs/m4-acceptance.md).
 
 ## Honest limits — read this first
 
@@ -82,7 +83,8 @@ record-verification, chain-view, and applicant-extract projections. The governan
 `http://127.0.0.1:7801/console` now provides the principal mandate/card/escalation/record surfaces and the
 applicant extract, plus the case officer's user-initiated handoff control. It has no third-party content,
 emits no CORS headers, stores a pasted role token only in that origin's `localStorage`, and presents evidence
-rather than an assurance signal. The handoff opens the fixed orchestrator-origin receiver, consumes a
+rather than an assurance signal. The applicant can append an extract-bound factual correction, which withdraws
+reliance pending a principal-owned routing obligation without rewriting the effect. The handoff opens the fixed orchestrator-origin receiver, consumes a
 maximum-30-second boot-bound code over the authenticated process channel, and creates an independent
 maximum-15-minute session whose raw bearer is kept only in that tab's `sessionStorage`. That case surface now
 shows the mandate's signed-card evidence, requires a local evidence check before preparing a model choice,
@@ -90,7 +92,7 @@ and polls only the authorization-owned ruling-status projection. A safe link ope
 authorization origin, where the responder's own role token reads the question/contract and posts the answer
 directly. Raw clients still face the same ACL, Origin guard, evidence resolution, and single-use state machine.
 The browser message route remains explicitly closed until the M5 model/screening/empathy loop is implemented;
-M5 remains blocked pending the M4 acceptance pass and exact-SHA adversarial review.
+M5 remains blocked pending exact-SHA adversarial review of the M4 acceptance candidate.
 
 Offline and deterministic verification uses synthetic records and skips only the remote-presence step:
 

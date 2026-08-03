@@ -31,9 +31,11 @@ must not be treated as matching this local pin.
 ## Reviewed implementation baseline
 
 The latest maintainer-run, cross-model adversarially reviewed runtime implementation baseline is
-`a8345f015f9df4b89cbae090a9f4d1d240dec5da` (`a8345f0`), with a GO verdict and no findings.
+`7f2e15350015f889c3d539a56001b245a555efb0` (`7f2e153`). Review of `d25f366` found one Medium
+asymmetric disposition-route guard; the focused `7f2e153` correction was re-reviewed **GO — finding closed,
+no new findings**.
 One earlier Low finding remains deliberately deferred to the anchoring-flow slice below. At this baseline,
-`npm run typecheck` passed, the Git-safety hook suite passed 4 tests, Vitest passed 259 tests across 30 files,
+`npm run typecheck` passed, the Git-safety hook suite passed 4 tests, Vitest passed 264 tests across 31 files,
 and both signed cards verified. The branch remained unpushed at review time; branch publication remains a
 maintainer decision.
 
@@ -50,7 +52,7 @@ distinguish an uncommitted latest checkpoint from confirmed remote rollback or m
 | M1 — protocol before schemas | Implemented and amended | ADRs, schemas, canonicalization, key handling, record chains, authenticated-interface contracts, and the approved case-session handoff contract are present. |
 | M2 — transactional core | Implemented and fault-tested | Authorization remains the single durable serialization point; authority defects fail closed. |
 | M3 — vertical slice | Implemented | Deterministic authorize → propose → rule → commit-verify → effect → receipt path, adapters, service ledger, and signed cards are present. |
-| M4 — escalation + governance console | **In progress** | The reviewed escalation/core, native-process, read-side, governance-console, and handoff/session baseline is extended by a pending-review case-console/dialogue tranche; the M4 acceptance pass remains. |
+| M4 — escalation + governance console | **In progress** | All implementation slices through case-console/dialogue are reviewed; the offline acceptance implementation and ledger are complete, with exact-SHA acceptance review pending. |
 | M5 — screening + empathy + switching | **Blocked** | Do not begin until M4 is complete and reviewed. |
 | M6–M7 | Not started | Full capture/publication work follows the implementation milestones. |
 
@@ -117,7 +119,7 @@ Independent adversarial review returned **GO — no findings**. The reviewed val
   dynamic credential rejection, strict assets/configuration, and absence of raw credentials from records and
   process output.
 
-### Implemented in the current tranche; follow-up exact-SHA review pending
+### Implemented and reviewed through `7f2e153`
 
 - Dynamic-session case routes expose the mandate's signed-card evidence and a case-bound ruling-status mirror;
   the static headless credential is denied, present foreign origins are refused, and the case projection never
@@ -142,12 +144,32 @@ Independent adversarial review returned **GO — no findings**. The reviewed val
 - Exact-SHA review of `d25f3661442fb27849c725817fcd74da54291007` found one Medium asymmetric-route
   guard: the general disposition method still accepted dialogue-only values at its core boundary. The focused
   follow-up restricts both the HTTP schema and core transition to general dispositions and adds direct-core
-  and real-listener negative coverage; independent review of that correction remains pending.
+  and real-listener negative coverage. Independent review of `7f2e15350015f889c3d539a56001b245a555efb0`
+  returned **GO — Medium finding closed; no new findings**.
+
+### M4 acceptance implementation; exact-SHA review pending
+
+- [The acceptance ledger](m4-acceptance.md) maps every M4 scripted beat and the §7 adversarial set to named
+  executable evidence while preserving partial and not-assessed classifications.
+- Beat 13 now has an explicit pre-commit cancellation case, and beat 17 has an explicit raw aggregate-ceiling
+  approval attempt followed by commitment-verification refusal.
+- Beat 18 now has an applicant-only, Origin-guarded challenge route and console control. The authorization
+  transaction binds the contested entry to its action, appends the exact synthetic correction, marks reliance
+  `withdrawn-pending-review`, and opens a single principal-owned routing obligation. It neither rewrites the
+  committed record/effect nor claims an independent remedy decision.
+- The real three-process test exercises that challenge after a successful effect, verifies the updated scoped
+  extract, rejects duplicate opening, and includes the new authority-changing route in the orchestrator-denial
+  sweep.
+- Candidate validation is `npm run typecheck` clean, 4 Git-safety hook tests and 267 Vitest tests across 31
+  files, with both signed cards verified unchanged.
+- Beat 15 remains honestly partial at the remote-presence boundary: local tamper/rollback and run-start
+  fail-stop are exercised, but commit/push anchoring stays approval-gated and assigned to the later anchoring
+  and M6 capture flow.
 
 ### Remaining before M4 can be called complete
 
-1. Exercise the M4 demo beats and adversarial families named by specification §10, update honest coverage
-   statements, and obtain an exact-SHA adversarial review. Only then may planning advance to M5.
+1. Obtain an exact-SHA adversarial review of the acceptance commit. Only a GO closes M4 and permits planning
+   to advance to M5.
 
 ## Resolved browser credential-handoff protocol
 
@@ -166,8 +188,8 @@ authorization route. The bounded handoff and session implementation was independ
 
 ## Ordered next slices
 
-1. **M4 acceptance pass** — named demo beats and adversarial families, honest coverage ledger, and exact-SHA
-   review. M5 remains blocked until that review is GO.
+1. **M4 acceptance review** — exact-SHA adversarial review of the challenge path, named-beat tests, and honest
+   coverage ledger. M5 remains blocked until that review is GO.
 
 Substantive tranches are committed and reviewed at bounded integration points. A documentation-only status
 acknowledgement does not trigger a recursive review round; changes to ADRs, gates, invariants, ACLs,

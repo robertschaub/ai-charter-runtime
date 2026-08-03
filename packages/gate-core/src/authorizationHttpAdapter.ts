@@ -192,6 +192,13 @@ export const AUTHORIZATION_ROUTES = [
     authorityChanging: false,
     accessLoggedOnServe: true,
   },
+  {
+    id: 'challenge.submit',
+    method: 'POST',
+    template: '/w/{world_id}/challenges',
+    allowed: ['role:applicant'],
+    authorityChanging: true,
+  },
 ] as const satisfies readonly RouteDefinition[];
 
 export interface AuthorizationAdapterRequest {

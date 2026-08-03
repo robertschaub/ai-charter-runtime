@@ -189,6 +189,30 @@
           <button type="button" id="load-extract">Load scoped extract</button>
           <pre id="extract-output" class="data-output tall" tabindex="0"></pre>
         </section>
+        <section class="panel" aria-labelledby="challenge-heading">
+          <h3 id="challenge-heading">Challenge a factual record</h3>
+          <p>
+            This appends the correction, withdraws reliance pending review, and opens a routing obligation to
+            the principal. It does not alter the committed effect or imply an independent remedy decision.
+            Use synthetic demonstration data only.
+          </p>
+          <form id="challenge-form" class="form-grid">
+            <label>
+              Action id
+              <input id="challenge-action-id" required pattern="[a-z0-9][a-z0-9_.:-]*">
+            </label>
+            <label>
+              Contested record entry id
+              <input id="challenge-entry-id" required pattern="[a-z0-9][a-z0-9_.:-]*">
+            </label>
+            <label>
+              Factual correction
+              <textarea id="challenge-correction" rows="5" maxlength="32768" required></textarea>
+            </label>
+            <button type="submit">Record challenge</button>
+          </form>
+          <pre id="challenge-output" class="data-output" tabindex="0"></pre>
+        </section>
       </section>
 
       <section id="dialogue-view" class="panel" aria-labelledby="dialogue-heading" hidden>

@@ -772,6 +772,88 @@ describe('M4 native three-process boundary', () => {
         ),
       ).toBe(false);
 
+      const extractReceipt = applicantExtractBody as {
+        receipt?: { action_entries?: Array<{ entry_id?: string; action_id?: string }> };
+      };
+      const contestedEntryId = extractReceipt.receipt?.action_entries?.find(
+        (entry) => entry.action_id === 'act_process_1',
+      )?.entry_id;
+      if (contestedEntryId === undefined) throw new Error('applicant extract omitted the challengeable record entry');
+      const correctionText = 'The synthetic registry date is 2024-06-01, not 2023-06-01.';
+      const foreignOriginChallenge = await fetch(`${authorizationOrigin}/w/w-demo/challenges`, {
+        method: 'POST',
+        headers: {
+          authorization: `Bearer ${tokens.applicant}`,
+          'content-type': 'application/json',
+          origin: orchestratorOrigin,
+        },
+        body: JSON.stringify({
+          action_id: 'act_process_1',
+          contested_entry_id: contestedEntryId,
+          correction_text: correctionText,
+        }),
+        signal: AbortSignal.timeout(5_000),
+      });
+      expect(foreignOriginChallenge.status).toBe(403);
+      expect(foreignOriginChallenge.headers.get('access-control-allow-origin')).toBeNull();
+      const challenge = await postJson(
+        authorizationOrigin,
+        '/w/w-demo/challenges',
+        tokens.applicant,
+        {
+          action_id: 'act_process_1',
+          contested_entry_id: contestedEntryId,
+          correction_text: correctionText,
+        },
+      );
+      expect(challenge.status).toBe(201);
+      const challengeBody = (await challenge.json()) as {
+        reviewObligationId?: string;
+      };
+      expect(challengeBody).toMatchObject({
+        accepted: true,
+        status: 'opened',
+        recordEntryId: expect.any(String),
+        reviewObligationId: expect.any(String),
+      });
+      const challengeReplay = await postJson(
+        authorizationOrigin,
+        '/w/w-demo/challenges',
+        tokens.applicant,
+        {
+          action_id: 'act_process_1',
+          contested_entry_id: contestedEntryId,
+          correction_text: correctionText,
+        },
+      );
+      expect(challengeReplay.status).toBe(409);
+      await expect(challengeReplay.json()).resolves.toMatchObject({
+        accepted: false,
+        defect: 'already-open',
+        reviewObligationId: challengeBody.reviewObligationId,
+      });
+      const challengedExtract = await requestJson(
+        authorizationOrigin,
+        'GET',
+        '/w/w-demo/extract',
+        tokens.applicant,
+      );
+      expect(challengedExtract.status).toBe(200);
+      await expect(challengedExtract.json()).resolves.toMatchObject({
+        actions: expect.arrayContaining([
+          expect.objectContaining({
+            action_id: 'act_process_1',
+            challenge_and_remedy: expect.objectContaining({
+              route: 'challenge',
+              contested_entry_id: contestedEntryId,
+              correction_text: correctionText,
+              reliance_state: 'withdrawn-pending-review',
+              recovery_owner_role: 'principal',
+            }),
+          }),
+        ]),
+      });
+
       const deniedRoutes = AUTHORIZATION_ROUTES.filter(
         (route) =>
           route.allowed !== 'open' &&

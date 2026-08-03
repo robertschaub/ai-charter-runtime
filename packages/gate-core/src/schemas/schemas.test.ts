@@ -438,6 +438,39 @@ describe('schemas — accept the shapes the ADRs specify', () => {
       challenge_and_remedy: null,
     });
     expect(entry.success, JSON.stringify(entry.error?.issues)).toBe(true);
+    if (!entry.success) throw new Error('expected base record entry');
+    expect(
+      recordEntry.safeParse({
+        ...entry.data,
+        entry_id: 'rec_challenge',
+        challenge_and_remedy: {
+          route: 'challenge',
+          opened_at: '2026-08-01T09:20:00.000Z',
+          contested_entry_id: entry.data.entry_id,
+          correction_text: 'The synthetic date is 2024-06-01.',
+          reliance_state: 'withdrawn-pending-review',
+          recovery_owner_role: 'principal',
+        },
+      }).success,
+    ).toBe(true);
+    expect(
+      recordEntry.safeParse({
+        ...entry.data,
+        entry_id: 'rec_incomplete_challenge',
+        challenge_and_remedy: { route: 'challenge', opened_at: '2026-08-01T09:20:00.000Z' },
+      }).success,
+    ).toBe(false);
+    expect(
+      recordEntry.safeParse({
+        ...entry.data,
+        entry_id: 'rec_misrouted_correction',
+        challenge_and_remedy: {
+          route: 'review',
+          opened_at: '2026-08-01T09:20:00.000Z',
+          correction_text: 'This field must remain challenge-only.',
+        },
+      }).success,
+    ).toBe(false);
 
     const access = accessEntry.safeParse({
       world_id: 'w-demo',

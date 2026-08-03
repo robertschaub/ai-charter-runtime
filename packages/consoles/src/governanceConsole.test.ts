@@ -20,6 +20,7 @@ describe('authorization-origin governance console contract', () => {
       '/w/w-demo/mandates/mdt_demo/approved-models',
     );
     expect(consoleApiPath('w-demo', 'mandates', 'mdt:demo')).toBe('/w/w-demo/mandates/mdt:demo');
+    expect(consoleApiPath('w-demo', 'challenges')).toBe('/w/w-demo/challenges');
     expect(validWorldId('w-demo')).toBe(true);
     expect(validWorldId('con')).toBe(false);
     expect(() => consoleApiPath('w-demo', '..', 'mandates')).toThrow(/invalid API path segment/);
@@ -69,6 +70,7 @@ describe('authorization-origin governance console contract', () => {
     const shell = readFileSync(resolve('packages/consoles/assets/governance-console/index.html'), 'utf8');
     expect(shell).toContain('<script type="module" src="/console/app.js"></script>');
     expect(shell).toContain('<link rel="stylesheet" href="/console/styles.css">');
+    expect(shell).toContain('id="challenge-form"');
     expect(shell).not.toMatch(/<script(?![^>]*\bsrc=)/i);
     expect(shell).not.toMatch(/<style\b/i);
     expect(shell).not.toMatch(/\son[a-z]+=/i);

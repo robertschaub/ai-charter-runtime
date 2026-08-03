@@ -185,6 +185,33 @@ export type RespondDialogueResult =
       readonly recordEntryId: string | null;
     };
 
+export interface SubmitChallengeInput {
+  readonly actionId: string;
+  readonly contestedEntryId: string;
+  readonly correctionText: string;
+  readonly actor: TransactionActor;
+}
+
+export type SubmitChallengeResult =
+  | {
+      readonly accepted: true;
+      readonly status: 'opened';
+      readonly recordEntryId: string;
+      readonly reviewObligationId: string;
+    }
+  | {
+      readonly accepted: false;
+      readonly defect:
+        | 'wrong-role'
+        | 'invalid-correction'
+        | 'missing-action'
+        | 'missing-entry'
+        | 'entry-not-in-action'
+        | 'already-open';
+      readonly recordEntryId: null;
+      readonly reviewObligationId?: string;
+    };
+
 export interface ContinueEscalationRevisionInput {
   readonly escalationId: string;
   readonly proposal: FrozenProposal;
@@ -1834,6 +1861,94 @@ export class AuthorizationCore {
         return {
           ops,
           result: { accepted: true, status: 'disposed', recordEntryId, reviewObligationId },
+        };
+      },
+    );
+    return completed.result;
+  }
+
+  async submitChallenge(input: SubmitChallengeInput): Promise<SubmitChallengeResult> {
+    if (input.actor.credential !== 'role:applicant') {
+      return { accepted: false, defect: 'wrong-role', recordEntryId: null };
+    }
+    const actionId = id.parse(input.actionId);
+    const contestedEntryId = id.parse(input.contestedEntryId);
+    const correctionText = input.correctionText.trim();
+    if (correctionText.length === 0 || correctionText.length > 32_768) {
+      return { accepted: false, defect: 'invalid-correction', recordEntryId: null };
+    }
+
+    const completed = await this.#store.transactWithState<SubmitChallengeResult>(
+      'challenge_submit',
+      input.actor,
+      (state, at) => {
+        const actionExists = [...state.proposals.values()].some((proposal) => proposal.action_id === actionId);
+        if (!actionExists) {
+          return { ops: [], result: { accepted: false, defect: 'missing-action', recordEntryId: null } };
+        }
+        const contestedEntry = state.actionRecords.find((entry) => entry.entry_id === contestedEntryId);
+        if (contestedEntry === undefined) {
+          return { ops: [], result: { accepted: false, defect: 'missing-entry', recordEntryId: null } };
+        }
+        const ruling = state.rulings.get(contestedEntry.admissibility_decision.ruling_id);
+        if (ruling === undefined) throw new Error(`record ${contestedEntryId} lost its ruling`);
+        const proposalId = state.proposalByHash.get(ruling.binding.frozen_proposal_hash);
+        const proposal = proposalId === undefined ? undefined : state.proposals.get(proposalId);
+        if (proposal === undefined) throw new Error(`record ${contestedEntryId} lost its proposal`);
+        if (proposal.action_id !== actionId) {
+          return { ops: [], result: { accepted: false, defect: 'entry-not-in-action', recordEntryId: null } };
+        }
+        const existing = [...state.reviews.values()].find(
+          (obligation) =>
+            obligation.case_id === actionId && obligation.route === 'challenge' && obligation.state === 'open',
+        );
+        if (existing !== undefined) {
+          return {
+            ops: [],
+            result: {
+              accepted: false,
+              defect: 'already-open',
+              recordEntryId: null,
+              reviewObligationId: existing.obligation_id,
+            },
+          };
+        }
+
+        const recordEntryId = this.#ids.next('rec');
+        const reviewObligationId = this.#ids.next('rev');
+        const baseRecord = escalationEventRecord(state, ruling, input.actor, recordEntryId, at, null);
+        return {
+          ops: [
+            {
+              op: 'record.action.append',
+              entry: {
+                ...baseRecord,
+                challenge_and_remedy: {
+                  route: 'challenge',
+                  opened_at: at,
+                  contested_entry_id: contestedEntryId,
+                  correction_text: correctionText,
+                  reliance_state: 'withdrawn-pending-review',
+                  recovery_owner_role: 'principal',
+                },
+              },
+            },
+            {
+              op: 'review.open',
+              obligation: {
+                world_id: state.worldId,
+                obligation_id: reviewObligationId,
+                case_id: actionId,
+                source_entry_id: recordEntryId,
+                route: 'challenge',
+                recovery_owner_role: 'principal',
+                opened_at: at,
+                state: 'open',
+                resolved_at: null,
+              },
+            },
+          ],
+          result: { accepted: true, status: 'opened', recordEntryId, reviewObligationId },
         };
       },
     );

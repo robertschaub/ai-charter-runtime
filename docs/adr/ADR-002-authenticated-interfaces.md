@@ -36,6 +36,11 @@ at the orchestrator origin. The existing derived case-officer credential remains
 seam only and is never delivered to a browser. The exchange authenticates a console session but grants no
 action authority.
 
+**Amendment (M4 acceptance challenge path, 2026-08-03):** an applicant-authenticated, Origin-guarded
+challenge route binds an action id to one existing record entry. Authorization appends the factual correction,
+marks reliance withdrawn pending review, and opens one principal-owned routing obligation atomically. It does
+not rewrite the contested entry, reverse an effect, or claim an independent remedy decision.
+
 ## Context
 
 Three OS processes make "the model proposes, a component outside the model decides, the executing service
@@ -141,6 +146,7 @@ Authorization service, all data routes under `/w/{world_id}/…`:
 | `POST /escalations/{id}/revision` (continue after narrow/modify) | **`proc:orchestrator` only** |
 | `GET /records…` · `POST /records/verify` | `role:principal` (full), `role:case_officer` (case-scoped) |
 | `GET /extract` (server-side scoped applicant extract) | **`role:applicant` only** |
+| `POST /challenges` (append correction and open routing obligation) | **`role:applicant` only** |
 | `GET /console/runtime-config.json` (exact configured origins only) | unauthenticated static data, no credentials |
 | `GET /console/*` (governance console assets) | unauthenticated static assets, no data |
 | `GET /healthz` | unauthenticated, no world, no data |
@@ -368,6 +374,12 @@ allowlist projection**, decided per route and per credential:
 - applicant extract → server-side action, authority/ruling, effect, intervention-summary, challenge route,
   and local-receipt projections for the single synthetic applicant world. It excludes evidence payloads,
   bindings, nonces, reservations, idempotency keys, and full internal records.
+
+The strict challenge body is `{action_id, contested_entry_id, correction_text}`. Authorization verifies that
+the record belongs to the named action, rejects a duplicate open challenge, appends rather than edits, and
+returns only the new record and obligation ids. The projected challenge names the correction, contested entry,
+`withdrawn-pending-review` reliance state, and principal recovery owner. Resolution remains outside this M4
+mechanism because no independent remedy decider exists in the POC.
 
 The orchestrator-facing ruling, model, and escalation-status projections carry neither record content nor
 applicant extract data.

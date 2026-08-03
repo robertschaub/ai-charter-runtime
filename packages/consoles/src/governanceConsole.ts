@@ -515,6 +515,30 @@ async function loadExtract(): Promise<void> {
   setActivity('Loaded the server-side applicant extract and local receipt.');
 }
 
+async function submitChallenge(): Promise<void> {
+  const state = currentState();
+  requireRole(state, 'applicant');
+  const actionId = element<HTMLInputElement>('challenge-action-id').value.trim();
+  const contestedEntryId = element<HTMLInputElement>('challenge-entry-id').value.trim();
+  const correctionText = element<HTMLTextAreaElement>('challenge-correction').value.trim();
+  if (!OPAQUE_ID.test(actionId) || !OPAQUE_ID.test(contestedEntryId)) {
+    throw new Error('enter valid action and record entry ids');
+  }
+  if (correctionText === '') throw new Error('enter the factual correction');
+  const result = await apiRequest(state, consoleApiPath(state.worldId, 'challenges'), {
+    method: 'POST',
+    body: {
+      action_id: actionId,
+      contested_entry_id: contestedEntryId,
+      correction_text: correctionText,
+    },
+  });
+  setOutput('challenge-output', result);
+  element<HTMLTextAreaElement>('challenge-correction').value = '';
+  setActivity('Challenge recorded; reliance is withdrawn pending the routed review obligation.');
+  await loadExtract();
+}
+
 async function loadRuntimeConfig(): Promise<void> {
   const response = await fetch('/console/runtime-config.json', {
     cache: 'no-store',
@@ -659,6 +683,7 @@ export function mountGovernanceConsole(): void {
   );
   element<HTMLButtonElement>('load-records').addEventListener('click', () => void loadRecords().catch(reportError));
   element<HTMLButtonElement>('load-extract').addEventListener('click', () => void loadExtract().catch(reportError));
+  wireForm('challenge-form', submitChallenge);
   wireForm('case-session-form', openCaseSession);
   element<HTMLButtonElement>('load-dialogue').addEventListener('click', () => void loadDialogue().catch(reportError));
   wireForm('dialogue-form', respondDialogue);

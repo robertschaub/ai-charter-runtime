@@ -14,6 +14,7 @@ import {
   type EffectOutcomeReportResult,
   type RespondDialogueResult,
   type RuleProposalResult,
+  type SubmitChallengeResult,
 } from './authorizationCore.js';
 import {
   AUTHORIZATION_ROUTES,
@@ -98,6 +99,13 @@ const revisionRequest = z
   .object({ proposal: frozenProposal, context: jsonObject.optional() })
   .strict();
 const caseHandoffMintRequest = z.object({ case_id: id }).strict();
+const challengeRequest = z
+  .object({
+    action_id: id,
+    contested_entry_id: id,
+    correction_text: z.string().trim().min(1).max(32_768),
+  })
+  .strict();
 const caseHandoffRedeemRequest = z
   .object({
     handoff_id: id,
@@ -502,6 +510,22 @@ export class AuthorizationHttpServer {
           ...(parsed.context === undefined ? {} : { context: parsed.context }),
         });
         return { status: result.accepted ? 200 : 422, body: result };
+      },
+      'challenge.submit': async (request, context) => {
+        const parsed = challengeRequest.parse(await body(request));
+        const result: SubmitChallengeResult = await options.authorization.submitChallenge({
+          actionId: parsed.action_id,
+          contestedEntryId: parsed.contested_entry_id,
+          correctionText: parsed.correction_text,
+          actor: requireActor(context),
+        });
+        if (result.accepted) return { status: 201, body: result };
+        if (result.defect === 'wrong-role') return { status: 403, body: result };
+        if (result.defect === 'missing-action' || result.defect === 'missing-entry') {
+          return { status: 404, body: result };
+        }
+        if (result.defect === 'already-open') return { status: 409, body: result };
+        return { status: 422, body: result };
       },
       'records.verify': async (_request, context) => {
         const result = await options.reads.verification(requireActor(context));

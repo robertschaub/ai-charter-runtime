@@ -32,3 +32,6 @@ The orchestrator-origin case surface uses only its dynamic tab session: it displ
 requires an in-tab evidence review before a model can be prepared, and polls a ruling-status mirror without
 receiving the question, contract, answer, or role credential. Model interaction remains closed with an
 explicit `501` until M5 implements the screening/empathy/switching loop.
+The applicant surface can also submit an extract-bound factual correction directly to authorization. The
+result is an append-only challenge plus a principal routing obligation and withdrawn-reliance marker, not a
+remedy decision or a mutation of the earlier effect record.

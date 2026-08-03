@@ -214,8 +214,28 @@ export const recordEntry = z.object({
     .object({
       route: z.string(),
       opened_at: timestamp,
+      contested_entry_id: id.optional(),
+      correction_text: z.string().min(1).max(32_768).optional(),
+      reliance_state: z.literal('withdrawn-pending-review').optional(),
+      recovery_owner_role: role.optional(),
     })
     .strict()
+    .superRefine((value, context) => {
+      const challengeFields = ['contested_entry_id', 'correction_text', 'reliance_state', 'recovery_owner_role'] as const;
+      if (value.route !== 'challenge') {
+        for (const field of challengeFields) {
+          if (value[field] !== undefined) {
+            context.addIssue({ code: 'custom', path: [field], message: `${field} is challenge-only` });
+          }
+        }
+        return;
+      }
+      for (const field of challengeFields) {
+        if (value[field] === undefined) {
+          context.addIssue({ code: 'custom', path: [field], message: `challenge requires ${field}` });
+        }
+      }
+    })
     .nullable(),
 }).strict();
 
