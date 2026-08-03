@@ -50,7 +50,7 @@ distinguish an uncommitted latest checkpoint from confirmed remote rollback or m
 | M1 — protocol before schemas | Implemented and amended | ADRs, schemas, canonicalization, key handling, record chains, authenticated-interface contracts, and the approved case-session handoff contract are present. |
 | M2 — transactional core | Implemented and fault-tested | Authorization remains the single durable serialization point; authority defects fail closed. |
 | M3 — vertical slice | Implemented | Deterministic authorize → propose → rule → commit-verify → effect → receipt path, adapters, service ledger, and signed cards are present. |
-| M4 — escalation + governance console | **In progress** | Escalation/core, native-process lifecycle, read-side handlers, and the authorization-origin governance console are implemented and reviewed; the handoff/session implementation awaits exact-SHA review, and case-console functionality remains. |
+| M4 — escalation + governance console | **In progress** | Escalation/core, native-process lifecycle, read-side handlers, authorization-origin governance console, and handoff/session boundary are implemented and reviewed; case-console functionality remains. |
 | M5 — screening + empathy + switching | **Blocked** | Do not begin until M4 is complete and reviewed. |
 | M6–M7 | Not started | Full capture/publication work follows the implementation milestones. |
 
@@ -98,7 +98,10 @@ review. Test-family coverage continues to be reported as exercised, partial, or 
   refusal, principal card projection, credential absence, and preservation of the three-process authority
   boundary.
 
-### Implemented in the current tranche; exact-SHA review pending
+### Implemented and reviewed at `a8345f0`
+
+Independent adversarial review returned **GO — no findings**. The reviewed validation baseline is
+`npm run typecheck` clean plus 4 hook tests and 259 Vitest tests across 30 files.
 
 - Authorization-owned, digest-only `issued`/`consumed`/`expired` handoff state bound to role, world, case,
   configured orchestrator origin, and authorization boot id; single-use redemption and expiry share the
@@ -116,11 +119,10 @@ review. Test-family coverage continues to be reported as exercised, partial, or 
 
 ### Remaining before M4 can be called complete
 
-1. Obtain an independent adversarial review of the exact committed SHA for the handoff/session tranche.
-2. Implement the case-console model picker, credential-bearing authorization-origin dialogue control,
+1. Implement the case-console model picker, credential-bearing authorization-origin dialogue control,
    authoritative deep link, two-hop outcome polling, and the HTTP-level raw-API bypass beat without moving
    authority into the UI.
-3. Exercise the M4 demo beats and adversarial families named by specification §10, update honest coverage
+2. Exercise the M4 demo beats and adversarial families named by specification §10, update honest coverage
    statements, and obtain an exact-SHA adversarial review. Only then may planning advance to M5.
 
 ## Resolved browser credential-handoff protocol
@@ -135,17 +137,14 @@ Expiry, replay, concurrent redemption, binding mismatch, or either process resta
 ADR-002 and ADR-004 freeze the route, custody, origin, and dialogue-boundary mechanics. The existing
 `ORCHESTRATOR_TOKEN_CASE_OFFICER` remains only a headless synthetic-test seam: browser case routes must reject
 it, and the dynamic browser session must be rejected on the headless route and every authority-bearing
-authorization route. The bounded handoff and session implementation is now present; its exact committed SHA
-must receive independent adversarial review before this ledger moves it into the reviewed baseline.
+authorization route. The bounded handoff and session implementation was independently reviewed at
+`a8345f0` with GO — no findings.
 
 ## Ordered next slices
 
-1. **Review the implemented handoff and case-session tranche** — exact-SHA adversarial review of the durable
-   boot-bound lifecycle, exact-window transfer, authenticated backchannel, in-memory session boundary, and
-   its adversarial matrix.
-2. **Case console and dialogue control** — model picker, authorization-origin response control, safe dialogue
+1. **Case console and dialogue control** — model picker, authorization-origin response control, safe dialogue
    link, two-hop polling, and the raw-API beat.
-3. **M4 acceptance pass** — named demo beats and adversarial families, honest coverage ledger, and exact-SHA
+2. **M4 acceptance pass** — named demo beats and adversarial families, honest coverage ledger, and exact-SHA
    review. M5 remains blocked until that review is GO.
 
 Substantive tranches are committed and reviewed at bounded integration points. A documentation-only status
