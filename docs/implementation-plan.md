@@ -15,23 +15,27 @@ the source document is linked here and is never copied into this repository.
 | Field | Pinned value |
 |---|---|
 | Canonical URL | `https://github.com/robertschaub/our-ai-charter/blob/main/docs/wip/runtime-gates-poc-spec.md` |
-| Charter commit | `c5af1d5f54fd17db219378d1958f57832e4de878` |
+| Charter commit | `00c32f521d550800990c795c9a38d5a83f2daf01` |
 | Specification path | `docs/wip/runtime-gates-poc-spec.md` |
-| Immutable URL | `https://github.com/robertschaub/our-ai-charter/blob/c5af1d5f54fd17db219378d1958f57832e4de878/docs/wip/runtime-gates-poc-spec.md` |
-| SHA-256 | `ce9e10b3357e8b9169d3fc2857ad3deb663a4952c55b802795fb3eb7d74fdb97` |
+| Immutable URL | `https://github.com/robertschaub/our-ai-charter/blob/00c32f521d550800990c795c9a38d5a83f2daf01/docs/wip/runtime-gates-poc-spec.md` |
+| SHA-256 | `33014caab9831674225fd77d711f06065c02ee65839d278c036331e8aa27bf60` |
+| Publication status | Charter commit exists locally and passed adversarial review; remote URL verification awaits a maintainer-authorized upstream push |
 
 The provenance row changes only after an approved upstream specification change. Update the Charter commit
-and digest together, verify the immutable URL resolves to the named path, and review the resulting runtime
-plan change before implementation continues.
+and digest together. Before either repository is published, push the Charter commit first under separate
+maintainer approval, verify that the immutable URL resolves to the named path and digest, then publish the
+runtime change. The local exact-SHA review may proceed before that publication step.
+Until the upstream push occurs, the canonical `main` URL still presents the previous published revision and
+must not be treated as matching this local pin.
 
 ## Reviewed implementation baseline
 
 The latest maintainer-run, cross-model adversarially reviewed runtime implementation baseline is
-`a8c01ec1fee0c2e72e2ce268d8813816d25ace2a` (`a8c01ec`), with a GO verdict and no code defects.
-One Low ledger correction from the parent review is preserved below as a deferred anchoring-flow finding.
-At this baseline, `npm run typecheck` passed, the Git-safety hook suite passed 4 tests, Vitest passed
-241 tests across 25 files, and both signed cards verified. The branch remained unpushed at review time;
-branch publication remains a maintainer decision.
+`4310550755bccfc3e930f512edb7d21591a366ca` (`4310550`), with a GO verdict and no findings.
+One earlier Low finding remains deliberately deferred to the anchoring-flow slice below. At this baseline,
+`npm run typecheck` passed, the Git-safety hook suite passed 4 tests, Vitest passed 247 tests across 26 files,
+and both signed cards verified. The branch remained unpushed at review time; branch publication remains a
+maintainer decision.
 
 **Deferred anchoring-flow finding:** remote verification currently classifies an honest failed push—where
 the latest local checkpoint commit has not reached the remote—as `remote-mismatch` and fails stop. Preserve
@@ -43,10 +47,10 @@ distinguish an uncommitted latest checkpoint from confirmed remote rollback or m
 | Milestone | Runtime status | Evidence boundary |
 |---|---|---|
 | M0 — probe | Baseline artifacts implemented | Live re-probing remains approval-gated; existing evidence is not silently refreshed. |
-| M1 — protocol before schemas | Implemented | ADRs, schemas, canonicalization, key handling, record chains, and authenticated-interface contracts are present. |
+| M1 — protocol before schemas | Implemented and amended | ADRs, schemas, canonicalization, key handling, record chains, authenticated-interface contracts, and the approved case-session handoff contract are present; its M4 implementation remains pending. |
 | M2 — transactional core | Implemented and fault-tested | Authorization remains the single durable serialization point; authority defects fail closed. |
 | M3 — vertical slice | Implemented | Deterministic authorize → propose → rule → commit-verify → effect → receipt path, adapters, service ledger, and signed cards are present. |
-| M4 — escalation + governance console | **In progress** | Escalation/core, native-process lifecycle, and read-side handlers are implemented; browser work remains. |
+| M4 — escalation + governance console | **In progress** | Escalation/core, native-process lifecycle, read-side handlers, and the authorization-origin governance console are implemented and reviewed; handoff and case-console work remains. |
 | M5 — screening + empathy + switching | **Blocked** | Do not begin until M4 is complete and reviewed. |
 | M6–M7 | Not started | Full capture/publication work follows the implementation milestones. |
 
@@ -76,7 +80,7 @@ review. Test-family coverage continues to be reported as exercised, partial, or 
   remote-unavailability asymmetry, beat-15 tamper/rollback tests, and latest-pushed-checkpoint receipt fields.
   Synthetic tests do not commit, push, or contact a remote.
 
-### Implemented and reviewed in the latest baseline
+### Implemented and reviewed at `4310550`
 
 - Fixed read-side projections and native HTTP handlers for ruling status, approved signed-card evidence,
   current mandate envelopes, role-routed escalation lists/detail, verified action/access-chain views,
@@ -84,47 +88,50 @@ review. Test-family coverage continues to be reported as exercised, partial, or 
 - Defence-in-depth role filters, orchestrator-minimal escalation status, fixed leakage allowlists, durable
   record-family access evidence, in-line-tamper and same-boot valid-prefix rollback refusal against the live
   writer heads, and real-listener integration coverage.
-
-### Remaining before M4 can be called complete
-
-1. Obtain an exact-SHA adversarial review of the current authorization-origin governance-console tranche.
-2. Resolve the browser credential-handoff gate below before shipping a case-console session. Then implement
-   the case-console model picker, authoritative dialogue deep link, two-hop outcome polling, and the HTTP-level
-   raw-API bypass beat without moving authority into the UI.
-3. Exercise the M4 demo beats and adversarial families named by specification §10, update honest coverage
-   statements, and obtain an exact-SHA adversarial review. Only then may planning advance to M5.
-
-### Implemented in the current review tranche
-
 - Authorization-origin governance-console shell with separately licensed, dependency-free static assets,
   strict self-only CSP including `frame-ancestors 'none'`, zero CORS, no cookies, token-free deep-link paths,
   and role tokens held only in that origin's `localStorage` and bearer headers.
 - Principal mandate grant/amend/revoke, routed escalation inbox/detail with only open contract-permitted
-  general dispositions rendered, signed model-card evidence, and verified action/access record views.
-- Server-side applicant extract/local receipt surface, strict text-only rendering, and real-listener tests for
-  asset routing, security headers, foreign-Origin refusal, principal card projection, credential absence, and
-  preservation of the three-process authority boundary.
-- The dialogue path currently resolves only to the safe governance shell. The credential-bearing dialogue
-  response control, case-console session, and case-browser credential handoff remain deliberately unimplemented.
+  general dispositions rendered, signed model-card evidence, verified action/access record views, and the
+  server-side applicant extract/local receipt surface.
+- Strict text-only rendering and real-listener tests for asset routing, security headers, foreign-Origin
+  refusal, principal card projection, credential absence, and preservation of the three-process authority
+  boundary.
 
-## Browser credential-handoff decision gate
+### Remaining before M4 can be called complete
 
-The headless runtime derives `ORCHESTRATOR_TOKEN_CASE_OFFICER` in memory, but no browser delivery mechanism is
-specified or implemented. The case console must not ship by printing, persisting, or exposing either that
-credential or the authorization-service role token.
+1. Implement the approved browser handoff and dynamic case-session protocol below, including exact-origin
+   messaging, atomic single-use redemption, restart/expiry/replay tests, and strict separation from the
+   headless derived credential.
+2. Implement the case-console model picker, credential-bearing authorization-origin dialogue control,
+   authoritative deep link, two-hop outcome polling, and the HTTP-level raw-API bypass beat without moving
+   authority into the UI.
+3. Exercise the M4 demo beats and adversarial families named by specification §10, update honest coverage
+   statements, and obtain an exact-SHA adversarial review. Only then may planning advance to M5.
 
-Before case-browser implementation, the maintainer must select a narrow authorization-origin handoff. Because
-that choice defines authentication, origin, and credential custody across processes, it is a normative protocol
-decision: update the authoritative specification first, then align ADR-002 and ADR-004 here, and only then
-implement and adversarially test it. Read-side routes and authorization-origin governance surfaces may proceed
-without resolving this gate.
+## Resolved browser credential-handoff protocol
+
+The normative decision is pinned above at Charter commit `00c32f5`: a user-initiated authorization-origin
+control mints an at-least-256-bit, single-use, maximum-30-second code bound to role, world, case, exact
+orchestrator origin, and authorization boot id. An exact-origin/exact-window `postMessage` exchange carries
+it without URL or persistent-storage exposure; the orchestrator redeems it over its process-authenticated
+backchannel and mints an unrelated, in-memory, case-bound browser session lasting no more than 15 minutes.
+Expiry, replay, concurrent redemption, binding mismatch, or either process restarting fails closed.
+
+ADR-002 and ADR-004 freeze the route, custody, origin, and dialogue-boundary mechanics. The existing
+`ORCHESTRATOR_TOKEN_CASE_OFFICER` remains only a headless synthetic-test seam: browser case routes must reject
+it, and the dynamic browser session must be rejected on the headless route and every authority-bearing
+authorization route. The protocol is specified but not yet implemented.
 
 ## Ordered next slices
 
-1. **Governance-console review** — one exact-SHA adversarial review of the authorization-origin browser tranche.
-2. **Upstream handoff decision** — separately approved specification change followed by ADR alignment.
-3. **Case console and M4 acceptance pass** — model picker, dialogue link/polling, raw-API beat, coverage ledger,
-   and exact-SHA review.
+1. **Handoff and case-session implementation** — durable boot-bound mint/consume state, exact-window browser
+   transfer, authenticated backchannel redemption, in-memory case sessions, logout/expiry/restart behaviour,
+   and the complete adversarial matrix from ADR-002.
+2. **Case console and dialogue control** — model picker, authorization-origin response control, safe dialogue
+   link, two-hop polling, and the raw-API beat.
+3. **M4 acceptance pass** — named demo beats and adversarial families, honest coverage ledger, and exact-SHA
+   review. M5 remains blocked until that review is GO.
 
 Substantive tranches are committed and reviewed at bounded integration points. A documentation-only status
 acknowledgement does not trigger a recursive review round; changes to ADRs, gates, invariants, ACLs,

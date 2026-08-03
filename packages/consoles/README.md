@@ -18,12 +18,14 @@ frozen proposal, the authorization process alone rules, and the services process
 own commit token before effect. Audience-scoped child environments prevent the orchestrator from receiving
 human authorization credentials and prevent the services host from replaying its orchestrator-facing
 credential at the authorization service. The supervisor starts services recovery first, authorization
-replay/sweep/reconciliation second, and the orchestrator last. Case-browser surfaces remain M4 work; in
-particular, the headless derived case credential has no browser handoff yet.
+replay/sweep/reconciliation second, and the orchestrator last. Case-browser surfaces remain M4 work; the
+derived case credential remains a headless synthetic-test seam and is never a browser credential. The
+approved browser path instead uses ADR-002's one-time handoff and independent dynamic session.
 
 The M4 authorization-origin governance console is now a dependency-free MIT asset set served by `gate-core`.
 Its principal surface covers mandate grant/amend/revoke, routed escalation contracts and permitted general
 dispositions, signed-card evidence, and action/access records; its applicant surface requests only the
 server-side scoped extract. The shell has no inline or third-party executable content, keeps role tokens in
 authorization-origin `localStorage`, and sends them only on same-origin bearer requests. The case console and
-credential-bearing dialogue response control remain blocked on the browser handoff decision.
+credential-bearing dialogue response control remain unimplemented; the next bounded slice is the approved
+handoff/session protocol, followed by those browser surfaces.

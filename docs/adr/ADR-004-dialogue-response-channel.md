@@ -5,6 +5,11 @@
 
 **Amendment (M4 authority review follow-up, 2026-08-02):** `decision_and_route.substitute_roles` is the exact machine-enforced substitute set; `substitute_rule` remains explanatory text. Wrong-role and disposition-outside-set attempts append refusal events while leaving the escalation open.
 
+**Amendment (M4 case-session handoff protocol, 2026-08-03):** ADR-002's one-time authorization-origin
+handoff authenticates entry to the orchestrator-origin case console without transferring a role token. It
+does not alter this dialogue channel: answers still post directly from the authorization-origin control
+under the responder's own role token, and the case-session claim has no standing there.
+
 ## Context
 A dialogue trigger is an ordinary escalation routed to the conversation partner — same single-use state machine, same six-field intervention contract — but two boundary rules constrain the channel. The answer posts **directly from the browser to the authorization service** under the responder's role token, from a control served by the **authorization service's own origin**, so the orchestrator neither serves the credential-bearing control nor carries the answer. And standing is **evidentiary, not managerial**: a responder answers only within their own standing; a third party's facts are resolved by cited evidence or routed to that party, never by bare assertion.
 
@@ -19,10 +24,14 @@ Alongside it the case console shows, read-only, the **ruling's `reason`** — a 
 
 The link carries only a world id and an opaque escalation id — no token, no answer, no case content. Escalation ids are 128-bit random and URL-safe, since the link may be copied.
 
+The case console itself is entered through ADR-002 §5.1's fixed handoff page, but that authentication
+exchange and this dialogue link are deliberately separate. The handoff uses one transient, exact-window
+opener and then severs it; the ordinary dialogue link below always uses `noopener` and transfers nothing.
+
 ### 2. Token custody: `localStorage` on the governance origin
 ADR-002 fixes browser custody: a token-entry field on the governance origin, held in that origin's **`localStorage`**, sent as `Authorization: Bearer …`, no cookies. (The two ADRs were drafted in parallel and initially resolved this in opposite directions; review ruling 2026-08-01: `localStorage` stands — a deep link opens a fresh tab, and per-tab `sessionStorage` would demand a paste per response or a shared named tab holding an open `window.opener` handle.) The dialogue link is therefore a plain `target="_blank"` **with `rel="noopener"`** — opener isolation costs nothing once storage persists on the origin.
 
-Costs, declared demo-grade (ADR-002 §8): the token persists on that origin until cleared, and any script on the governance origin can read it — tolerable only because that origin serves no third-party content and ships a strict CSP. The case-console origin never holds a role token, and the orchestrator's process credential is denied on this route.
+Costs, declared demo-grade (ADR-002 §8): the token persists on that origin until cleared, and any script on the governance origin can read it — tolerable only because that origin serves no third-party content and ships a strict CSP. The case-console origin never holds an authorization-service role token; it holds only ADR-002's short-lived, case-bound session bearer. That bearer and the orchestrator's process credential are both denied on this route.
 
 ### 3. CSRF
 Covered by ADR-002's design rather than re-solved here: no cookie authenticates anything, so no ambient credential exists for a cross-site form to ride, and the authorization service emits no CORS headers at all, so a credentialed cross-origin fetch fails in the browser. The dialogue control adds nothing — same-origin form, bearer token required. No synchronizer token, stated as a deliberate POC-scale limit. An `Origin` check is *not* relied on: a non-browser client (beat 17's raw API client) forges it freely, so the bearer token plus the route ACL is the actual control.
@@ -69,7 +78,7 @@ The console renders only permitted dispositions enabled; the endpoint is the aut
 **Timeout is decided by the authorization service**, atomically, against the contract's response bound — never by the browser or the orchestrator, so no client clock can manufacture one. Default is the declared `abstain` or `narrow`; never proceed.
 
 ### 7. How the case console learns the outcome
-Two-hop polling of non-authoritative mirrors, over routes the orchestrator is actually permitted (ADR-002). The orchestrator polls `GET /w/{w}/rulings/{id}` — the status projection, which reports the escalated ruling's current status and, once a disposition mints one, its `successor_ruling_id`; it never reads the escalation, its contract fields, or the record. The case console polls `GET /w/{w}/cases/{case_id}/state` every 2 s while an escalation is open and stops at a terminal state. SSE is rejected as unnecessary at POC scale.
+Two-hop polling of non-authoritative mirrors, over routes the orchestrator is actually permitted (ADR-002). The orchestrator polls `GET /w/{w}/rulings/{id}` — the status projection, which reports the escalated ruling's current status and, once a disposition mints one, its `successor_ruling_id`; it never reads the escalation, its contract fields, or the record. The case console polls `GET /w/{w}/cases/{case_id}/state` under its dynamic case-session bearer every 2 s while an escalation is open and stops at a terminal state. SSE is rejected as unnecessary at POC scale.
 
 The mirror is display-only and carries **no evidentiary standing** — that belongs to the authenticated post and its record entry. On divergence the authorization service wins. Ruling-status polls read a status projection, not record entries, so they are deliberately **not** written to the access-log chain (record-viewer reads still are); otherwise polling would drown the access log.
 
@@ -78,7 +87,7 @@ Every step is a `human_intervention_event` payload on the existing record fields
 
 ## Consequences
 - The orchestrator can neither read the role token nor forge a confirmation or permission; the model never sees either. Beat 4 and the wrong-role / disposition-outside-set adversarial cases test the endpoint directly.
-- Two usability costs, both accepted: the responder leaves the chat seat for a second tab, and the token is pasted once per browser profile.
+- Three usability costs are accepted: the case officer starts a fresh handoff after session expiry, the responder leaves the chat seat for a second tab, and the authorization-service role token is pasted once per browser profile.
 - Reconciled with the same-day ADR-002: its route table already lists the escalation read route (`GET /w/{w}/escalations/{id}`, orchestrator read-only via the §7 projection), token custody follows its `localStorage` decision, and the zero-CORS posture and "orchestrator never reads an escalation's contract fields" rule hold.
 - Polling adds up to ~3 s of perceived latency between answer and case-console update; acceptable, and it keeps the authoritative path one-directional.
 - Review rulings 2026-08-01: `route` stays dialogue-only — non-dialogue escalations already carry the general `seek review / route to remedy` dispositions (ADR-001 §7); and `standing_class` derivation reads the per-item `origin_actor` field (ADR-005 §3) rather than staying fixture-declared.

@@ -81,7 +81,8 @@ record-verification, chain-view, and applicant-extract projections. The governan
 `http://127.0.0.1:7801/console` now provides the principal mandate/card/escalation/record surfaces and the
 applicant extract. It has no third-party content, emits no CORS headers, stores a pasted role token only in
 that origin's `localStorage`, and presents evidence rather than an assurance signal. The case console,
-credential-bearing dialogue response control, and browser credential handoff are not yet built.
+credential-bearing dialogue response control, and approved one-time browser credential handoff are not yet
+built; their pinned protocol and order are recorded in the implementation plan.
 
 Offline and deterministic verification uses synthetic records and skips only the remote-presence step:
 

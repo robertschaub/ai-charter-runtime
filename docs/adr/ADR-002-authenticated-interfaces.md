@@ -28,13 +28,24 @@ or cookie header. The principal may read the existing fixed approved-model proje
 surface can show the signed-card evidence it governs; this adds no mutation permission and exposes no
 binding, nonce, reservation, or aggregate trust signal.
 
+**Amendment (M4 case-session handoff protocol, 2026-08-03):** the authorization-origin console mints a
+single-use, boot-bound handoff for an authenticated case officer; an exact-origin/exact-window browser
+exchange carries it to the fixed orchestrator handoff page, and the orchestrator redeems it through its
+authenticated process channel. Redemption creates an independent, short-lived, case-bound browser session
+at the orchestrator origin. The existing derived case-officer credential remains a headless synthetic-test
+seam only and is never delivered to a browser. The exchange authenticates a console session but grants no
+action authority.
+
 ## Context
 
 Three OS processes make "the model proposes, a component outside the model decides, the executing service
 verifies again" a process boundary rather than a comment. Static per-role tokens (principal, case officer,
-applicant) and per-process credentials ride every call, and every decision records the authenticated
-role. The boundary that matters: **the orchestrator can reach no authority-changing endpoint**, and it can
-neither read a person's credential nor forge a confirmation. This is demo-grade authentication by
+applicant) stay at the authorization origin, per-process credentials authenticate inter-process calls, and
+an ephemeral handoff creates the case officer's browser session at the orchestrator origin. Every decision
+records the authenticated role. The boundary that matters: **the orchestrator can reach no authority-changing
+endpoint**; the dedicated redemption route changes only one-time protocol-credential state and cannot affect
+a mandate, ruling, escalation, commitment, effect, or dialogue answer. The orchestrator can neither read a
+person's authorization-service credential nor forge a confirmation. This is demo-grade authentication by
 declared limit (§9), not an IAM design.
 
 ## Decision
@@ -56,8 +67,8 @@ Request bodies are capped at 1 MiB; anything larger is rejected before parsing.
 
 ### 2. Credentials — format, custody, verification
 
-Two credential families, both opaque static bearer tokens of 32 random bytes, hex-encoded, generated once
-by a tooling script and written to the gitignored `.env.local`:
+The base role and process credentials are opaque static bearer tokens of 32 random bytes, hex-encoded,
+generated once by a tooling script and written to the gitignored `.env.local`:
 
 | Env var | Kind | Held by |
 |---|---|---|
@@ -80,7 +91,18 @@ credential, its probe credential, and the HMAC pair; the orchestrator receives o
 process credential and the two narrower credentials it must verify or present. Model API keys are not
 passed by this M4 headless supervisor.
 
-- Transport: `Authorization: Bearer <token>` on every call. No cookies anywhere — which also means no
+`ORCHESTRATOR_TOKEN_CASE_OFFICER` is retained only for the synthetic headless
+`POST /w/{world_id}/actions/execute` seam. Browser case routes do not accept it, and neither the supervisor
+nor the orchestrator exposes it through HTML, JavaScript, a response, storage, a log, or a record. The
+browser protocol introduces no new static environment secret:
+
+| Credential | Material and lifetime | Custody |
+|---|---|---|
+| Case-session handoff code | At least 32 cryptographically random bytes; single use; maximum 30 seconds; bound to handoff id, role, world, case, exact orchestrator origin, and authorization boot id | Raw value exists only in the authorization-origin browser, the exact-window message, the orchestrator browser/request, and the authenticated redemption call; authorization persists only its SHA-256 digest and lifecycle metadata |
+| Case-session bearer | Independent random value of at least 32 bytes; one case and role; maximum 15 minutes; no refresh | Raw value is returned once to the orchestrator-origin browser and kept only in that origin's `sessionStorage`; the orchestrator keeps only its digest and bindings in process memory |
+
+- Transport: `Authorization: Bearer <token>` on every authenticated call. The one-time handoff code is
+  the credential in the strict same-origin redemption body, never a bearer and never a URL component. No cookies anywhere — which also means no
   CSRF surface on the data routes: there is no ambient credential for a cross-site form to ride, a
   foreign origin cannot read another origin's `localStorage`, and it cannot make the browser attach an
   `Authorization` header (ADR-004 completes the dialogue-control side).
@@ -88,8 +110,9 @@ passed by this M4 headless supervisor.
   every required variable present, ≥ 64 hex chars, and all values mutually distinct. Two roles sharing a
   token would silently collapse the ACL, so a duplicate is a startup error.
 - Verification: constant-time compare (`crypto.timingSafeEqual` after a length check).
-- **Tokens never appear in logs, records, or error bodies.** Only the resolved label (`role:principal`,
-  `proc:orchestrator`) is logged or recorded — not the value, not a prefix.
+- **Credentials never appear in logs, records, error bodies, or console output.** Only the resolved label
+  (`role:principal`, `proc:orchestrator`, or the bounded case-session actor), handoff/session id, digest,
+  bindings, and lifecycle state may be logged or recorded — never a raw value or prefix.
 
 ### 3. Who may call what — deny-by-default route ACL
 
@@ -104,6 +127,8 @@ Authorization service, all data routes under `/w/{world_id}/…`:
 | `POST /proposals` (submit frozen proposal → ruling) | `proc:orchestrator` |
 | `GET /rulings/{id}` (status projection, §7) | `proc:orchestrator` (own submissions), `proc:services_host` |
 | `GET /mandates/{id}/approved-models` (picker and principal card-evidence source, card-verified) | `proc:orchestrator`, `role:principal`, `role:case_officer` |
+| `POST /case-session-handoffs` (mint; adapter `authorityChanging: true`, `originGuarded: true`) | **`role:case_officer` only** |
+| `POST /case-session-handoffs/{id}/redeem` (consume; adapter `authorityChanging: false`, `originGuarded: true`) | **`proc:orchestrator` only** |
 | `POST /commit-verify` | **`proc:services_host` only** |
 | `POST /effects/{effect_id}/outcome` | **`proc:services_host` only** |
 | `POST /access-events` (narrow services-host denial evidence) | **`proc:services_host` only** |
@@ -116,28 +141,51 @@ Authorization service, all data routes under `/w/{world_id}/…`:
 | `POST /escalations/{id}/revision` (continue after narrow/modify) | **`proc:orchestrator` only** |
 | `GET /records…` · `POST /records/verify` | `role:principal` (full), `role:case_officer` (case-scoped) |
 | `GET /extract` (server-side scoped applicant extract) | **`role:applicant` only** |
+| `GET /console/runtime-config.json` (exact configured origins only) | unauthenticated static data, no credentials |
 | `GET /console/*` (governance console assets) | unauthenticated static assets, no data |
 | `GET /healthz` | unauthenticated, no world, no data |
 
-Orchestrator: `GET /console/*` unauthenticated assets; `POST /w/{w}/cases/{id}/messages`,
-`GET /w/{w}/cases/{id}/state`, `GET /w/{w}/models` all `role:case_officer`, authenticated with the
-orchestrator-audience derived credential rather than the authorization-service role credential.
-The bounded headless transport slice also exposes `POST /w/{w}/actions/execute` under that same
-orchestrator-audience credential. It accepts an already-frozen synthetic proposal solely to drive the
-cross-process gate/commit/effect path; it is not the case-dialogue API and does not complete the browser
-console contract.
+The mint request is a strict `{case_id}` body under the authorization-origin case-officer bearer. Role,
+world, exact configured orchestrator origin, and current authorization boot id are server-owned bindings,
+not caller-selected fields. Mint is conservatively marked `authorityChanging: true` because it changes
+durable handoff state and is browser-facing, so ADR-002's present-but-foreign-Origin guard applies. The
+redemption route is server-to-server protocol-authentication plumbing: it atomically consumes the exact
+credential state but cannot mint a handoff or change a mandate, ruling, escalation, commitment, or effect,
+so `authorityChanging: false` is an explicit classification rather than an omission. It nevertheless carries
+the independent `originGuarded: true` transport flag and rejects a present foreign or opaque origin. Existing
+authority-changing routes imply that guard; the handoff implementation makes the two concepts explicit so
+protocol-credential mutation is not mislabeled as action authority. Both transitions are durably appended
+before their response. The exact config route precedes the wildcard console shell and
+returns only `{authorization_origin, orchestrator_origin}` with `Cache-Control: no-store`, no CORS, and no
+caller-supplied override.
+
+Orchestrator: exact `GET /console/runtime-config.json` and the remaining `GET /console/*` serve the same
+no-store origin projection and unauthenticated fixed assets, respectively; the exact route precedes the
+wildcard shell. `POST /w/{w}/case-sessions/redeem`
+accepts only the single-use handoff in a strict same-origin body and is explicitly
+`authorityChanging: false, originGuarded: true`: it creates authentication state but no action authority.
+`POST /w/{w}/cases/{id}/messages`,
+`GET /w/{w}/cases/{id}/state`, `GET /w/{w}/models`, and `POST /w/{w}/case-sessions/close` require the
+dynamic case-session bearer and re-check its exact role/world/case/expiry binding. The bounded headless
+transport seam `POST /w/{w}/actions/execute` continues to accept only the derived
+`ORCHESTRATOR_TOKEN_CASE_OFFICER`; browser sessions are denied there, and the static derived credential is
+denied on every browser case route.
 Services host: `POST /w/{w}/services/{service}/execute` `proc:orchestrator`;
 `GET /w/{w}/effects/{idempotency_key}` (read-only reconciliation probe) `proc:authz`; `GET /healthz` open.
 `commit-verify`, effect outcomes, and reconciliation probes carry both the current services-host boot id
 and the persistent services-ledger id; only absence under the same ledger id can release a commitment.
 
-**The orchestrator's credential appears on exactly five authorization-service routes** — proposal
-submission, revised-proposal continuation, ruling read, approved-model read, and the read-only escalation
-mirror ADR-004 §7 requires so the case console can render a pending question. Nothing else: it is denied on mandate
-grant/amend/revoke, escalation disposition, dialogue response, `commit-verify`, effect outcome, record
-read, verify, and extract. Reading escalation *state* is not authority-changing, and §7's projection
-bounds what that read returns. The orchestrator also never receives a commit token: the services host
-obtains its own from `commit-verify` and never trusts the orchestrator's claim of approval.
+**The orchestrator's process credential appears on exactly five gate/data routes plus the dedicated
+case-session-handoff redemption route.** The five remain proposal submission, revised-proposal continuation,
+ruling read, approved-model read, and the read-only escalation mirror ADR-004 §7 requires. Redemption
+returns only `{handoff_id, role, world_id, case_id, target_origin, authorization_boot_id, consumed_at}`
+after atomic consumption; it is an
+authentication claim, not a ruling or authorization. Nothing else changes: the process credential is
+denied on handoff mint, mandate grant/amend/revoke, escalation disposition, dialogue response,
+`commit-verify`, effect outcome, record read, verify, and extract. Reading escalation state and redeeming
+an already issued handoff are not authority-changing, and their projections are fixed. The orchestrator
+also never receives a commit token: the services host obtains its own from `commit-verify` and never trusts
+the orchestrator's claim of approval.
 
 ADR-004 writes the two escalation routes without their world prefix (`{AUTHZ_ORIGIN}/escalations/…`);
 the canonical form is the world-scoped one above.
@@ -170,7 +218,9 @@ process** and are recorded as such. Every record entry therefore carries two dis
 an escalation disposition, a dialogue confirm/correct/permit, a mandate change — is accepted **only** when
 the person's own role token arrives on a direct browser→authorization-service call. This is the
 mechanical form of spec §5's boundary rule: the orchestrator neither serves the credential-bearing control
-nor carries the answer, so it can neither read the token nor forge a confirmation or a permission.
+nor carries the answer, so it can neither read the token nor forge a confirmation or a permission. A
+redeemed case-session claim may identify the chat seat for display and provenance, but it remains
+`claimed_actor` at the authorization boundary and never substitutes for the person's role token.
 
 ### 5. Browser access, CORS, and console token custody
 
@@ -195,11 +245,9 @@ mirror (§7) and links the responder to the governance origin to answer. It lear
 proceed from `GET /rulings/{id}`: that projection reports the ruling's status and, when an escalation's
 "allow within scope" disposition mints a successor, its `successor_ruling_id`.
 
-The headless M4 slice has no browser delivery path for `ORCHESTRATOR_TOKEN_CASE_OFFICER`; injecting it into
-the orchestrator child is sufficient only for synthetic HTTP tests. The browser console must not ship until
-an authorization-origin, one-time handoff is specified and implemented. That handoff may deliver a narrow
-case-console session but must never send the authorization-service role token to the orchestrator, print
-either credential, or persist the derived static credential in a repository or runtime record.
+The headless `ORCHESTRATOR_TOKEN_CASE_OFFICER` remains sufficient only for synthetic HTTP tests. It is not
+the parent credential of a browser session and never crosses a process response. Browser case routes accept
+only the independent dynamic session below.
 
 Token custody in the browser is demo-grade and explicit: a token-entry field on the governance origin,
 held in that origin's `localStorage` (not `sessionStorage` — ADR-004's deep link opens a new tab, which
@@ -212,6 +260,54 @@ approved-card, routed-escalation, and record routes already owned by this servic
 calls only the server-side scoped-extract route. UI disposition controls are intersected with the general
 disposition vocabulary and appear only while the returned contract is open; the endpoint remains the
 authority and can still refuse a stale or forged request. Dialogue responses remain a later M4 slice.
+
+#### 5.1 Authorization-origin handoff to the orchestrator-origin case session
+
+Both consoles first read their same-origin `GET /console/runtime-config.json` projection and require the
+origin corresponding to the current page to equal `window.location.origin`. This is how each side learns the
+other exact configured origin without a URL parameter, hard-coded port, inline executable configuration, or
+caller-selected target.
+
+1. **Mint on the credential-bearing origin.** A user-initiated governance-console control posts strict
+   `{case_id}` JSON to `POST /w/{world_id}/case-session-handoffs` with `AUTHZ_TOKEN_CASE_OFFICER`. Before the
+   asynchronous mint, the click handler installs its single-use message listener and opens the fixed child
+   synchronously; a blocked or wrong-origin window aborts without minting. The
+   authorization service verifies that the synthetic case exists in that token's world, generates the
+   handoff id and at-least-256-bit code, and binds the case-officer role, world, case, configured
+   orchestrator origin, current authorization boot id, creation time, and a deadline no more than 30 seconds
+   later. Under the world mutex it appends `issued` state containing the SHA-256 code digest but not the raw
+   code; the response is returned only after that append and carries `Cache-Control: no-store`.
+2. **Transfer to one exact window.** The console opens `${ORCHESTRATOR_ORIGIN}/console/handoff` with no
+   query, fragment, world, case, handoff id, or credential in the URL. The child sends a typed readiness
+   message to the configured authorization origin. The parent accepts it only when both `event.origin` and
+   `event.source` match the expected origin and returned `WindowProxy`, then transfers the strict handoff
+   object with the exact orchestrator `targetOrigin`. The child performs the reciprocal origin/source check,
+   each side removes its single-use listener, the child verifies the transferred target origin equals
+   `window.location.origin`, receives the value only into memory, and sets `window.opener = null`.
+   Unlike ADR-004's ordinary dialogue link, this one user gesture deliberately uses a transient opener; the
+   exact-window checks and immediate severing are part of the protocol, not optional UI hardening.
+3. **Redeem over both authenticated boundaries.** The child posts the strict object to its own
+   `POST /w/{world_id}/case-sessions/redeem`. That handler rejects a present foreign or opaque `Origin`,
+   hashes the code, and calls the authorization service's
+   `POST /w/{world_id}/case-session-handoffs/{handoff_id}/redeem` with
+   `AUTHZ_TOKEN_PROC_ORCHESTRATOR`. Under the authorization world's serialization point, redemption succeeds
+   only for one exact, still-`issued`, unexpired match across digest, role, world, case, configured origin,
+   and current boot id, and changes it atomically to `consumed`. A crash after consumption yields no session;
+   the user must mint again. On startup, prior-boot `issued` handoffs are expired before the listener binds.
+4. **Create an independent session.** Only after the bounded claim returns does the orchestrator generate
+   an unrelated at-least-256-bit bearer, store its digest with role/world/case/creation/expiry and
+   `active` state in process memory, and return the raw value once with `Cache-Control: no-store`. The browser
+   stores it only in orchestrator-origin `sessionStorage` and sends it only as a same-origin bearer. The
+   session lasts no more than 15 minutes, has no refresh or widening operation, and is closed server-side on
+   explicit logout. Tab close removes the client copy; expiry or an orchestrator restart removes server
+   usability. A fresh authorization-origin handoff is the only way to create another session.
+
+Both origins serve these surfaces with a strict self-only CSP, `frame-ancestors 'none'`, no third-party
+browser code, no cookies, and no CORS. Extra payload fields, missing process authentication, a binding
+mismatch, expiry, replay, concurrent double redemption, a prior boot id, an unknown session, or use of a
+handoff/session credential on an authority-bearing route fails closed. External refusal bodies stay fixed;
+the durable internal evidence may name the reason, authenticated actor, ids, digests, bindings, and state,
+but never raw credentials.
 
 ### 6. World-id keying
 
@@ -229,7 +325,7 @@ wildcard tails are not promoted to authority inputs and must not be re-parsed fr
 - The world mutex and the writer lock (ADR-001) are per world; ADR-003 keeps one composite digest over
   all worlds with the per-world heads listed inside it.
 - **Credentials are issued for a world.** The demo world is `w-demo` (config `DEMO_WORLD_ID`, matching
-  ADR-003's checkpoint example) and all six credentials are scoped to it; a token presented against
+  ADR-003's checkpoint example) and every static, derived, handoff, and session credential is scoped to it; a token presented against
   another world's path is 403. That is the whole v1.1 per-visitor-sandbox seam: mint a world-scoped
   token, create a world directory, change nothing in the transactional core.
 - The demo world is deliberately **not** named `default`, so no reader mistakes it for a fallback: there
@@ -279,10 +375,12 @@ Escalation-status polls read state rather than record entries and are deliberate
 
 ### 8. Declared limits (demo-grade, stated in the README)
 
-Static tokens with **no rotation, no expiry, and no revocation** short of editing `.env.local` and
-restarting. All three processes run as one OS user on one machine, so there is no OS-level isolation
-behind the process boundary. A bearer token in `localStorage` is readable by any script on that origin —
-tolerable only because that origin serves no third-party content and ships a strict CSP.
+Static base and derived tokens have **no rotation, no expiry, and no revocation** short of editing
+`.env.local` and restarting; only handoff codes and dynamic case sessions carry the short expiries above.
+All three processes run as one OS user on one machine, so there is no OS-level isolation behind the process
+boundary. A bearer token in either origin's browser storage is readable by any script on that origin —
+tolerable only because both origins serve no third-party content and ship a strict CSP. The handoff's
+transient cross-origin opener is an additional declared POC cost.
 Competence and independence in the intervention contract remain *declared*, not verified. Role binding is
 testable; identity is not established.
 
@@ -297,11 +395,20 @@ disposition route is rejected and recorded. Cross-world token use is 403. A dupl
 independent layers: the console renders only permitted dispositions, and the API still refuses an
 out-of-scope one — and `commit-verify` refuses it again.
 
-**Deferred, by decision.** No rotation, expiry, refresh, or revocation list. No mTLS or signed
+**Required with the browser handoff implementation.** Real-listener tests cover exact-origin/exact-window
+message acceptance and wrong/opaque origin or wrong-window refusal; mint-role confinement; absence from URLs,
+storage other than the named `sessionStorage`, responses after the one-time returns, logs, records, errors,
+and console output; exact role/world/case/origin/boot binding; expiry; concurrent double redemption; replay;
+authorization restart after issue; orchestrator restart after session creation; logout; rejection of the
+headless derived credential on browser routes; rejection of the dynamic session and handoff on every
+authority-bearing route; and unchanged negative authorization across all other orchestrator-accessible paths.
+
+**Deferred, by decision.** No rotation, expiry, refresh, or revocation list for the static base credentials.
+The handoff and session expiries above do not add a general identity/session service. No mTLS or signed
 inter-process requests — the process credential is a shared secret, and a local attacker who can read
 `.env.local` has everything. No per-user identity, directory, or audit of *who* holds a role token. No
 general authenticated rate limiting beyond the body cap and the bounded unauthenticated-ingress control
-above. The v1.1 sandbox needs a token-minting path and a world lifecycle
+above. The v1.1 sandbox still needs a world-scoped base-token minting path and a world lifecycle
 (create, expire, delete); this ADR reserves the seam and specifies nothing further.
 Authenticated 403s remain one durable transaction per attempt by design. The unauthenticated limiter is
 global per process, so one flooder can suppress detailed evidence for peers during the short window; this
