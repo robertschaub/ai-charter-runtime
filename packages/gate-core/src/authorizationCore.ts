@@ -13,6 +13,7 @@ import {
   commitToken,
   DIALOGUE_DISPOSITIONS,
   effectIntent,
+  GENERAL_DISPOSITIONS,
   type CommitToken,
   hexDigest,
   id,
@@ -1485,6 +1486,12 @@ export class AuthorizationCore {
           ...escalation.contract.decision_and_route.substitute_roles,
         ];
         if (responderRole === null || !eligibleRoles.includes(responderRole)) return refuse('wrong-role');
+        const generalContract = escalation.contract.permitted_dispositions.every((value) =>
+          (GENERAL_DISPOSITIONS as readonly string[]).includes(value),
+        );
+        if (!generalContract || !(GENERAL_DISPOSITIONS as readonly string[]).includes(disposition)) {
+          return refuse('disposition-not-permitted');
+        }
         if (!escalation.contract.permitted_dispositions.includes(disposition)) {
           return refuse('disposition-not-permitted');
         }

@@ -117,7 +117,7 @@ Independent adversarial review returned **GO — no findings**. The reviewed val
   dynamic credential rejection, strict assets/configuration, and absence of raw credentials from records and
   process output.
 
-### Implemented in the current tranche; exact-SHA review pending
+### Implemented in the current tranche; follow-up exact-SHA review pending
 
 - Dynamic-session case routes expose the mandate's signed-card evidence and a case-bound ruling-status mirror;
   the static headless credential is denied, present foreign origins are refused, and the case projection never
@@ -139,6 +139,10 @@ Independent adversarial review returned **GO — no findings**. The reviewed val
 - Unit, real-listener, and real-three-process tests cover the raw-API bypass, exact role routing, bare-confirm
   refusal, successful cited confirmation, terminal replay, zero CORS, two-hop status projection, and absence
   of answer text and credentials from public responses, records, and process output.
+- Exact-SHA review of `d25f3661442fb27849c725817fcd74da54291007` found one Medium asymmetric-route
+  guard: the general disposition method still accepted dialogue-only values at its core boundary. The focused
+  follow-up restricts both the HTTP schema and core transition to general dispositions and adds direct-core
+  and real-listener negative coverage; independent review of that correction remains pending.
 
 ### Remaining before M4 can be called complete
 

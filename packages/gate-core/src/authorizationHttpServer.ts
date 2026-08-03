@@ -35,6 +35,7 @@ import {
   effectIntent,
   frozenProposal,
   gate,
+  generalDisposition,
   hexDigest,
   id,
   integer,
@@ -77,7 +78,7 @@ const effectOutcomeRequest = z
   })
   .strict();
 const revokeRequest = z.object({ version: integer.min(1) }).strict();
-const dispositionRequest = z.object({ disposition }).strict();
+const dispositionRequest = z.object({ disposition: generalDisposition }).strict();
 const dialogueResponseRequest = z
   .object({
     escalation_id: id,

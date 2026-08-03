@@ -1813,6 +1813,11 @@ describe('M2 authorization transactions', () => {
     });
 
     await expect(
+      h.core.disposeEscalation({ escalationId, disposition: 'confirm', actor: APPLICANT }),
+    ).resolves.toMatchObject({ accepted: false, defect: 'disposition-not-permitted' });
+    expect(h.store.snapshot().escalations.get(escalationId)?.state).toBe('open');
+
+    await expect(
       h.core.respondDialogue({
         escalationId,
         disposition: 'confirm',
@@ -1953,6 +1958,21 @@ describe('M2 authorization transactions', () => {
       });
     const baseBody = { escalation_id: escalationId, disposition: 'confirm' };
     try {
+      const legacyDispositionBypass = await fetch(
+        `${address.origin}/w/w-demo/escalations/${escalationId}/disposition`,
+        {
+          method: 'POST',
+          headers: {
+            authorization: `Bearer ${tokens.caseOfficer}`,
+            'content-type': 'application/json',
+          },
+          body: JSON.stringify({ disposition: 'confirm' }),
+        },
+      );
+      expect(legacyDispositionBypass.status).toBe(422);
+      await expect(legacyDispositionBypass.json()).resolves.toEqual({ error: 'invalid-request' });
+      expect(h.store.snapshot().escalations.get(escalationId)?.state).toBe('open');
+
       const processBypass = await post(tokens.orchestrator, baseBody);
       expect(processBypass.status).toBe(403);
       const foreignOrigin = await post(tokens.applicant, baseBody, 'http://127.0.0.1:9999');
