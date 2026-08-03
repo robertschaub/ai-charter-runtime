@@ -9,8 +9,8 @@
 or generated-record edit
 
 This ledger maps the M4 delivery row in the authoritative specification to executable repository evidence.
-It does not upgrade partial or unassessed coverage. The exact candidate commit remains subject to independent
-adversarial review before M4 is marked complete or M5 begins.
+It does not upgrade partial or unassessed coverage. Independent exact-SHA adversarial review of
+`e326562f6c29fe2fc625a18127517163d5665dcd` returned **GO — M4 acceptance complete; no findings**.
 
 ## M4 scripted beats
 
@@ -56,8 +56,9 @@ model interaction remain M5 and are not counted as an exercised beat-4 outcome.
 ## Acceptance outcome
 
 All offline M4 implementation paths named above are exercised. Remote anchoring presence remains explicitly
-partial and approval-gated; M6 still owns the all-beats capture. M4 remains **in progress** until an independent
-review returns GO on the exact acceptance commit. M5 remains blocked until then.
+partial and approval-gated; M6 still owns the all-beats capture. The exact-SHA review gate is satisfied at
+`e326562f6c29fe2fc625a18127517163d5665dcd`: M4 is **complete**, and M5 is unblocked for planning but has not
+begun.
 
-Candidate validation: `npm run typecheck` clean, 4 Git-safety hook tests, 267 Vitest tests across 31 files,
+Reviewed validation: `npm run typecheck` clean, 4 Git-safety hook tests, 267 Vitest tests across 31 files,
 and both signed model cards verified unchanged.

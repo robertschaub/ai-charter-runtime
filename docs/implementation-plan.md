@@ -3,7 +3,7 @@
 
 **Status date:** 2026-08-03
 
-**Current milestone:** M4 in progress; M5 is blocked.
+**Current milestone:** M4 complete; M5 is unblocked for planning and has not begun.
 
 This file tracks implementation status and sequencing in `ai-charter-runtime`. It does not replace or
 reinterpret the authoritative specification. On divergence, the specification and its linked Charter
@@ -31,11 +31,12 @@ must not be treated as matching this local pin.
 ## Reviewed implementation baseline
 
 The latest maintainer-run, cross-model adversarially reviewed runtime implementation baseline is
-`7f2e15350015f889c3d539a56001b245a555efb0` (`7f2e153`). Review of `d25f366` found one Medium
-asymmetric disposition-route guard; the focused `7f2e153` correction was re-reviewed **GO — finding closed,
-no new findings**.
+`e326562f6c29fe2fc625a18127517163d5665dcd` (`e326562`). The final M4 acceptance review returned
+**GO — M4 acceptance complete; no findings**. Review of `d25f366` had found one Medium asymmetric
+disposition-route guard; the focused `7f2e153` correction was re-reviewed **GO — finding closed, no new
+findings** before the acceptance tranche was added.
 One earlier Low finding remains deliberately deferred to the anchoring-flow slice below. At this baseline,
-`npm run typecheck` passed, the Git-safety hook suite passed 4 tests, Vitest passed 264 tests across 31 files,
+`npm run typecheck` passed, the Git-safety hook suite passed 4 tests, Vitest passed 267 tests across 31 files,
 and both signed cards verified. The branch remained unpushed at review time; branch publication remains a
 maintainer decision.
 
@@ -52,8 +53,8 @@ distinguish an uncommitted latest checkpoint from confirmed remote rollback or m
 | M1 — protocol before schemas | Implemented and amended | ADRs, schemas, canonicalization, key handling, record chains, authenticated-interface contracts, and the approved case-session handoff contract are present. |
 | M2 — transactional core | Implemented and fault-tested | Authorization remains the single durable serialization point; authority defects fail closed. |
 | M3 — vertical slice | Implemented | Deterministic authorize → propose → rule → commit-verify → effect → receipt path, adapters, service ledger, and signed cards are present. |
-| M4 — escalation + governance console | **In progress** | All implementation slices through case-console/dialogue are reviewed; the offline acceptance implementation and ledger are complete, with exact-SHA acceptance review pending. |
-| M5 — screening + empathy + switching | **Blocked** | Do not begin until M4 is complete and reviewed. |
+| M4 — escalation + governance console | **Complete** | Final exact-SHA review of `e326562` returned GO with no findings; the offline acceptance ledger preserves the remaining partial and not-assessed boundaries. |
+| M5 — screening + empathy + switching | **Not started; planning unblocked** | M4's completion gate is satisfied. No M5 implementation has begun. |
 | M6–M7 | Not started | Full capture/publication work follows the implementation milestones. |
 
 These labels describe repository implementation status, not assurance, certification, or independent
@@ -147,7 +148,7 @@ Independent adversarial review returned **GO — no findings**. The reviewed val
   and real-listener negative coverage. Independent review of `7f2e15350015f889c3d539a56001b245a555efb0`
   returned **GO — Medium finding closed; no new findings**.
 
-### M4 acceptance implementation; exact-SHA review pending
+### M4 acceptance implementation and review
 
 - [The acceptance ledger](m4-acceptance.md) maps every M4 scripted beat and the §7 adversarial set to named
   executable evidence while preserving partial and not-assessed classifications.
@@ -160,16 +161,17 @@ Independent adversarial review returned **GO — no findings**. The reviewed val
 - The real three-process test exercises that challenge after a successful effect, verifies the updated scoped
   extract, rejects duplicate opening, and includes the new authority-changing route in the orchestrator-denial
   sweep.
-- Candidate validation is `npm run typecheck` clean, 4 Git-safety hook tests and 267 Vitest tests across 31
-  files, with both signed cards verified unchanged.
+- Final exact-SHA review of `e326562f6c29fe2fc625a18127517163d5665dcd` returned **GO — M4 acceptance
+  complete; no findings**. Validation was `npm run typecheck` clean, 4 Git-safety hook tests and 267 Vitest
+  tests across 31 files, with both signed cards verified unchanged.
 - Beat 15 remains honestly partial at the remote-presence boundary: local tamper/rollback and run-start
   fail-stop are exercised, but commit/push anchoring stays approval-gated and assigned to the later anchoring
   and M6 capture flow.
 
-### Remaining before M4 can be called complete
+### M4 completion decision
 
-1. Obtain an exact-SHA adversarial review of the acceptance commit. Only a GO closes M4 and permits planning
-   to advance to M5.
+The required exact-SHA adversarial review returned GO at `e326562`. M4 is complete. This closes the M4 review
+cycle and permits M5 planning; it does not itself start M5 implementation.
 
 ## Resolved browser credential-handoff protocol
 
@@ -188,8 +190,10 @@ authorization route. The bounded handoff and session implementation was independ
 
 ## Ordered next slices
 
-1. **M4 acceptance review** — exact-SHA adversarial review of the challenge path, named-beat tests, and honest
-   coverage ledger. M5 remains blocked until that review is GO.
+1. **M5 planning** — define the first bounded screening/empathy/switching implementation slice against the
+   pinned specification, preserving the server-owned said/confirmed/permitted-store transition and
+   re-projection boundary before model interaction is opened. Obtain maintainer approval for that slice before
+   implementation.
 
 Substantive tranches are committed and reviewed at bounded integration points. A documentation-only status
 acknowledgement does not trigger a recursive review round; changes to ADRs, gates, invariants, ACLs,

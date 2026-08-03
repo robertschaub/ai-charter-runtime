@@ -92,7 +92,7 @@ and polls only the authorization-owned ruling-status projection. A safe link ope
 authorization origin, where the responder's own role token reads the question/contract and posts the answer
 directly. Raw clients still face the same ACL, Origin guard, evidence resolution, and single-use state machine.
 The browser message route remains explicitly closed until the M5 model/screening/empathy loop is implemented;
-M5 remains blocked pending exact-SHA adversarial review of the M4 acceptance candidate.
+M4 acceptance is complete at reviewed runtime commit `e326562`; M5 is unblocked for planning but has not begun.
 
 Offline and deterministic verification uses synthetic records and skips only the remote-presence step:
 
