@@ -283,7 +283,7 @@ export class AuthorizationReadSide {
   }
 
   approvedModels(mandateId: string, actor: TransactionActor): ApprovedModelsProjection | null {
-    requireCredential(actor, ['proc:orchestrator', 'role:case_officer']);
+    requireCredential(actor, ['proc:orchestrator', 'role:principal', 'role:case_officer']);
     const state = this.#store.snapshot();
     const status = state.mandateStatus.get(mandateId);
     const mandateValue =

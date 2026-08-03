@@ -263,12 +263,20 @@ describe('ADR-002 authorization HTTP adapter', () => {
     ]);
   });
 
-  it('matches the bare console path and supplies only validated named parameters', async () => {
+  it('matches fixed console assets before the shell and supplies only validated named parameters', async () => {
     const { adapter } = setup();
-    const consoleOperation = vi.fn(async ({ params }) => ({ status: 200, body: { params } }));
+    const consoleOperation = vi.fn(async ({ params, routeId }) => ({ status: 200, body: { params, routeId } }));
     await expect(adapter.dispatch({ method: 'GET', pathname: '/console' }, consoleOperation)).resolves.toMatchObject({
       status: 200,
-      body: { params: {} },
+      body: { params: {}, routeId: 'console.shell' },
+    });
+    await expect(adapter.dispatch({ method: 'GET', pathname: '/console/app.js' }, consoleOperation)).resolves.toMatchObject({
+      status: 200,
+      body: { params: {}, routeId: 'console.script' },
+    });
+    await expect(adapter.dispatch({ method: 'GET', pathname: '/console/styles.css' }, consoleOperation)).resolves.toMatchObject({
+      status: 200,
+      body: { params: {}, routeId: 'console.style' },
     });
     const recordOperation = vi.fn(async ({ params }) => ({ status: 200, body: { params } }));
     await expect(
@@ -281,6 +289,22 @@ describe('ADR-002 authorization HTTP adapter', () => {
         recordOperation,
       ),
     ).resolves.toMatchObject({ status: 200, body: { params: { world_id: 'w-demo' } } });
+  });
+
+  it('lets the principal read fixed model-card evidence without opening a mutation route', async () => {
+    const { adapter } = setup();
+    const operation = vi.fn(async ({ actor }) => ({ status: 200, body: { actor: actor?.credential } }));
+    await expect(
+      adapter.dispatch(
+        {
+          method: 'GET',
+          pathname: '/w/w-demo/mandates/mdt_demo/approved-models',
+          authorization: `Bearer ${'1'.repeat(64)}`,
+        },
+        operation,
+      ),
+    ).resolves.toMatchObject({ status: 200, body: { actor: 'role:principal' } });
+    expect(operation).toHaveBeenCalledOnce();
   });
 
   it('returns 404 for an unregistered route without invoking or fabricating evidence', async () => {

@@ -21,6 +21,13 @@ their access evidence before returning, and expose checkpoint/open-window facts 
 an assurance signal. The orchestrator's escalation read is a status mirror only; intervention contracts
 remain confined to the authoritative origin and the role to which they are routed.
 
+**Amendment (M4 governance-console slice, 2026-08-03):** the authorization process preloads the separate
+MIT console assets before binding and serves their shell, script, and stylesheet through fixed open route
+ids. Every console response carries a strict self-only CSP including `frame-ancestors 'none'`, and no CORS
+or cookie header. The principal may read the existing fixed approved-model projection so the mandate
+surface can show the signed-card evidence it governs; this adds no mutation permission and exposes no
+binding, nonce, reservation, or aggregate trust signal.
+
 ## Context
 
 Three OS processes make "the model proposes, a component outside the model decides, the executing service
@@ -96,7 +103,7 @@ Authorization service, all data routes under `/w/{world_id}/…`:
 |---|---|
 | `POST /proposals` (submit frozen proposal → ruling) | `proc:orchestrator` |
 | `GET /rulings/{id}` (status projection, §7) | `proc:orchestrator` (own submissions), `proc:services_host` |
-| `GET /mandates/{id}/approved-models` (picker source, card-verified) | `proc:orchestrator`, `role:case_officer` |
+| `GET /mandates/{id}/approved-models` (picker and principal card-evidence source, card-verified) | `proc:orchestrator`, `role:principal`, `role:case_officer` |
 | `POST /commit-verify` | **`proc:services_host` only** |
 | `POST /effects/{effect_id}/outcome` | **`proc:services_host` only** |
 | `POST /access-events` (narrow services-host denial evidence) | **`proc:services_host` only** |
@@ -198,6 +205,14 @@ Token custody in the browser is demo-grade and explicit: a token-entry field on 
 held in that origin's `localStorage` (not `sessionStorage` — ADR-004's deep link opens a new tab, which
 would start empty), sent as a bearer header. No login, no session exchange, no cookie.
 
+The static console has no inline executable content and no third-party dependency. Its external module and
+stylesheet are same-origin resources; its browser fetches use relative paths, omit cookies, and keep token
+values out of URLs, rendered output, and error messages. The principal surface calls only mandate,
+approved-card, routed-escalation, and record routes already owned by this service. The applicant surface
+calls only the server-side scoped-extract route. UI disposition controls are intersected with the general
+disposition vocabulary and appear only while the returned contract is open; the endpoint remains the
+authority and can still refuse a stale or forged request. Dialogue responses remain a later M4 slice.
+
 ### 6. World-id keying
 
 Every data route is world-scoped by construction: `/w/{world_id}/…`. There is no default world and no
@@ -230,7 +245,8 @@ allowlist projection**, decided per route and per credential:
 - proposal submission → `{ruling: {ruling_id, verdict, ux_class, reason, status,
   successor_ruling_id, validity_window}, escalation_id}`;
 - ruling → `{ruling_id, verdict, ux_class, reason, status, successor_ruling_id, validity_window}`;
-- approved models → the mandate id/version/state and acting-role entries only, each carrying its pinned
+- approved models → for the orchestrator, case officer, and principal, the mandate id/version/state and
+  acting-role entries only, each carrying its pinned
   approval, current signed public card, current digest and verifying key id, factual
   `current | superseded | withdrawn` and signature/integrity states, and the effective data-class
   intersection. This is the find → check evidence view, not a green-light or aggregate trust signal;

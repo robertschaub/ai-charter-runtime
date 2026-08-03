@@ -271,6 +271,51 @@ describe('M4 native three-process boundary', () => {
       const orchestratorOrigin = `http://127.0.0.1:${orchestratorPort}`;
       const servicesOrigin = `http://127.0.0.1:${servicesPort}`;
 
+      const consoleShell = await fetch(`${authorizationOrigin}/console`, {
+        headers: { origin: orchestratorOrigin },
+        signal: AbortSignal.timeout(5_000),
+      });
+      expect(consoleShell.status).toBe(200);
+      expect(consoleShell.headers.get('content-type')).toBe('text/html; charset=utf-8');
+      expect(consoleShell.headers.get('content-security-policy')).toContain("frame-ancestors 'none'");
+      expect(consoleShell.headers.get('content-security-policy')).toContain("default-src 'none'");
+      expect(consoleShell.headers.get('content-security-policy')).toContain("connect-src 'self'");
+      expect(consoleShell.headers.get('access-control-allow-origin')).toBeNull();
+      expect(consoleShell.headers.get('set-cookie')).toBeNull();
+      const consoleShellBody = await consoleShell.text();
+      expect(consoleShellBody).toContain('Governance console');
+      expect(consoleShellBody).toContain('/console/app.js');
+      expect(consoleShellBody).not.toMatch(/https?:\/\//i);
+
+      const consoleScript = await fetch(`${authorizationOrigin}/console/app.js`, {
+        signal: AbortSignal.timeout(5_000),
+      });
+      expect(consoleScript.status).toBe(200);
+      expect(consoleScript.headers.get('content-type')).toBe('text/javascript; charset=utf-8');
+      expect(consoleScript.headers.get('access-control-allow-origin')).toBeNull();
+      const consoleScriptBody = await consoleScript.text();
+      expect(consoleScriptBody).toContain('localStorage');
+      expect(consoleScriptBody).toContain('credentials: \'omit\'');
+      expect(consoleScriptBody).not.toContain('sourceMappingURL');
+
+      const consoleStyle = await fetch(`${authorizationOrigin}/console/styles.css`, {
+        signal: AbortSignal.timeout(5_000),
+      });
+      expect(consoleStyle.status).toBe(200);
+      expect(consoleStyle.headers.get('content-type')).toBe('text/css; charset=utf-8');
+      expect(consoleStyle.headers.get('access-control-allow-origin')).toBeNull();
+
+      const dialogueShell = await fetch(`${authorizationOrigin}/console/dialogue/w-demo/esc_synthetic`, {
+        signal: AbortSignal.timeout(5_000),
+      });
+      expect(dialogueShell.status).toBe(200);
+      expect(await dialogueShell.text()).toBe(consoleShellBody);
+
+      for (const token of Object.values(tokens)) {
+        expect(consoleShellBody).not.toContain(token);
+        expect(consoleScriptBody).not.toContain(token);
+      }
+
       const rawAuthorizationCredentialAtServices = await postJson(
         servicesOrigin,
         '/w/w-demo/services/filing/execute',
@@ -309,6 +354,20 @@ describe('M4 native three-process boundary', () => {
 
       const grant = await postJson(authorizationOrigin, '/w/w-demo/mandates', tokens.principal, mandate);
       expect(grant.status).toBe(201);
+
+      const foreignOriginGrant = await fetch(`${authorizationOrigin}/w/w-demo/mandates`, {
+        method: 'POST',
+        headers: {
+          authorization: `Bearer ${tokens.principal}`,
+          'content-type': 'application/json',
+          origin: orchestratorOrigin,
+        },
+        body: JSON.stringify(mandate),
+        signal: AbortSignal.timeout(5_000),
+      });
+      expect(foreignOriginGrant.status).toBe(403);
+      expect(foreignOriginGrant.headers.get('access-control-allow-origin')).toBeNull();
+      await expect(foreignOriginGrant.json()).resolves.toEqual({ error: 'forbidden' });
 
       const proposal = freezeProposal({
         world_id: 'w-demo',
@@ -408,6 +467,26 @@ describe('M4 native three-process boundary', () => {
         ],
       });
       for (const token of Object.values(tokens)) expect(JSON.stringify(approvedModelsBody)).not.toContain(token);
+
+      const principalApprovedModelsRead = await requestJson(
+        authorizationOrigin,
+        'GET',
+        '/w/w-demo/mandates/mdt_demo_grant/approved-models',
+        tokens.principal,
+      );
+      expect(principalApprovedModelsRead.status).toBe(200);
+      await expect(principalApprovedModelsRead.json()).resolves.toMatchObject({
+        mandate_id: 'mdt_demo_grant',
+        models: [
+          expect.objectContaining({
+            card_status: 'current',
+            current_card: expect.objectContaining({
+              attestation: 'self-declared or probe-tested — never independently attested',
+            }),
+          }),
+          expect.objectContaining({ card_status: 'current' }),
+        ],
+      });
 
       const mandateRead = await requestJson(
         authorizationOrigin,

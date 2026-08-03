@@ -20,8 +20,8 @@ The exact upstream revision, digest, reviewed runtime baseline, and remaining mi
   "Charter-certified"; there is no green light, no trust API, no queryable certification (see [NOTICE](NOTICE)).
 - **Institutions are simulated — two roles are absent.** Rulemaker, operator, and record keeper are surfaces
   played by one person; independent reviewer and remedy decider do not exist here. M4 now has a native
-  three-process HTTP boundary, but same-machine process isolation is separation of duties in miniature,
-  not independence; the browser consoles remain unfinished.
+  three-process HTTP boundary and an authorization-origin governance console, but same-machine process
+  isolation is separation of duties in miniature, not independence; the case console remains unfinished.
 - **A deterministic gate proves declared rules were applied** — not that the rules are lawful, fair, or legitimate.
 - **Commit-token window (interpretive choice).** Commitment binds at `commit-verify`; a revocation landing in the
   token's short TTL is too late for that action by definition. On the stricter reading of "authority in flight",
@@ -45,7 +45,7 @@ The exact upstream revision, digest, reviewed runtime baseline, and remaining mi
 | `packages/gate-core/` | Authorization service — the independent gate (AGPL-3.0-only) | M2 |
 | `packages/adapters/` | OpenAI-compatible model adapters (MIT) | M3 |
 | `packages/services-mock/` | Executing services with commitment verification (MIT) | M3 |
-| `packages/consoles/` | M3 deterministic loop + M4 orchestrator HTTP process; browser consoles pending (MIT) | M3–M4 |
+| `packages/consoles/` | M3 deterministic loop, M4 orchestrator process, and authorization-origin governance-console assets (MIT) | M3–M4 |
 | `fixtures/` | Synthetic grant-scenario data and pinned test fixtures (MIT) | M3+ |
 
 Licensing is per-directory — see [LICENSE.md](LICENSE.md).
@@ -77,8 +77,11 @@ reported without being confused with missing authority. The orchestrator binds l
 installed before the first spawn, and supervised children close when their IPC parent disconnects. All listeners
 use `127.0.0.1` by default.
 The authorization-origin read-side APIs now serve strict ruling, model-card, mandate, escalation,
-record-verification, chain-view, and applicant-extract projections. Browser surfaces remain M4 work: the
-governance console, case console, dialogue control, record viewer UI, and applicant extract UI are not yet built.
+record-verification, chain-view, and applicant-extract projections. The governance console at
+`http://127.0.0.1:7801/console` now provides the principal mandate/card/escalation/record surfaces and the
+applicant extract. It has no third-party content, emits no CORS headers, stores a pasted role token only in
+that origin's `localStorage`, and presents evidence rather than an assurance signal. The case console,
+credential-bearing dialogue response control, and browser credential handoff are not yet built.
 
 Offline and deterministic verification uses synthetic records and skips only the remote-presence step:
 

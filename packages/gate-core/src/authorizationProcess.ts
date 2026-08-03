@@ -1,12 +1,16 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 /** Authorization process: replay, sweep, and service reconciliation complete before listen. */
 import { randomUUID } from 'node:crypto';
-import { resolve } from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { join, resolve } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import { AuthorizationCore } from './authorizationCore.js';
 import { AuthorizationHttpAdapter, type CredentialBinding } from './authorizationHttpAdapter.js';
-import { AuthorizationHttpServer, type ListeningAddress } from './authorizationHttpServer.js';
+import {
+  AuthorizationHttpServer,
+  loadGovernanceConsoleAssets,
+  type ListeningAddress,
+} from './authorizationHttpServer.js';
 import { AuthorizationReadSide } from './authorizationReadSide.js';
 import { CardRegistry } from './cardRegistry.js';
 import {
@@ -127,6 +131,15 @@ export async function startAuthorizationProcess(
   const policyRoot = resolve(env['RUNTIME_POLICY_ROOT'] ?? 'packages/gate-core/policy');
   const sourceRoot = resolve(env['RUNTIME_GATE_SOURCE_ROOT'] ?? 'packages/gate-core/src');
   const cardsRoot = resolve(env['RUNTIME_CARDS_ROOT'] ?? 'docs/cards');
+  const consolesRoot = fileURLToPath(new URL('../../consoles/', import.meta.url));
+  const consoleAssetsRoot = resolve(
+    env['RUNTIME_CONSOLE_ASSETS_ROOT'] ?? join(consolesRoot, 'assets', 'governance-console'),
+  );
+  const consoleAssets = loadGovernanceConsoleAssets({
+    shell: join(consoleAssetsRoot, 'index.html'),
+    stylesheet: join(consoleAssetsRoot, 'styles.css'),
+    script: resolve(env['RUNTIME_CONSOLE_SCRIPT'] ?? join(consolesRoot, 'dist', 'governanceConsole.js')),
+  });
   const keyring = loadKeyring({ env });
   const loadedPolicy = loadPolicyFile(policyFile, digestFileSet(sourceRoot, 'evaluator-build'));
   const policy = { ...loadedPolicy, policyContentDigest: digestFileSet(policyRoot, 'policy-set') };
@@ -208,7 +221,7 @@ export async function startAuthorizationProcess(
       worldId: world,
       verifyRecordLayer: verifyCurrentRecords,
     });
-    server = new AuthorizationHttpServer({ authorization, reads, adapter, keyring, host, port });
+    server = new AuthorizationHttpServer({ authorization, reads, adapter, keyring, consoleAssets, host, port });
     const address = await server.listen();
     const scheduleMaintenance = () => {
       if (maintenancePromise !== undefined || closed) return;

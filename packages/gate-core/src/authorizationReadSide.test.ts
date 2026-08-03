@@ -48,6 +48,16 @@ function harness(verifyRecordLayer: () => Promise<RecordsVerificationReport>) {
 }
 
 describe('authorization read side', () => {
+  it('permits the principal to request the fixed approved-model projection', () => {
+    const { reads } = harness(async () => {
+      throw new Error('verification is not used by the model-card route');
+    });
+    expect(reads.approvedModels('mdt_missing', PRINCIPAL)).toBeNull();
+    expect(() => reads.approvedModels('mdt_missing', APPLICANT)).toThrowError(
+      expect.objectContaining<Partial<AuthorizationReadSideError>>({ code: 'forbidden' }),
+    );
+  });
+
   it('projects record-verification alarms and keeps the route role-scoped', async () => {
     const { reads } = harness(async () => {
       throw new RecordVerificationError('rollback', 'synthetic rollback detail');

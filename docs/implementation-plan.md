@@ -27,10 +27,16 @@ plan change before implementation continues.
 ## Reviewed implementation baseline
 
 The latest maintainer-run, cross-model adversarially reviewed runtime implementation baseline is
-`7f7baa0b8526547cb78d42be2c583bb468e80c8c` (`7f7baa0`), with a GO verdict and no open findings.
-At that baseline, `npm run typecheck` passed, the Git-safety hook suite passed 4 tests, and Vitest passed
-239 tests across 24 files. The branch remained unpushed at review time; branch publication remains a
-maintainer decision.
+`a8c01ec1fee0c2e72e2ce268d8813816d25ace2a` (`a8c01ec`), with a GO verdict and no code defects.
+One Low ledger correction from the parent review is preserved below as a deferred anchoring-flow finding.
+At this baseline, `npm run typecheck` passed, the Git-safety hook suite passed 4 tests, Vitest passed
+241 tests across 25 files, and both signed cards verified. The branch remained unpushed at review time;
+branch publication remains a maintainer decision.
+
+**Deferred anchoring-flow finding:** remote verification currently classifies an honest failed push—where
+the latest local checkpoint commit has not reached the remote—as `remote-mismatch` and fails stop. Preserve
+this conservative behaviour until the operational checkpoint commit/push flow is implemented, then
+distinguish an uncommitted latest checkpoint from confirmed remote rollback or mismatch.
 
 ## Milestone status
 
@@ -70,7 +76,7 @@ review. Test-family coverage continues to be reported as exercised, partial, or 
   remote-unavailability asymmetry, beat-15 tamper/rollback tests, and latest-pushed-checkpoint receipt fields.
   Synthetic tests do not commit, push, or contact a remote.
 
-### Implemented in the current review tranche
+### Implemented and reviewed in the latest baseline
 
 - Fixed read-side projections and native HTTP handlers for ruling status, approved signed-card evidence,
   current mandate envelopes, role-routed escalation lists/detail, verified action/access-chain views,
@@ -81,16 +87,25 @@ review. Test-family coverage continues to be reported as exercised, partial, or 
 
 ### Remaining before M4 can be called complete
 
-1. Obtain an exact-SHA adversarial review of the current read-side tranche.
-2. Serve the governance-console shell from the authorization origin with `frame-ancestors 'none'`, no CORS,
-   strict same-origin authority-changing requests, and no third-party script or content dependency.
-3. Implement the principal surfaces: mandate grant/amend/revoke, escalation inbox with only contract-permitted
-   dispositions enabled, model-card check view, record/access viewer, and applicant extract.
-4. Resolve the browser credential-handoff gate below before shipping a case-console session. Then implement
+1. Obtain an exact-SHA adversarial review of the current authorization-origin governance-console tranche.
+2. Resolve the browser credential-handoff gate below before shipping a case-console session. Then implement
    the case-console model picker, authoritative dialogue deep link, two-hop outcome polling, and the HTTP-level
    raw-API bypass beat without moving authority into the UI.
-5. Exercise the M4 demo beats and adversarial families named by specification §10, update honest coverage
+3. Exercise the M4 demo beats and adversarial families named by specification §10, update honest coverage
    statements, and obtain an exact-SHA adversarial review. Only then may planning advance to M5.
+
+### Implemented in the current review tranche
+
+- Authorization-origin governance-console shell with separately licensed, dependency-free static assets,
+  strict self-only CSP including `frame-ancestors 'none'`, zero CORS, no cookies, token-free deep-link paths,
+  and role tokens held only in that origin's `localStorage` and bearer headers.
+- Principal mandate grant/amend/revoke, routed escalation inbox/detail with only open contract-permitted
+  general dispositions rendered, signed model-card evidence, and verified action/access record views.
+- Server-side applicant extract/local receipt surface, strict text-only rendering, and real-listener tests for
+  asset routing, security headers, foreign-Origin refusal, principal card projection, credential absence, and
+  preservation of the three-process authority boundary.
+- The dialogue path currently resolves only to the safe governance shell. The credential-bearing dialogue
+  response control, case-console session, and case-browser credential handoff remain deliberately unimplemented.
 
 ## Browser credential-handoff decision gate
 
@@ -106,11 +121,9 @@ without resolving this gate.
 
 ## Ordered next slices
 
-1. **Read-side review** — one exact-SHA adversarial review of the projection/handler tranche.
-2. **Authorization-origin governance console** — static shell and principal/applicant surfaces, excluding the
-   unresolved case-browser handoff.
-3. **Upstream handoff decision** — separately approved specification change followed by ADR alignment.
-4. **Case console and M4 acceptance pass** — model picker, dialogue link/polling, raw-API beat, coverage ledger,
+1. **Governance-console review** — one exact-SHA adversarial review of the authorization-origin browser tranche.
+2. **Upstream handoff decision** — separately approved specification change followed by ADR alignment.
+3. **Case console and M4 acceptance pass** — model picker, dialogue link/polling, raw-API beat, coverage ledger,
    and exact-SHA review.
 
 Substantive tranches are committed and reviewed at bounded integration points. A documentation-only status

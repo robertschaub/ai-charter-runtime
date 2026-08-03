@@ -33,7 +33,9 @@ interface RouteDefinition {
 
 export const AUTHORIZATION_ROUTES = [
   { id: 'health', method: 'GET', template: '/healthz', allowed: 'open', authorityChanging: false },
-  { id: 'console', method: 'GET', template: '/console/*', allowed: 'open', authorityChanging: false },
+  { id: 'console.script', method: 'GET', template: '/console/app.js', allowed: 'open', authorityChanging: false },
+  { id: 'console.style', method: 'GET', template: '/console/styles.css', allowed: 'open', authorityChanging: false },
+  { id: 'console.shell', method: 'GET', template: '/console/*', allowed: 'open', authorityChanging: false },
   {
     id: 'proposal.submit',
     method: 'POST',
@@ -52,7 +54,7 @@ export const AUTHORIZATION_ROUTES = [
     id: 'models.read',
     method: 'GET',
     template: '/w/{world_id}/mandates/{id}/approved-models',
-    allowed: ['proc:orchestrator', 'role:case_officer'],
+    allowed: ['proc:orchestrator', 'role:principal', 'role:case_officer'],
     authorityChanging: false,
   },
   {

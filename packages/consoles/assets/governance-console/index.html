@@ -1,0 +1,181 @@
+<!-- SPDX-License-Identifier: MIT -->
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="light dark">
+    <title>Runtime governance console</title>
+    <link rel="stylesheet" href="/console/styles.css">
+    <script type="module" src="/console/app.js"></script>
+  </head>
+  <body>
+    <header class="masthead">
+      <p class="eyebrow">Our AI Charter · runtime gates POC</p>
+      <h1>Governance console</h1>
+      <p class="lede">
+        This local surface shows authorization records and evidence. It is a maintainer sketch, not an
+        assurance, certification, or aggregate trust signal.
+      </p>
+    </header>
+
+    <main>
+      <section class="panel session" aria-labelledby="session-heading">
+        <div>
+          <h2 id="session-heading">Local credential</h2>
+          <p>
+            Paste the role token for this authorization origin. It stays in this origin's local storage and
+            is sent only as a bearer header to same-origin routes. Clear it when finished.
+          </p>
+        </div>
+        <form id="credential-form" autocomplete="off" class="form-grid">
+          <label>
+            Role
+            <select id="role" name="role">
+              <option value="principal">Principal</option>
+              <option value="applicant">Applicant</option>
+            </select>
+          </label>
+          <label>
+            World
+            <input id="world" name="world" value="w-demo" pattern="[a-z0-9][a-z0-9-]{0,31}" required>
+          </label>
+          <label class="token-field">
+            Role token
+            <input id="token" name="token" type="password" inputmode="text" minlength="64"
+              pattern="[0-9a-fA-F]{64,}" spellcheck="false" required>
+          </label>
+          <div class="actions">
+            <button type="submit">Save on this origin</button>
+            <button type="button" id="clear-token" class="secondary">Clear token</button>
+          </div>
+        </form>
+        <p id="session-status" class="status" role="status" aria-live="polite"></p>
+      </section>
+
+      <nav class="view-tabs" aria-label="Console views">
+        <button type="button" data-view="principal" aria-pressed="true">Principal governance</button>
+        <button type="button" data-view="applicant" aria-pressed="false">Applicant extract</button>
+      </nav>
+
+      <section id="principal-view" class="view" aria-labelledby="principal-heading">
+        <h2 id="principal-heading">Principal governance</h2>
+        <p class="boundary-note">
+          The interface exposes only authorization-owned projections. Buttons do not create authority; the
+          endpoint and commitment boundary decide again.
+        </p>
+
+        <div class="panel-grid">
+          <section class="panel" aria-labelledby="mandates-heading">
+            <div class="section-heading">
+              <div>
+                <h3 id="mandates-heading">Mandate envelopes</h3>
+                <p>Current envelopes omit bindings, replay mechanics, and mutation endpoints.</p>
+              </div>
+              <button type="button" id="load-mandates" class="secondary">Refresh</button>
+            </div>
+            <div id="mandate-list" class="collection" aria-live="polite"></div>
+          </section>
+
+          <section class="panel" aria-labelledby="cards-heading">
+            <h3 id="cards-heading">Signed model-card evidence</h3>
+            <p>Factual card status and evidence fields only—never a green light or certification result.</p>
+            <form id="card-form" class="inline-form">
+              <label>
+                Mandate id
+                <input id="card-mandate-id" required pattern="[a-z0-9][a-z0-9_.:-]*">
+              </label>
+              <button type="submit">Check card evidence</button>
+            </form>
+            <pre id="card-output" class="data-output" tabindex="0"></pre>
+          </section>
+        </div>
+
+        <section class="panel" aria-labelledby="change-heading">
+          <h3 id="change-heading">Plan → Authorize mandate changes</h3>
+          <p>
+            Submit the complete synthetic mandate JSON without a <code>binding</code> field. Amendment and
+            revocation remain versioned authorization-service transactions.
+          </p>
+          <div class="mutation-grid">
+            <form id="grant-form">
+              <h4>Grant</h4>
+              <label>
+                Complete mandate JSON
+                <textarea id="grant-json" rows="12" spellcheck="false" required></textarea>
+              </label>
+              <button type="submit">Grant mandate</button>
+            </form>
+            <form id="amend-form">
+              <h4>Amend</h4>
+              <label>
+                Mandate id
+                <input id="amend-id" required pattern="[a-z0-9][a-z0-9_.:-]*">
+              </label>
+              <label>
+                Complete amended mandate JSON
+                <textarea id="amend-json" rows="9" spellcheck="false" required></textarea>
+              </label>
+              <button type="submit">Amend mandate</button>
+            </form>
+            <form id="revoke-form">
+              <h4>Revoke</h4>
+              <label>
+                Mandate id
+                <input id="revoke-id" required pattern="[a-z0-9][a-z0-9_.:-]*">
+              </label>
+              <label>
+                Current version
+                <input id="revoke-version" type="number" min="1" step="1" required>
+              </label>
+              <button type="submit" class="danger">Revoke mandate</button>
+            </form>
+          </div>
+          <pre id="mandate-mutation-output" class="data-output" tabindex="0"></pre>
+        </section>
+
+        <div class="panel-grid">
+          <section class="panel" aria-labelledby="escalations-heading">
+            <div class="section-heading">
+              <div>
+                <h3 id="escalations-heading">Routed escalation inbox</h3>
+                <p>Only dispositions named by each six-field intervention contract are rendered.</p>
+              </div>
+              <button type="button" id="load-escalations" class="secondary">Refresh</button>
+            </div>
+            <div id="escalation-list" class="collection" aria-live="polite"></div>
+            <div id="escalation-detail" class="detail" aria-live="polite"></div>
+          </section>
+
+          <section class="panel" aria-labelledby="records-heading">
+            <div class="section-heading">
+              <div>
+                <h3 id="records-heading">Action and access records</h3>
+                <p>Each read is recorded. The viewer refuses chain divergence against the live writer heads.</p>
+              </div>
+              <button type="button" id="load-records" class="secondary">Load records</button>
+            </div>
+            <pre id="record-output" class="data-output tall" tabindex="0"></pre>
+          </section>
+        </div>
+      </section>
+
+      <section id="applicant-view" class="view" aria-labelledby="applicant-heading" hidden>
+        <h2 id="applicant-heading">Applicant-scoped extract</h2>
+        <p class="boundary-note">
+          The extract is assembled server-side for the applicant role. It is a local record receipt, not an
+          independent lodgment receipt, and it refuses to render after an integrity alarm.
+        </p>
+        <section class="panel">
+          <button type="button" id="load-extract">Load scoped extract</button>
+          <pre id="extract-output" class="data-output tall" tabindex="0"></pre>
+        </section>
+      </section>
+
+      <section class="panel activity" aria-labelledby="activity-heading">
+        <h2 id="activity-heading">Console activity</h2>
+        <p id="activity" role="status" aria-live="polite">No request made.</p>
+      </section>
+    </main>
+  </body>
+</html>

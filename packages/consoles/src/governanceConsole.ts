@@ -1,0 +1,421 @@
+// SPDX-License-Identifier: MIT
+/** Authorization-origin governance console. No authority decision is made in this client. */
+
+export const CONSOLE_ROLES = ['principal', 'applicant'] as const;
+export type ConsoleRole = (typeof CONSOLE_ROLES)[number];
+
+const WORLD_ID = /^[a-z0-9][a-z0-9-]{0,31}$/;
+const OPAQUE_ID = /^[a-z0-9][a-z0-9_.:-]*$/;
+const TOKEN = /^[0-9a-fA-F]{64,}$/;
+const WINDOWS_RESERVED = new Set([
+  'con',
+  'prn',
+  'aux',
+  'nul',
+  ...Array.from({ length: 9 }, (_, index) => `com${index + 1}`),
+  ...Array.from({ length: 9 }, (_, index) => `lpt${index + 1}`),
+]);
+
+export const GENERAL_CONSOLE_DISPOSITIONS = [
+  'allow-within-scope',
+  'deny',
+  'narrow-or-modify',
+  'seek-review',
+  'cancel',
+  'reverse',
+  'route-to-remedy',
+] as const;
+
+type GeneralConsoleDisposition = (typeof GENERAL_CONSOLE_DISPOSITIONS)[number];
+
+export interface ConsoleDeepLink {
+  readonly kind: 'dialogue';
+  readonly worldId: string;
+  readonly escalationId: string;
+}
+
+export function validWorldId(value: string): boolean {
+  return WORLD_ID.test(value) && !WINDOWS_RESERVED.has(value);
+}
+
+export function consoleApiPath(worldId: string, ...segments: readonly string[]): string {
+  if (!validWorldId(worldId)) throw new Error('invalid world id');
+  if (segments.length === 0 || segments.some((segment) => !OPAQUE_ID.test(segment))) {
+    throw new Error('invalid API path segment');
+  }
+  return `/w/${worldId}/${segments.join('/')}`;
+}
+
+export function parseConsoleDeepLink(pathname: string): ConsoleDeepLink | null {
+  const match = /^\/console\/dialogue\/([^/]+)\/([^/]+)\/?$/.exec(pathname);
+  if (match === null) return null;
+  const worldId = match[1];
+  const escalationId = match[2];
+  if (worldId === undefined || escalationId === undefined || !validWorldId(worldId) || !OPAQUE_ID.test(escalationId)) {
+    return null;
+  }
+  return { kind: 'dialogue', worldId, escalationId };
+}
+
+export function permittedGeneralDispositions(
+  status: unknown,
+  values: unknown,
+): readonly GeneralConsoleDisposition[] {
+  if (status !== 'open' || !Array.isArray(values)) return [];
+  const permitted = new Set(values.filter((value): value is string => typeof value === 'string'));
+  return GENERAL_CONSOLE_DISPOSITIONS.filter((value) => permitted.has(value));
+}
+
+interface ConsoleState {
+  role: ConsoleRole;
+  worldId: string;
+  token: string;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function element<T extends HTMLElement>(id: string): T {
+  const found = document.getElementById(id);
+  if (found === null) throw new Error(`console element missing: ${id}`);
+  return found as T;
+}
+
+function storageKey(role: ConsoleRole): string {
+  return `runtime-governance-token:${role}`;
+}
+
+function jsonText(value: unknown): string {
+  return JSON.stringify(value, null, 2);
+}
+
+function setOutput(id: string, value: unknown): void {
+  element<HTMLElement>(id).textContent = jsonText(value);
+}
+
+function setActivity(message: string): void {
+  element<HTMLElement>('activity').textContent = message;
+}
+
+function clearChildren(target: HTMLElement): void {
+  while (target.firstChild !== null) target.removeChild(target.firstChild);
+}
+
+function text(tag: keyof HTMLElementTagNameMap, value: string, className?: string): HTMLElement {
+  const node = document.createElement(tag);
+  node.textContent = value;
+  if (className !== undefined) node.className = className;
+  return node;
+}
+
+function tokenFromStorage(role: ConsoleRole): string {
+  try {
+    return localStorage.getItem(storageKey(role)) ?? '';
+  } catch {
+    return '';
+  }
+}
+
+function persistToken(role: ConsoleRole, token: string): void {
+  localStorage.setItem(storageKey(role), token);
+}
+
+function currentState(): ConsoleState {
+  const role = element<HTMLSelectElement>('role').value as ConsoleRole;
+  const worldId = element<HTMLInputElement>('world').value.trim();
+  const token = element<HTMLInputElement>('token').value.trim();
+  if (!CONSOLE_ROLES.includes(role)) throw new Error('select a supported role');
+  if (!validWorldId(worldId)) throw new Error('enter a valid world id');
+  if (!TOKEN.test(token)) throw new Error('enter a valid role token');
+  return { role, worldId, token };
+}
+
+async function apiRequest(
+  state: ConsoleState,
+  path: string,
+  init: { readonly method?: 'GET' | 'POST'; readonly body?: unknown } = {},
+): Promise<unknown> {
+  const method = init.method ?? 'GET';
+  const response = await fetch(path, {
+    method,
+    cache: 'no-store',
+    credentials: 'omit',
+    redirect: 'error',
+    referrerPolicy: 'no-referrer',
+    headers: {
+      authorization: `Bearer ${state.token}`,
+      ...(init.body === undefined ? {} : { 'content-type': 'application/json' }),
+    },
+    ...(init.body === undefined ? {} : { body: JSON.stringify(init.body) }),
+  });
+  const contentType = response.headers.get('content-type') ?? '';
+  const body: unknown = contentType.startsWith('application/json') ? await response.json() : await response.text();
+  if (!response.ok) {
+    const code = isRecord(body) && typeof body['error'] === 'string' ? body['error'] : `http-${response.status}`;
+    throw new Error(`${code} (${response.status})`);
+  }
+  return body;
+}
+
+function requireRole(state: ConsoleState, role: ConsoleRole): void {
+  if (state.role !== role) throw new Error(`select the ${role} credential first`);
+}
+
+function formJson(id: string): Record<string, unknown> {
+  const raw = element<HTMLTextAreaElement>(id).value;
+  const parsed: unknown = JSON.parse(raw);
+  if (!isRecord(parsed)) throw new Error('mandate JSON must be an object');
+  if (Object.hasOwn(parsed, 'binding')) throw new Error('remove the server-owned binding field');
+  return parsed;
+}
+
+function itemButton(label: string, action: () => void): HTMLButtonElement {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.textContent = label;
+  button.className = 'secondary';
+  button.addEventListener('click', action);
+  return button;
+}
+
+async function loadMandates(): Promise<void> {
+  const state = currentState();
+  requireRole(state, 'principal');
+  const result = await apiRequest(state, consoleApiPath(state.worldId, 'mandates'));
+  const mandates = isRecord(result) && Array.isArray(result['mandates']) ? result['mandates'] : [];
+  const target = element<HTMLElement>('mandate-list');
+  clearChildren(target);
+  if (mandates.length === 0) target.append(text('p', 'No current mandates are visible for this role.'));
+  for (const value of mandates) {
+    if (!isRecord(value)) continue;
+    const mandateId = typeof value['mandate_id'] === 'string' ? value['mandate_id'] : 'unknown';
+    const version = typeof value['version'] === 'number' ? value['version'] : null;
+    const item = text('article', '', 'item');
+    item.append(text('h4', mandateId));
+    item.append(text('p', `Version ${version ?? 'unknown'} · state ${String(value['state'] ?? 'unknown')}`));
+    const actions = text('div', '', 'item-actions');
+    actions.append(
+      itemButton('Check model cards', () => {
+        element<HTMLInputElement>('card-mandate-id').value = mandateId;
+        void loadCards().catch(reportError);
+      }),
+    );
+    actions.append(
+      itemButton('Prepare amendment', () => {
+        element<HTMLInputElement>('amend-id').value = mandateId;
+      }),
+    );
+    if (version !== null) {
+      actions.append(
+        itemButton('Prepare revocation', () => {
+          element<HTMLInputElement>('revoke-id').value = mandateId;
+          element<HTMLInputElement>('revoke-version').value = String(version);
+        }),
+      );
+    }
+    item.append(actions);
+    target.append(item);
+  }
+  setActivity(`Loaded ${mandates.length} mandate envelope(s).`);
+}
+
+async function loadCards(): Promise<void> {
+  const state = currentState();
+  requireRole(state, 'principal');
+  const mandateId = element<HTMLInputElement>('card-mandate-id').value.trim();
+  if (!OPAQUE_ID.test(mandateId)) throw new Error('enter a valid mandate id');
+  const result = await apiRequest(
+    state,
+    consoleApiPath(state.worldId, 'mandates', mandateId, 'approved-models'),
+  );
+  setOutput('card-output', result);
+  setActivity('Loaded signed model-card evidence. No aggregate assurance result was computed.');
+}
+
+async function submitMandate(operation: 'grant' | 'amend'): Promise<void> {
+  const state = currentState();
+  requireRole(state, 'principal');
+  const body = formJson(operation === 'grant' ? 'grant-json' : 'amend-json');
+  const mandateId = operation === 'amend' ? element<HTMLInputElement>('amend-id').value.trim() : null;
+  if (mandateId !== null && !OPAQUE_ID.test(mandateId)) throw new Error('enter a valid mandate id');
+  const path =
+    mandateId === null
+      ? consoleApiPath(state.worldId, 'mandates')
+      : consoleApiPath(state.worldId, 'mandates', mandateId, 'amend');
+  const result = await apiRequest(state, path, { method: 'POST', body });
+  setOutput('mandate-mutation-output', result);
+  setActivity(operation === 'grant' ? 'Mandate grant recorded.' : 'Mandate amendment recorded.');
+  await loadMandates();
+}
+
+async function revokeMandate(): Promise<void> {
+  const state = currentState();
+  requireRole(state, 'principal');
+  const mandateId = element<HTMLInputElement>('revoke-id').value.trim();
+  const version = Number(element<HTMLInputElement>('revoke-version').value);
+  if (!OPAQUE_ID.test(mandateId)) throw new Error('enter a valid mandate id');
+  if (!Number.isSafeInteger(version) || version < 1) throw new Error('enter a valid mandate version');
+  if (!window.confirm(`Revoke ${mandateId} version ${version}?`)) return;
+  const result = await apiRequest(state, consoleApiPath(state.worldId, 'mandates', mandateId, 'revoke'), {
+    method: 'POST',
+    body: { version },
+  });
+  setOutput('mandate-mutation-output', result);
+  setActivity('Mandate revocation recorded.');
+  await loadMandates();
+}
+
+async function loadEscalations(): Promise<void> {
+  const state = currentState();
+  requireRole(state, 'principal');
+  const result = await apiRequest(state, consoleApiPath(state.worldId, 'escalations'));
+  const escalations = isRecord(result) && Array.isArray(result['escalations']) ? result['escalations'] : [];
+  const target = element<HTMLElement>('escalation-list');
+  clearChildren(target);
+  clearChildren(element<HTMLElement>('escalation-detail'));
+  if (escalations.length === 0) target.append(text('p', 'No escalations are routed to this role.'));
+  for (const value of escalations) {
+    if (!isRecord(value)) continue;
+    const escalationId = typeof value['escalation_id'] === 'string' ? value['escalation_id'] : 'unknown';
+    const item = text('article', '', 'item');
+    item.append(text('h4', escalationId));
+    item.append(
+      text('p', `${String(value['trigger'] ?? 'unknown trigger')} · ${String(value['status'] ?? 'unknown')}`),
+    );
+    item.append(itemButton('Open contract', () => void loadEscalationDetail(escalationId).catch(reportError)));
+    target.append(item);
+  }
+  setActivity(`Loaded ${escalations.length} routed escalation(s).`);
+}
+
+async function loadEscalationDetail(escalationId: string): Promise<void> {
+  const state = currentState();
+  requireRole(state, 'principal');
+  const result = await apiRequest(state, consoleApiPath(state.worldId, 'escalations', escalationId));
+  if (!isRecord(result)) throw new Error('unexpected escalation projection');
+  const target = element<HTMLElement>('escalation-detail');
+  clearChildren(target);
+  target.append(text('h4', `Intervention contract · ${escalationId}`));
+  const output = text('pre', jsonText(result), 'data-output');
+  output.tabIndex = 0;
+  target.append(output);
+  const permitted = permittedGeneralDispositions(result['status'], result['permitted_dispositions']);
+  const actions = text('div', '', 'item-actions');
+  for (const disposition of permitted) {
+    const button = itemButton(disposition, () => void disposeEscalation(escalationId, disposition).catch(reportError));
+    actions.append(button);
+  }
+  if (permitted.length === 0) {
+    actions.append(text('p', 'No general disposition is currently available from this contract.'));
+  }
+  target.append(actions);
+}
+
+async function disposeEscalation(escalationId: string, disposition: GeneralConsoleDisposition): Promise<void> {
+  const state = currentState();
+  requireRole(state, 'principal');
+  await apiRequest(
+    state,
+    consoleApiPath(state.worldId, 'escalations', escalationId, 'disposition'),
+    { method: 'POST', body: { disposition } },
+  );
+  setActivity(`Escalation disposition ${disposition} was submitted to the authorization service.`);
+  await loadEscalations();
+}
+
+async function loadRecords(): Promise<void> {
+  const state = currentState();
+  requireRole(state, 'principal');
+  const result = await apiRequest(state, consoleApiPath(state.worldId, 'records'));
+  setOutput('record-output', result);
+  setActivity('Loaded action and access record projections; this read was itself recorded.');
+}
+
+async function loadExtract(): Promise<void> {
+  const state = currentState();
+  requireRole(state, 'applicant');
+  const result = await apiRequest(state, consoleApiPath(state.worldId, 'extract'));
+  setOutput('extract-output', result);
+  setActivity('Loaded the server-side applicant extract and local receipt.');
+}
+
+function reportError(error: unknown): void {
+  const message = error instanceof Error ? error.message : 'unexpected console error';
+  setActivity(`Request refused: ${message}`);
+}
+
+function setView(view: ConsoleRole): void {
+  element<HTMLElement>('principal-view').hidden = view !== 'principal';
+  element<HTMLElement>('applicant-view').hidden = view !== 'applicant';
+  for (const button of document.querySelectorAll<HTMLButtonElement>('[data-view]')) {
+    button.setAttribute('aria-pressed', String(button.dataset['view'] === view));
+  }
+  element<HTMLSelectElement>('role').value = view;
+  element<HTMLInputElement>('token').value = tokenFromStorage(view);
+  element<HTMLElement>('session-status').textContent = tokenFromStorage(view) === ''
+    ? `No ${view} token is stored on this origin.`
+    : `${view} token is stored on this origin.`;
+}
+
+function wireForm(id: string, action: () => Promise<void>): void {
+  element<HTMLFormElement>(id).addEventListener('submit', (event) => {
+    event.preventDefault();
+    void action().catch(reportError);
+  });
+}
+
+export function mountGovernanceConsole(): void {
+  const role = element<HTMLSelectElement>('role');
+  const token = element<HTMLInputElement>('token');
+  const world = element<HTMLInputElement>('world');
+  const deepLink = parseConsoleDeepLink(window.location.pathname);
+  if (deepLink !== null) {
+    world.value = deepLink.worldId;
+    setActivity(
+      `Dialogue ${deepLink.escalationId} was linked safely without a token. The response control remains a later M4 slice.`,
+    );
+  }
+  const savedWorld = localStorage.getItem('runtime-governance-world');
+  if (deepLink === null && savedWorld !== null && validWorldId(savedWorld)) world.value = savedWorld;
+  token.value = tokenFromStorage('principal');
+  setView('principal');
+
+  wireForm('credential-form', async () => {
+    const state = currentState();
+    persistToken(state.role, state.token);
+    localStorage.setItem('runtime-governance-world', state.worldId);
+    element<HTMLElement>('session-status').textContent = `${state.role} token is stored on this origin.`;
+    setActivity('Credential saved locally; its value was not displayed or sent yet.');
+  });
+  element<HTMLButtonElement>('clear-token').addEventListener('click', () => {
+    const selected = role.value as ConsoleRole;
+    localStorage.removeItem(storageKey(selected));
+    token.value = '';
+    element<HTMLElement>('session-status').textContent = `${selected} token cleared from this origin.`;
+    setActivity('Stored role credential cleared.');
+  });
+  role.addEventListener('change', () => setView(role.value as ConsoleRole));
+  for (const button of document.querySelectorAll<HTMLButtonElement>('[data-view]')) {
+    button.addEventListener('click', () => setView(button.dataset['view'] as ConsoleRole));
+  }
+
+  element<HTMLButtonElement>('load-mandates').addEventListener(
+    'click',
+    () => void loadMandates().catch(reportError),
+  );
+  wireForm('card-form', loadCards);
+  wireForm('grant-form', () => submitMandate('grant'));
+  wireForm('amend-form', () => submitMandate('amend'));
+  wireForm('revoke-form', revokeMandate);
+  element<HTMLButtonElement>('load-escalations').addEventListener(
+    'click',
+    () => void loadEscalations().catch(reportError),
+  );
+  element<HTMLButtonElement>('load-records').addEventListener('click', () => void loadRecords().catch(reportError));
+  element<HTMLButtonElement>('load-extract').addEventListener('click', () => void loadExtract().catch(reportError));
+}
+
+if (typeof document !== 'undefined') {
+  mountGovernanceConsole();
+}

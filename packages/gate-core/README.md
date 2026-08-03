@@ -30,5 +30,7 @@ rollback alarms, receipt references, and `npm run verify:records -- --local`; op
 anchoring remains outside this deterministic M4 slice.
 The authorization-owned read model now implements fixed ruling, approved-card, mandate, routed-escalation,
 verified-chain, record-verification, and applicant-extract projections behind those ACLs. Browser consoles
-remain to be built.
+are served only after their separate assets preload successfully. The governance shell uses a strict self-only
+CSP, no CORS or cookies, and the principal's read-only card-evidence view does not widen mutation authority.
+The case console and dialogue response control remain to be built.
 Run `npm test` and `npm run typecheck` from the repository root.

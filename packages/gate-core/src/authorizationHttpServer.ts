@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 /** Native HTTP host for the ADR-002 authorization-service boundary. */
+import { readFileSync } from 'node:fs';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 
 import { z, ZodError } from 'zod';
@@ -154,6 +155,59 @@ function sendJson(response: ServerResponse, status: number, body: unknown): void
   response.end(bytes);
 }
 
+const CONSOLE_CSP = [
+  "default-src 'none'",
+  "script-src 'self'",
+  "style-src 'self'",
+  "connect-src 'self'",
+  "img-src 'self'",
+  "base-uri 'none'",
+  "form-action 'self'",
+  "frame-ancestors 'none'",
+  "object-src 'none'",
+].join('; ');
+
+export interface GovernanceConsoleAssetPaths {
+  readonly shell: string;
+  readonly script: string;
+  readonly stylesheet: string;
+}
+
+export interface GovernanceConsoleAssets {
+  readonly shell: string;
+  readonly script: string;
+  readonly stylesheet: string;
+}
+
+/** Load every console byte before the listener binds, so a partial UI cannot start. */
+export function loadGovernanceConsoleAssets(paths: GovernanceConsoleAssetPaths): GovernanceConsoleAssets {
+  return {
+    shell: readFileSync(paths.shell, 'utf8'),
+    script: readFileSync(paths.script, 'utf8').replace(/\r?\n\/\/# sourceMappingURL=.*\r?\n?$/u, '\n'),
+    stylesheet: readFileSync(paths.stylesheet, 'utf8'),
+  };
+}
+
+function sendConsoleAsset(
+  response: ServerResponse,
+  status: number,
+  body: string,
+  contentType: string,
+): void {
+  const bytes = Buffer.from(body, 'utf8');
+  response.writeHead(status, {
+    'content-type': `${contentType}; charset=utf-8`,
+    'content-length': bytes.length,
+    'cache-control': 'no-store',
+    'content-security-policy': CONSOLE_CSP,
+    'cross-origin-resource-policy': 'same-origin',
+    'permissions-policy': 'camera=(), microphone=(), geolocation=()',
+    'referrer-policy': 'no-referrer',
+    'x-content-type-options': 'nosniff',
+  });
+  response.end(bytes);
+}
+
 type Handler = (
   request: IncomingMessage,
   context: AuthorizationAdapterContext,
@@ -164,6 +218,7 @@ export interface AuthorizationHttpServerOptions {
   readonly reads: AuthorizationReadSide;
   readonly adapter: AuthorizationHttpAdapter;
   readonly keyring: Keyring;
+  readonly consoleAssets: GovernanceConsoleAssets;
   readonly host: string;
   readonly port: number;
   readonly maxBodyBytes?: number;
@@ -204,6 +259,9 @@ export class AuthorizationHttpServer {
     };
     const handlers: Record<string, Handler> = {
       health: async () => ({ status: 200, body: { status: 'ready', service: 'authorization' } }),
+      'console.shell': async () => ({ status: 200, body: options.consoleAssets.shell }),
+      'console.script': async () => ({ status: 200, body: options.consoleAssets.script }),
+      'console.style': async () => ({ status: 200, body: options.consoleAssets.stylesheet }),
       'proposal.submit': async (request, context) => {
         const parsed = proposalRequest.parse(await body(request));
         const result: RuleProposalResult = await options.authorization.ruleProposal({
@@ -426,7 +484,15 @@ export class AuthorizationHttpServer {
           }
         },
       );
-      sendJson(response, adapted.status, adapted.body);
+      if (adapted.routeId === 'console.shell' && typeof adapted.body === 'string') {
+        sendConsoleAsset(response, adapted.status, adapted.body, 'text/html');
+      } else if (adapted.routeId === 'console.script' && typeof adapted.body === 'string') {
+        sendConsoleAsset(response, adapted.status, adapted.body, 'text/javascript');
+      } else if (adapted.routeId === 'console.style' && typeof adapted.body === 'string') {
+        sendConsoleAsset(response, adapted.status, adapted.body, 'text/css');
+      } else {
+        sendJson(response, adapted.status, adapted.body);
+      }
     } catch {
       if (!response.headersSent) sendJson(response, 500, { error: 'internal-error' });
       else response.destroy();
