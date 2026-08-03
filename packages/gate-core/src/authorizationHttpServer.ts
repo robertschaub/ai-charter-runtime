@@ -12,6 +12,7 @@ import {
   type ContinueEscalationRevisionResult,
   type DisposeEscalationResult,
   type EffectOutcomeReportResult,
+  type RespondDialogueResult,
   type RuleProposalResult,
 } from './authorizationCore.js';
 import {
@@ -77,6 +78,21 @@ const effectOutcomeRequest = z
   .strict();
 const revokeRequest = z.object({ version: integer.min(1) }).strict();
 const dispositionRequest = z.object({ disposition }).strict();
+const dialogueResponseRequest = z
+  .object({
+    escalation_id: id,
+    disposition,
+    answer_text: z.string().min(1).max(32_768).optional(),
+    evidence_ref: z
+      .object({ kind: z.literal('registry_record'), id: z.string().min(1).max(256), retrieved_at: timestamp })
+      .strict()
+      .optional(),
+    scope: z
+      .object({ item_ref: id, applies_to: z.literal('this_case_only') })
+      .strict()
+      .optional(),
+  })
+  .strict();
 const revisionRequest = z
   .object({ proposal: frozenProposal, context: jsonObject.optional() })
   .strict();
@@ -98,7 +114,7 @@ const runtimeConsoleConfig = z
     orchestrator_origin: browserOrigin,
   })
   .strict();
-const servicesAccessRoute = z.enum(['services.execute', 'services.effect-probe']);
+const servicesAccessRoute = z.enum(['services.execute', 'services.effect-probe', 'services.registry-read']);
 const servicesAccessReportRequest = z.discriminatedUnion('outcome', [
   z
     .object({
@@ -132,6 +148,7 @@ const servicesAccessReportRequest = z.discriminatedUnion('outcome', [
 const ACCESS_ROUTE_LABELS = {
   'services.execute': 'POST /w/{world_id}/services/{service}/execute',
   'services.effect-probe': 'GET /w/{world_id}/effects/{idempotency_key}',
+  'services.registry-read': 'GET /w/{world_id}/registry-records/{record_id}',
   'services.unauthenticated-ingress': 'SERVICES unauthenticated ingress',
 } as const;
 
@@ -452,6 +469,26 @@ export class AuthorizationHttpServer {
           actor: requireActor(context),
         });
         return { status: result.accepted ? 200 : 422, body: result };
+      },
+      'escalation.respond': async (request, context) => {
+        const parsed = dialogueResponseRequest.parse(await body(request));
+        const escalationId = context.params['id'];
+        if (escalationId === undefined || parsed.escalation_id !== escalationId) {
+          return { status: 400, body: { error: 'binding-mismatch' } };
+        }
+        const result: RespondDialogueResult = await options.authorization.respondDialogue({
+          escalationId,
+          disposition: parsed.disposition,
+          actor: requireActor(context),
+          ...(parsed.answer_text === undefined ? {} : { answerText: parsed.answer_text }),
+          ...(parsed.evidence_ref === undefined ? {} : { evidenceRef: parsed.evidence_ref }),
+          ...(parsed.scope === undefined ? {} : { scope: parsed.scope }),
+        });
+        if (result.accepted) return { status: 200, body: result };
+        if (result.defect === 'missing-escalation') return { status: 404, body: result };
+        if (result.defect === 'wrong-role') return { status: 403, body: result };
+        if (result.defect === 'late-response') return { status: 409, body: result };
+        return { status: 422, body: result };
       },
       'escalation.revise': async (request, context) => {
         const parsed = revisionRequest.parse(await body(request));

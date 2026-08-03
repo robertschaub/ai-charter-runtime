@@ -19,6 +19,7 @@ import {
   OrchestratorServicesHttpClient,
 } from './runtimeHttpClients.js';
 import { CaseSessionStore } from './caseSessionStore.js';
+import { CaseConsoleStateStore } from './caseConsoleState.js';
 
 const executeRequest = z
   .object({ proposal: frozenProposal, service: id, action_class: classToken })
@@ -35,6 +36,7 @@ const caseSessionRedeemRequest = z
   })
   .strict();
 const closeSessionRequest = z.object({}).strict();
+const caseMessageRequest = z.object({ message: z.string().min(1).max(32_768) }).strict();
 
 async function readJson(request: IncomingMessage, maxBytes: number): Promise<unknown> {
   if (!request.headers['content-type']?.toLowerCase().startsWith('application/json')) throw new Error('json-required');
@@ -123,10 +125,12 @@ export interface OrchestratorHttpServerOptions {
   readonly services: OrchestratorServicesHttpClient;
   readonly worldId: string;
   readonly demoCaseId: string;
+  readonly demoMandateId: string;
   readonly caseOfficerToken: string;
   readonly authorizationOrigin: string;
   readonly caseConsoleAssets: CaseConsoleAssets;
   readonly caseSessions?: CaseSessionStore;
+  readonly caseState?: CaseConsoleStateStore;
   readonly host: string;
   readonly port: number;
   readonly maxBodyBytes?: number;
@@ -147,8 +151,10 @@ export class OrchestratorHttpServer {
   constructor(options: OrchestratorHttpServerOptions) {
     const configuredWorld = worldId.parse(options.worldId);
     const configuredCase = id.parse(options.demoCaseId);
+    const configuredMandate = id.parse(options.demoMandateId);
     const authorizationOrigin = browserOrigin.parse(options.authorizationOrigin);
     const sessions = options.caseSessions ?? new CaseSessionStore();
+    const caseState = options.caseState ?? new CaseConsoleStateStore();
     const maxBodyBytes = options.maxBodyBytes ?? 1024 * 1024;
     if (!/^[0-9a-fA-F]{64,}$/.test(options.caseOfficerToken)) throw new Error('invalid case-console credential');
     this.#host = options.host;
@@ -251,6 +257,84 @@ export class OrchestratorHttpServer {
             sendJson(response, 200, { closed: true });
             return;
           }
+          const stateMatch = /^\/w\/([^/]+)\/cases\/([^/]+)\/state$/.exec(url.pathname);
+          if (request.method === 'GET' && stateMatch !== null) {
+            const requestedWorld = worldId.safeParse(stateMatch[1]);
+            const requestedCase = id.safeParse(stateMatch[2]);
+            if (
+              !requestedWorld.success ||
+              requestedWorld.data !== configuredWorld ||
+              !requestedCase.success ||
+              requestedCase.data !== configuredCase
+            ) {
+              sendJson(response, 404, { error: 'not-found' });
+              return;
+            }
+            const origin = requestOrigin(request);
+            if (origin !== undefined && origin !== ownOrigin) {
+              sendJson(response, 403, { error: 'forbidden' });
+              return;
+            }
+            const presented = bearer(request.headers.authorization);
+            if (presented === null || sessions.authenticate(presented, configuredWorld, configuredCase) === null) {
+              sendJson(response, 401, { error: 'unauthenticated' });
+              return;
+            }
+            const tracked = caseState.tracked(configuredCase);
+            const current =
+              tracked === null
+                ? undefined
+                : await options.authorization.rulingStatus(configuredWorld, tracked.rulingId);
+            sendJson(response, 200, caseState.project(configuredCase, authorizationOrigin, configuredWorld, current));
+            return;
+          }
+          const modelsMatch = /^\/w\/([^/]+)\/models$/.exec(url.pathname);
+          if (request.method === 'GET' && modelsMatch !== null) {
+            const requestedWorld = worldId.safeParse(modelsMatch[1]);
+            if (!requestedWorld.success || requestedWorld.data !== configuredWorld) {
+              sendJson(response, 404, { error: 'not-found' });
+              return;
+            }
+            const origin = requestOrigin(request);
+            if (origin !== undefined && origin !== ownOrigin) {
+              sendJson(response, 403, { error: 'forbidden' });
+              return;
+            }
+            const presented = bearer(request.headers.authorization);
+            if (presented === null || sessions.authenticate(presented, configuredWorld) === null) {
+              sendJson(response, 401, { error: 'unauthenticated' });
+              return;
+            }
+            sendJson(response, 200, await options.authorization.approvedModels(configuredWorld, configuredMandate));
+            return;
+          }
+          const messageMatch = /^\/w\/([^/]+)\/cases\/([^/]+)\/messages$/.exec(url.pathname);
+          if (request.method === 'POST' && messageMatch !== null) {
+            const requestedWorld = worldId.safeParse(messageMatch[1]);
+            const requestedCase = id.safeParse(messageMatch[2]);
+            if (
+              !requestedWorld.success ||
+              requestedWorld.data !== configuredWorld ||
+              !requestedCase.success ||
+              requestedCase.data !== configuredCase
+            ) {
+              sendJson(response, 404, { error: 'not-found' });
+              return;
+            }
+            const origin = requestOrigin(request);
+            if (origin !== undefined && origin !== ownOrigin) {
+              sendJson(response, 403, { error: 'forbidden' });
+              return;
+            }
+            const presented = bearer(request.headers.authorization);
+            if (presented === null || sessions.authenticate(presented, configuredWorld, configuredCase) === null) {
+              sendJson(response, 401, { error: 'unauthenticated' });
+              return;
+            }
+            caseMessageRequest.parse(await readJson(request, maxBodyBytes));
+            sendJson(response, 501, { error: 'model-interaction-not-active' });
+            return;
+          }
           const match = /^\/w\/([^/]+)\/actions\/execute$/.exec(url.pathname);
           if (match === null || request.method !== 'POST') {
             sendJson(response, 404, { error: 'not-found' });
@@ -276,6 +360,7 @@ export class OrchestratorHttpServer {
             service: parsed.service,
             actionClass: parsed.action_class,
           });
+          caseState.track(configuredCase, ruled);
           if (ruled.ruling.verdict !== 'allow') {
             sendJson(response, 200, { ok: false, stage: 'ruling', ruling: ruled.ruling });
             return;

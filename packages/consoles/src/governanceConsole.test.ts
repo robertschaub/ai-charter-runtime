@@ -9,6 +9,7 @@ import {
   consoleApiPath,
   parseGovernanceRuntimeConfig,
   parseConsoleDeepLink,
+  permittedDialogueDispositions,
   permittedGeneralDispositions,
   validWorldId,
 } from './governanceConsole.js';
@@ -42,6 +43,10 @@ describe('authorization-origin governance console contract', () => {
     ).toEqual(['deny', 'route-to-remedy']);
     expect(permittedGeneralDispositions('disposed', ['deny'])).toEqual([]);
     expect(permittedGeneralDispositions('open', 'deny')).toEqual([]);
+    expect(
+      permittedDialogueDispositions('open', ['confirm', 'deny', 'route', 'invented']),
+    ).toEqual(['confirm', 'route']);
+    expect(permittedDialogueDispositions('disposed', ['confirm'])).toEqual([]);
   });
 
   it('accepts a handoff readiness message only from the exact opened window and configured origin', () => {

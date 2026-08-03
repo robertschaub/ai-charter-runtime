@@ -30,6 +30,17 @@ export const GENERAL_CONSOLE_DISPOSITIONS = [
 
 type GeneralConsoleDisposition = (typeof GENERAL_CONSOLE_DISPOSITIONS)[number];
 
+export const DIALOGUE_CONSOLE_DISPOSITIONS = [
+  'confirm',
+  'correct',
+  'narrow',
+  'permit',
+  'abstain',
+  'route',
+] as const;
+
+type DialogueConsoleDisposition = (typeof DIALOGUE_CONSOLE_DISPOSITIONS)[number];
+
 export interface ConsoleDeepLink {
   readonly kind: 'dialogue';
   readonly worldId: string;
@@ -81,6 +92,15 @@ export function permittedGeneralDispositions(
   if (status !== 'open' || !Array.isArray(values)) return [];
   const permitted = new Set(values.filter((value): value is string => typeof value === 'string'));
   return GENERAL_CONSOLE_DISPOSITIONS.filter((value) => permitted.has(value));
+}
+
+export function permittedDialogueDispositions(
+  status: unknown,
+  values: unknown,
+): readonly DialogueConsoleDisposition[] {
+  if (status !== 'open' || !Array.isArray(values)) return [];
+  const permitted = new Set(values.filter((value): value is string => typeof value === 'string'));
+  return DIALOGUE_CONSOLE_DISPOSITIONS.filter((value) => permitted.has(value));
 }
 
 interface ConsoleState {
@@ -152,6 +172,7 @@ function parseMintedCaseHandoff(value: unknown, config: GovernanceRuntimeConfig)
 }
 
 let runtimeConfig: GovernanceRuntimeConfig | null = null;
+let dialogueDeepLink: ConsoleDeepLink | null = null;
 
 function element<T extends HTMLElement>(id: string): T {
   const found = document.getElementById(id);
@@ -229,7 +250,12 @@ async function apiRequest(
   const contentType = response.headers.get('content-type') ?? '';
   const body: unknown = contentType.startsWith('application/json') ? await response.json() : await response.text();
   if (!response.ok) {
-    const code = isRecord(body) && typeof body['error'] === 'string' ? body['error'] : `http-${response.status}`;
+    const code =
+      isRecord(body) && typeof body['error'] === 'string'
+        ? body['error']
+        : isRecord(body) && typeof body['defect'] === 'string'
+          ? body['defect']
+          : `http-${response.status}`;
     throw new Error(`${code} (${response.status})`);
   }
   return body;
@@ -401,6 +427,78 @@ async function disposeEscalation(escalationId: string, disposition: GeneralConso
   await loadEscalations();
 }
 
+async function loadDialogue(): Promise<void> {
+  const deepLink = dialogueDeepLink;
+  if (deepLink === null) throw new Error('no dialogue deep link is active');
+  const state = currentState();
+  if (state.worldId !== deepLink.worldId) throw new Error('the credential world does not match the dialogue link');
+  const result = await apiRequest(state, consoleApiPath(state.worldId, 'escalations', deepLink.escalationId));
+  if (!isRecord(result) || !isRecord(result['contract'])) throw new Error('unexpected dialogue projection');
+  const target = element<HTMLElement>('dialogue-detail');
+  clearChildren(target);
+  target.append(text('h3', `Dialogue ${deepLink.escalationId}`));
+  target.append(text('p', typeof result['question_text'] === 'string' ? result['question_text'] : 'No question was recorded.'));
+  const contract = text('pre', jsonText(result['contract']), 'data-output');
+  contract.tabIndex = 0;
+  target.append(contract);
+  const permitted = permittedDialogueDispositions(result['status'], result['permitted_dispositions']);
+  const select = element<HTMLSelectElement>('dialogue-disposition');
+  clearChildren(select);
+  for (const disposition of permitted) {
+    const option = document.createElement('option');
+    option.value = disposition;
+    option.textContent = disposition;
+    select.append(option);
+  }
+  const form = element<HTMLFormElement>('dialogue-form');
+  form.hidden = permitted.length === 0;
+  if (permitted.length === 0) target.append(text('p', 'This dialogue has no open response disposition.'));
+  setActivity('Loaded the routed question and six-field contract directly from the authorization service.');
+}
+
+async function respondDialogue(): Promise<void> {
+  const deepLink = dialogueDeepLink;
+  if (deepLink === null) throw new Error('no dialogue deep link is active');
+  const state = currentState();
+  if (state.worldId !== deepLink.worldId) throw new Error('the credential world does not match the dialogue link');
+  const disposition = element<HTMLSelectElement>('dialogue-disposition').value as DialogueConsoleDisposition;
+  if (!DIALOGUE_CONSOLE_DISPOSITIONS.includes(disposition)) throw new Error('select a permitted dialogue disposition');
+  const answer = element<HTMLTextAreaElement>('dialogue-answer').value.trim();
+  const evidenceId = element<HTMLInputElement>('dialogue-evidence-id').value.trim();
+  const evidenceRetrieved = element<HTMLInputElement>('dialogue-evidence-retrieved').value.trim();
+  const scopeItem = element<HTMLInputElement>('dialogue-scope-item').value.trim();
+  if ((disposition === 'correct' || disposition === 'narrow') && answer === '') {
+    throw new Error(`${disposition} requires answer text`);
+  }
+  if ((disposition === 'permit' || disposition === 'narrow') && !OPAQUE_ID.test(scopeItem)) {
+    throw new Error(`${disposition} requires a valid scope item reference`);
+  }
+  if ((evidenceId === '') !== (evidenceRetrieved === '')) throw new Error('evidence id and retrieved-at are supplied together');
+  const body = {
+    escalation_id: deepLink.escalationId,
+    disposition,
+    ...(answer === '' ? {} : { answer_text: answer }),
+    ...(evidenceId === ''
+      ? {}
+      : {
+          evidence_ref: {
+            kind: 'registry_record',
+            id: evidenceId,
+            retrieved_at: evidenceRetrieved,
+          },
+        }),
+    ...(scopeItem === '' ? {} : { scope: { item_ref: scopeItem, applies_to: 'this_case_only' } }),
+  };
+  await apiRequest(
+    state,
+    consoleApiPath(state.worldId, 'escalations', deepLink.escalationId, 'response'),
+    { method: 'POST', body },
+  );
+  element<HTMLTextAreaElement>('dialogue-answer').value = '';
+  setActivity(`Dialogue response ${disposition} was recorded directly by the authorization service.`);
+  await loadDialogue();
+}
+
 async function loadRecords(): Promise<void> {
   const state = currentState();
   requireRole(state, 'principal');
@@ -517,10 +615,10 @@ export function mountGovernanceConsole(): void {
   const world = element<HTMLInputElement>('world');
   const deepLink = parseConsoleDeepLink(window.location.pathname);
   if (deepLink !== null) {
+    dialogueDeepLink = deepLink;
     world.value = deepLink.worldId;
-    setActivity(
-      `Dialogue ${deepLink.escalationId} was linked safely without a token. The response control remains a later M4 slice.`,
-    );
+    element<HTMLElement>('dialogue-view').hidden = false;
+    setActivity(`Dialogue ${deepLink.escalationId} was linked safely without a token. Supply its routed role credential to load it.`);
   }
   const savedWorld = localStorage.getItem('runtime-governance-world');
   if (deepLink === null && savedWorld !== null && validWorldId(savedWorld)) world.value = savedWorld;
@@ -533,6 +631,7 @@ export function mountGovernanceConsole(): void {
     localStorage.setItem('runtime-governance-world', state.worldId);
     element<HTMLElement>('session-status').textContent = `${state.role} token is stored on this origin.`;
     setActivity('Credential saved locally; its value was not displayed or sent yet.');
+    if (dialogueDeepLink !== null) await loadDialogue();
   });
   element<HTMLButtonElement>('clear-token').addEventListener('click', () => {
     const selected = role.value as ConsoleRole;
@@ -561,6 +660,8 @@ export function mountGovernanceConsole(): void {
   element<HTMLButtonElement>('load-records').addEventListener('click', () => void loadRecords().catch(reportError));
   element<HTMLButtonElement>('load-extract').addEventListener('click', () => void loadExtract().catch(reportError));
   wireForm('case-session-form', openCaseSession);
+  element<HTMLButtonElement>('load-dialogue').addEventListener('click', () => void loadDialogue().catch(reportError));
+  wireForm('dialogue-form', respondDialogue);
   void loadRuntimeConfig().catch(reportError);
 }
 

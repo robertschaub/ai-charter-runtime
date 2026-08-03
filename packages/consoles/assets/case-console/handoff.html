@@ -12,12 +12,31 @@
   <body>
     <main>
       <p class="eyebrow">Our AI Charter · runtime gates POC</p>
-      <h1>Case session handoff</h1>
+      <h1>Case session</h1>
       <p id="handoff-status" role="status" aria-live="polite">Waiting for the governance console.</p>
       <p class="boundary-note">
         This surface receives authentication only. It does not authorize a ruling, commitment, effect, or
         dialogue response, and it is not an assurance or certification result.
       </p>
+      <section id="case-console" hidden>
+        <h2>Find → check → prepare</h2>
+        <p>
+          Only models in the mandate's approved set appear. Review the signed card evidence before preparing a
+          choice. The evidence is factual and self-declared or probe-tested; it is not a green light.
+        </p>
+        <div id="model-list" class="collection" aria-live="polite"></div>
+        <p id="model-status" class="status" aria-live="polite">No model choice prepared.</p>
+
+        <h2>Case gate state</h2>
+        <div id="case-state" class="state" aria-live="polite">
+          <p>No ruling is currently mirrored for this case.</p>
+        </div>
+        <div id="dialogue-link" class="dialogue-link" aria-live="polite"></div>
+        <p class="boundary-note">
+          Model interaction and model switching are not active in this M4 surface. A prepared choice creates no
+          authority and sends no model request.
+        </p>
+      </section>
       <button id="close-session" type="button" disabled>Close session</button>
     </main>
   </body>

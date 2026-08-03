@@ -12,6 +12,7 @@ import type {
   ServicesAuthorizationHttpClient,
 } from './authorizationHttpClient.js';
 import type { MockServicesHost } from './servicesHost.js';
+import { resolveSyntheticRegistryEvidence } from './registryEvidence.js';
 
 const executeRequest = z.object({ ruling_id: id, intent: effectIntent }).strict();
 
@@ -115,6 +116,7 @@ export class ServicesHttpServer {
           }
           const execute = /^\/w\/([^/]+)\/services\/([^/]+)\/execute$/.exec(url.pathname);
           const probe = /^\/w\/([^/]+)\/effects\/([0-9a-f]{64})$/.exec(url.pathname);
+          const registryRead = /^\/w\/([^/]+)\/registry-records\/([^/]+)$/.exec(url.pathname);
           const presented = bearer(request.headers.authorization);
           const knownOrchestrator =
             presented !== null && timingSafeEqualUtf8(presented, options.orchestratorToken);
@@ -165,6 +167,33 @@ export class ServicesHttpServer {
               return;
             }
             sendJson(response, 200, options.ledger.probe(key.data));
+            return;
+          }
+          if (registryRead !== null && request.method === 'GET') {
+            if (!knownAuthorization) {
+              const denial = knownOrchestrator
+                ? await this.#recordForbidden('services.registry-read', 'proc:orchestrator')
+                : await this.#recordUnauthenticated('services.registry-read');
+              sendJson(response, denial.http_status, {
+                error: denial.outcome === 'rate-limited' ? 'rate-limited' : denial.outcome,
+              });
+              return;
+            }
+            const requestedWorld = worldId.safeParse(registryRead[1]);
+            let recordId: string;
+            try {
+              recordId = decodeURIComponent(registryRead[2] ?? '');
+            } catch {
+              sendJson(response, 404, { error: 'not-found' });
+              return;
+            }
+            if (!requestedWorld.success || requestedWorld.data !== configuredWorld || recordId.length > 256) {
+              sendJson(response, 404, { error: 'not-found' });
+              return;
+            }
+            const resolvedAt = new Date(this.#nowMilliseconds()).toISOString();
+            const evidence = resolveSyntheticRegistryEvidence(recordId, resolvedAt);
+            sendJson(response, evidence === null ? 404 : 200, evidence ?? { error: 'not-found' });
             return;
           }
           sendJson(response, 404, { error: 'not-found' });

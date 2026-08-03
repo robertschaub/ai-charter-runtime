@@ -14,3 +14,6 @@ the returned token locally, executes once, and reports the outcome itself. The c
 to the orchestrator. The process recovers and exposes its authenticated read-only ledger probe before
 authorization starts; execute still fails closed while authorization is unavailable. Authenticated denials
 and bounded unauthenticated suppression evidence are appended through the authorization-owned access chain.
+The same authorization-audience credential can resolve one immutable synthetic registry retrieval for
+ADR-004 evidence binding. The endpoint returns only retrieval identity, timestamps, and a content digest;
+the orchestrator credential is denied and that refusal is recorded.

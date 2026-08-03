@@ -125,7 +125,7 @@ export const humanInterventionEvent = z.object({
     }).strict(),
     z.object({
       kind: z.literal('dialogue_response_refused'),
-      reason_code: z.enum(['evidence_required', 'wrong_role', 'disposition_not_permitted']),
+      reason_code: z.enum(['evidence_required', 'wrong_role', 'disposition_not_permitted', 'invalid_response']),
       at: timestamp,
     }).strict(),
     z.object({

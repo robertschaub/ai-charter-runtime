@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 import { spawn, type ChildProcess } from 'node:child_process';
 import { createServer } from 'node:net';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -183,6 +183,42 @@ describe('M4 native three-process boundary', () => {
     async () => {
       const recordsRoot = mkdtempSync(join(tmpdir(), 'runtime-process-boundary-'));
       roots.push(recordsRoot);
+      const policyRoot = mkdtempSync(join(tmpdir(), 'runtime-dialogue-policy-'));
+      roots.push(policyRoot);
+      const policyFile = join(policyRoot, 'v1.yaml');
+      const basePolicy = readFileSync(join(ROOT, 'packages', 'gate-core', 'policy', 'v1.yaml'), 'utf8');
+      const dialogueRule = `  - id: dialogue-third-party-fact
+    priority: 200
+    gate: commit
+    matcher: { kind: field, source: context, path: [dialogue_trigger], operator: eq, value: true }
+    verdict: escalate
+    ux_class: stop
+    reason_template: Can the applicant confirm the cited third-party registry fact?
+    intervention_contract:
+      trigger_and_state: { trigger: unconfirmed-inference-as-fact, state: open }
+      decision_and_route:
+        eligible_role: applicant
+        standing_class: third-party-fact
+        competence_declared: Synthetic applicant response (declared, not verified).
+        independence_declared: Same-operator POC; no independent reviewer exists.
+        substitute_roles: []
+        substitute_rule: A bare assertion cannot confirm a third-party fact.
+      decision_basis_shown: [inf_7, registry read reg:CH-0042]
+      response_bound_and_default:
+        response_bound_ms: 900000
+        safe_default:
+          kind: stop-remains
+          disposition: abstain
+          authority_basis: { kind: no-new-authority }
+          reversible: true
+      permitted_dispositions: [confirm, correct, narrow, permit, abstain, route]
+      record_and_feedback:
+        record_events: [dialogue_trigger_raised, dialogue_response_recorded]
+        feedback_consequence: Increment the dialogue ask-rate counter.
+
+`;
+      if (!basePolicy.includes('rules:\n')) throw new Error('policy fixture lost its rules marker');
+      writeFileSync(policyFile, basePolicy.replace('rules:\n', `rules:\n${dialogueRule}`), 'utf8');
       const [authzPort, orchestratorPort, servicesPort] = await Promise.all([freePort(), freePort(), freePort()]);
       const tokens = {
         principal: '1'.repeat(64),
@@ -217,6 +253,8 @@ describe('M4 native three-process boundary', () => {
       };
       const authorizationEnvironment = {
         ...common,
+        RUNTIME_POLICY_FILE: policyFile,
+        RUNTIME_POLICY_ROOT: policyRoot,
         AUTHZ_TOKEN_PRINCIPAL: tokens.principal,
         AUTHZ_TOKEN_CASE_OFFICER: tokens.caseOfficer,
         AUTHZ_TOKEN_APPLICANT: tokens.applicant,
@@ -394,6 +432,145 @@ describe('M4 native three-process boundary', () => {
         },
         mandate_ref: { mandate_id: 'mdt_demo_grant', version: 1 },
       });
+      const { proposal_hash: ignoredDialogueBaseHash, ...dialogueBase } = proposal;
+      void ignoredDialogueBaseHash;
+      const dialogueProposal = freezeProposal({
+        ...dialogueBase,
+        proposal_id: 'prp_process_dialogue',
+        action_id: 'act_process_dialogue',
+        exact_parameters: { amount_minor_units: 0, reference: 'case-process-dialogue' },
+        cost_obligation: { amount_minor_units: 0, description: 'No synthetic cost.' },
+      });
+      const dialogueSubmission = await postJson(
+        authorizationOrigin,
+        '/w/w-demo/proposals',
+        tokens.orchestratorAtAuthz,
+        {
+          gate: 'commit',
+          proposal: dialogueProposal,
+          service: 'filing',
+          action_class: 'grant-filing',
+          context: { dialogue_trigger: true },
+        },
+      );
+      expect(dialogueSubmission.status).toBe(200);
+      const dialogueSubmissionBody = (await dialogueSubmission.json()) as {
+        ruling?: { ruling_id?: string; verdict?: string; reason?: string };
+        escalation_id?: string | null;
+      };
+      expect(dialogueSubmissionBody).toMatchObject({
+        ruling: {
+          verdict: 'escalate',
+          reason: 'Can the applicant confirm the cited third-party registry fact?',
+        },
+        escalation_id: expect.any(String),
+      });
+      const dialogueRulingId = dialogueSubmissionBody.ruling?.ruling_id;
+      const dialogueEscalationId = dialogueSubmissionBody.escalation_id;
+      if (dialogueRulingId === undefined || typeof dialogueEscalationId !== 'string') {
+        throw new Error('dialogue fixture did not receive its ruling and escalation');
+      }
+      const dialogueDetail = await requestJson(
+        authorizationOrigin,
+        'GET',
+        `/w/w-demo/escalations/${dialogueEscalationId}`,
+        tokens.applicant,
+      );
+      expect(dialogueDetail.status).toBe(200);
+      await expect(dialogueDetail.json()).resolves.toMatchObject({
+        escalation_id: dialogueEscalationId,
+        status: 'open',
+        question_text: 'Can the applicant confirm the cited third-party registry fact?',
+        contract: {
+          decision_and_route: { eligible_role: 'applicant', standing_class: 'third-party-fact' },
+          permitted_dispositions: ['confirm', 'correct', 'narrow', 'permit', 'abstain', 'route'],
+        },
+      });
+      const orchestratorDialogueMirror = await requestJson(
+        authorizationOrigin,
+        'GET',
+        `/w/w-demo/escalations/${dialogueEscalationId}`,
+        tokens.orchestratorAtAuthz,
+      );
+      expect(orchestratorDialogueMirror.status).toBe(200);
+      const orchestratorDialogueBody = await orchestratorDialogueMirror.json();
+      expect(orchestratorDialogueBody).toMatchObject({ escalation_id: dialogueEscalationId, status: 'open' });
+      expect(hasAnyKey(orchestratorDialogueBody, new Set(['question_text', 'contract', 'ruling']))).toBe(false);
+
+      const dialoguePath = `/w/w-demo/escalations/${dialogueEscalationId}/response`;
+      expect(
+        (
+          await postJson(authorizationOrigin, dialoguePath, tokens.orchestratorAtAuthz, {
+            escalation_id: dialogueEscalationId,
+            disposition: 'confirm',
+          })
+        ).status,
+      ).toBe(403);
+      const wrongDialogueRole = await postJson(authorizationOrigin, dialoguePath, tokens.caseOfficer, {
+        escalation_id: dialogueEscalationId,
+        disposition: 'confirm',
+      });
+      expect(wrongDialogueRole.status).toBe(403);
+      await expect(wrongDialogueRole.json()).resolves.toMatchObject({ accepted: false, defect: 'wrong-role' });
+      const bareConfirm = await postJson(authorizationOrigin, dialoguePath, tokens.applicant, {
+        escalation_id: dialogueEscalationId,
+        disposition: 'confirm',
+      });
+      expect(bareConfirm.status).toBe(422);
+      await expect(bareConfirm.json()).resolves.toMatchObject({ accepted: false, defect: 'evidence-required' });
+      const foreignDialogue = await fetch(`${authorizationOrigin}${dialoguePath}`, {
+        method: 'POST',
+        headers: {
+          authorization: `Bearer ${tokens.applicant}`,
+          'content-type': 'application/json',
+          origin: orchestratorOrigin,
+        },
+        body: JSON.stringify({ escalation_id: dialogueEscalationId, disposition: 'confirm' }),
+        signal: AbortSignal.timeout(5_000),
+      });
+      expect(foreignDialogue.status).toBe(403);
+      expect(foreignDialogue.headers.get('access-control-allow-origin')).toBeNull();
+      const dialogueAnswer = 'The cited synthetic registry record supports the registration date.';
+      const acceptedDialogue = await postJson(authorizationOrigin, dialoguePath, tokens.applicant, {
+        escalation_id: dialogueEscalationId,
+        disposition: 'confirm',
+        answer_text: dialogueAnswer,
+        evidence_ref: {
+          kind: 'registry_record',
+          id: 'reg:CH-0042',
+          retrieved_at: '2026-08-01T09:14:02.000Z',
+        },
+      });
+      expect(acceptedDialogue.status).toBe(200);
+      await expect(acceptedDialogue.json()).resolves.toMatchObject({ accepted: true, status: 'disposed' });
+      const replayedDialogue = await postJson(authorizationOrigin, dialoguePath, tokens.applicant, {
+        escalation_id: dialogueEscalationId,
+        disposition: 'abstain',
+      });
+      expect(replayedDialogue.status).toBe(409);
+      await expect(replayedDialogue.json()).resolves.toMatchObject({
+        accepted: false,
+        defect: 'late-response',
+        terminalState: 'disposed',
+      });
+      const dialogueRulingMirror = await requestJson(
+        authorizationOrigin,
+        'GET',
+        `/w/w-demo/rulings/${dialogueRulingId}`,
+        tokens.orchestratorAtAuthz,
+      );
+      await expect(dialogueRulingMirror.json()).resolves.toMatchObject({
+        ruling_id: dialogueRulingId,
+        status: 'invalidated',
+      });
+      const registryBypass = await requestJson(
+        servicesOrigin,
+        'GET',
+        '/w/w-demo/registry-records/reg%3ACH-0042',
+        orchestratorAtServices,
+      );
+      expect(registryBypass.status).toBe(403);
+
       const submitted = await postJson(
         authorizationOrigin,
         '/w/w-demo/proposals',
@@ -534,6 +711,22 @@ describe('M4 native three-process boundary', () => {
       });
       expect(recordViewBody.action_chain?.length).toBeGreaterThan(0);
       for (const token of Object.values(tokens)) expect(JSON.stringify(recordViewBody)).not.toContain(token);
+      expect(JSON.stringify(recordViewBody)).not.toContain(dialogueAnswer);
+      expect(recordViewBody.action_chain?.entries).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            entry: expect.objectContaining({
+              human_intervention_event: expect.objectContaining({
+                payload: expect.objectContaining({
+                  kind: 'dialogue_response_recorded',
+                  disposition: 'confirm',
+                  evidence_ref: expect.objectContaining({ id: 'reg:CH-0042' }),
+                }),
+              }),
+            }),
+          }),
+        ]),
+      );
 
       const recordVerification = await requestJson(
         authorizationOrigin,
@@ -560,12 +753,12 @@ describe('M4 native three-process boundary', () => {
       expect(applicantExtractBody).toMatchObject({
         world_id: 'w-demo',
         scope: { role: 'applicant', resources: ['application-42'] },
-        actions: [
+        actions: expect.arrayContaining([
           expect.objectContaining({
             action_id: 'act_process_1',
             ruling: expect.objectContaining({ verdict: 'allow' }),
           }),
-        ],
+        ]),
         receipt: {
           kind: 'local-record-receipt',
           latest_pushed_checkpoint: null,
@@ -605,11 +798,19 @@ describe('M4 native three-process boundary', () => {
         accessEntries.filter(
           (entry) => entry['authenticated_actor'] === 'proc:orchestrator' && entry['http_status'] === 403,
         ),
-      ).toHaveLength(deniedRoutes.length);
+      ).toHaveLength(deniedRoutes.length + 2);
       expect(accessEntries).toContainEqual(
         expect.objectContaining({
           route: 'POST /w/{world_id}/services/{service}/execute',
           authenticated_actor: 'proc:authz',
+          outcome: 'forbidden',
+          http_status: 403,
+        }),
+      );
+      expect(accessEntries).toContainEqual(
+        expect.objectContaining({
+          route: 'GET /w/{world_id}/registry-records/{record_id}',
+          authenticated_actor: 'proc:orchestrator',
           outcome: 'forbidden',
           http_status: 403,
         }),

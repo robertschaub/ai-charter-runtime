@@ -5,13 +5,17 @@ import {
   effectIntent,
   frozenProposal,
   id,
+  approvedModelsProjection,
   proposalRulingProjection,
+  rulingProjection,
   browserOrigin,
   timestamp,
   worldId,
   type EffectIntent,
   type FrozenProposal,
+  type ApprovedModelsProjection,
   type ProposalRulingProjection,
+  type RulingProjection,
 } from 'gate-core';
 import type { ServicesHostExecution } from 'services-mock';
 import { z } from 'zod';
@@ -99,6 +103,22 @@ abstract class JsonHttpClient {
     if (!response.ok) throw new Error(`runtime dependency rejected transport request with HTTP ${response.status}`);
     return parsed;
   }
+
+  protected async get(path: string): Promise<unknown> {
+    let response: Response;
+    try {
+      response = await this.#fetch(new URL(path, this.#origin), {
+        headers: { authorization: `Bearer ${this.#token}` },
+        redirect: 'error',
+        signal: AbortSignal.timeout(this.#timeoutMs),
+      });
+    } catch {
+      throw new Error('runtime dependency unavailable');
+    }
+    const parsed = await responseJson(response, this.#maxResponseBytes);
+    if (!response.ok) throw new Error(`runtime dependency rejected transport request with HTTP ${response.status}`);
+    return parsed;
+  }
 }
 
 export class OrchestratorAuthorizationHttpClient extends JsonHttpClient {
@@ -128,6 +148,20 @@ export class OrchestratorAuthorizationHttpClient extends JsonHttpClient {
         parsed,
       ),
     );
+  }
+
+  async approvedModels(worldIdInput: string, mandateIdInput: string): Promise<ApprovedModelsProjection> {
+    const world = worldId.parse(worldIdInput);
+    const mandateId = id.parse(mandateIdInput);
+    return approvedModelsProjection.parse(
+      await this.get(`/w/${world}/mandates/${mandateId}/approved-models`),
+    );
+  }
+
+  async rulingStatus(worldIdInput: string, rulingIdInput: string): Promise<RulingProjection> {
+    const world = worldId.parse(worldIdInput);
+    const rulingId = id.parse(rulingIdInput);
+    return rulingProjection.parse(await this.get(`/w/${world}/rulings/${rulingId}`));
   }
 }
 

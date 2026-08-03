@@ -2,8 +2,8 @@
 /** Authorization-owned client for read-only services-ledger reconciliation probes. */
 import { z } from 'zod';
 
-import type { CommitmentProbe } from './authorizationCore.js';
-import { classToken, effectIntent, hexDigest, id, timestamp, worldId } from './schemas/index.js';
+import type { CommitmentProbe, RegistryEvidence, RegistryEvidenceCitation } from './authorizationCore.js';
+import { classToken, effectIntent, hexDigest, id, registryRecordRef, timestamp, worldId } from './schemas/index.js';
 
 const recordedProbe = z
   .object({
@@ -123,5 +123,18 @@ export class ServicesProbeHttpClient {
         ...(parsed.record.detail === undefined ? {} : { detail: parsed.record.detail }),
       },
     };
+  }
+
+  async resolveRegistryEvidence(citation: RegistryEvidenceCitation): Promise<RegistryEvidence | null> {
+    const retrievedAt = timestamp.parse(citation.retrieved_at);
+    let raw: unknown;
+    try {
+      raw = await this.#get(`/w/${this.#worldId}/registry-records/${encodeURIComponent(citation.id)}`);
+    } catch {
+      return null;
+    }
+    const evidence = registryRecordRef.parse(raw);
+    if (evidence.id !== citation.id || evidence.retrieved_at !== retrievedAt) return null;
+    return evidence;
   }
 }

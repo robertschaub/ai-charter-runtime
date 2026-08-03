@@ -37,7 +37,10 @@ Costs, declared demo-grade (ADR-002 §8): the token persists on that origin unti
 Covered by ADR-002's design rather than re-solved here: no cookie authenticates anything, so no ambient credential exists for a cross-site form to ride, and the authorization service emits no CORS headers at all, so a credentialed cross-origin fetch fails in the browser. The dialogue control adds nothing — same-origin form, bearer token required. No synchronizer token, stated as a deliberate POC-scale limit. An `Origin` check is *not* relied on: a non-browser client (beat 17's raw API client) forges it freely, so the bearer token plus the route ACL is the actual control.
 
 ### 4. Response endpoint and payload
-`POST /w/{world_id}/dialogue/{escalation_id}/response` on the authorization service — ADR-002's route, restricted to the routed conversation partner's role token, same origin as the control. The shell's read side needs one route ADR-002's table does not yet list: `GET /w/{world_id}/escalations/{id}`, same restriction — to be added there.
+`POST /w/{world_id}/escalations/{escalation_id}/response` on the authorization service — ADR-002's
+canonical world-scoped route, restricted to the routed conversation partner's role token, same origin as the
+control. The shell reads `GET /w/{world_id}/escalations/{id}` under that routed role token. The path and body
+both carry the escalation id and must match.
 
 ```json
 {

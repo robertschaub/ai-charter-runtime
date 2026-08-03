@@ -129,6 +129,7 @@ export async function startOrchestratorProcess(
     }),
     worldId: worldId.parse(env['DEMO_WORLD_ID'] ?? 'w-demo'),
     demoCaseId: id.parse(env['DEMO_CASE_ID'] ?? 'case_demo'),
+    demoMandateId: id.parse(env['DEMO_MANDATE_ID'] ?? 'mdt_demo_grant'),
     caseOfficerToken,
     authorizationOrigin,
     caseConsoleAssets,

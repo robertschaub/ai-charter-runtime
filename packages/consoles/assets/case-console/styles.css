@@ -14,7 +14,7 @@ body {
 }
 
 main {
-  width: min(42rem, calc(100% - 3rem));
+  width: min(58rem, calc(100% - 3rem));
   padding: 2rem;
   border: 1px solid color-mix(in srgb, CanvasText 20%, transparent);
   border-radius: 0.75rem;
@@ -34,4 +34,43 @@ main {
 
 button {
   padding: 0.65rem 1rem;
+}
+
+.collection {
+  display: grid;
+  gap: 1rem;
+  margin: 1rem 0;
+}
+
+.model-card,
+.state {
+  padding: 1rem;
+  border: 1px solid color-mix(in srgb, CanvasText 18%, transparent);
+  border-radius: 0.5rem;
+}
+
+.model-card h3,
+.model-card p {
+  margin-top: 0;
+}
+
+.model-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+}
+
+.evidence {
+  overflow: auto;
+  max-height: 20rem;
+  padding: 0.75rem;
+  background: color-mix(in srgb, CanvasText 7%, Canvas);
+}
+
+.status {
+  font-weight: 650;
+}
+
+.dialogue-link {
+  margin: 1rem 0;
 }

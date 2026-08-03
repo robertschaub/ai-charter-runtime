@@ -4,7 +4,12 @@ import { resolve } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
-import { acceptsHandoffTransfer, parseRuntimeConsoleConfig } from './caseHandoffConsole.js';
+import {
+  acceptsHandoffTransfer,
+  parseCreatedSession,
+  parseRuntimeConsoleConfig,
+  shouldPollCaseState,
+} from './caseHandoffConsole.js';
 
 describe('orchestrator-origin exact-window handoff client', () => {
   it('accepts only an exact two-origin runtime configuration', () => {
@@ -70,5 +75,30 @@ describe('orchestrator-origin exact-window handoff client', () => {
     expect(shell).not.toMatch(/<style\b/i);
     expect(shell).not.toMatch(/\son[a-z]+=/i);
     expect(shell).not.toMatch(/https?:\/\//i);
+  });
+
+  it('binds created sessions to one case and polls only an open dialogue mirror', () => {
+    expect(
+      parseCreatedSession({
+        session_token: 'a'.repeat(64),
+        session_id: 'session_one',
+        role: 'case_officer',
+        world_id: 'w-demo',
+        case_id: 'case_demo',
+        expires_at: '2026-08-03T10:15:00.000Z',
+      }),
+    ).toEqual({ session_token: 'a'.repeat(64), world_id: 'w-demo', case_id: 'case_demo' });
+    expect(
+      parseCreatedSession({
+        session_token: 'a'.repeat(64),
+        session_id: 'session_one',
+        role: 'case_officer',
+        world_id: 'w-demo',
+        expires_at: '2026-08-03T10:15:00.000Z',
+      }),
+    ).toBeNull();
+    expect(shouldPollCaseState({ dialogue: { status: 'open' } })).toBe(true);
+    expect(shouldPollCaseState({ dialogue: { status: 'terminal' } })).toBe(false);
+    expect(shouldPollCaseState({ dialogue: null })).toBe(false);
   });
 });

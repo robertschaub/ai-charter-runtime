@@ -47,7 +47,7 @@ const outcomeResult = z.discriminatedUnion('accepted', [
 ]);
 const accessReportResult = z.object({ entry_id: id }).strict();
 
-export type ServicesDataAccessRoute = 'services.execute' | 'services.effect-probe';
+export type ServicesDataAccessRoute = 'services.execute' | 'services.effect-probe' | 'services.registry-read';
 export type ServicesAccessRoute = ServicesDataAccessRoute | 'services.unauthenticated-ingress';
 
 export type ServicesAccessDenial =

@@ -32,5 +32,8 @@ The authorization-owned read model now implements fixed ruling, approved-card, m
 verified-chain, record-verification, and applicant-extract projections behind those ACLs. Browser consoles
 are served only after their separate assets preload successfully. The governance shell uses a strict self-only
 CSP, no CORS or cookies, and the principal's read-only card-evidence view does not widen mutation authority.
-The case console and dialogue response control remain to be built.
+The M4 dialogue transaction records the routed role's direct response, refuses bare third-party confirmation
+unless the cited retrieval resolves over the authenticated services boundary, invalidates the stopped ruling,
+and treats replay as a recorded no-op. The orchestrator receives only ruling status; it cannot read the
+question, contract, response, evidence payload, or responder identity.
 Run `npm test` and `npm run typecheck` from the repository root.

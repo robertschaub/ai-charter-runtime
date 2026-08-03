@@ -135,7 +135,7 @@ Authorization service, all data routes under `/w/{world_id}/…`:
 | `POST /mandates` · `POST /mandates/{id}/amend` · `POST /mandates/{id}/revoke` | **`role:principal` only** |
 | `GET /mandates` (read) | `role:principal`, `role:case_officer` (envelope they work under) |
 | `GET /escalations` (inbox) | `role:principal`, `role:case_officer` — each sees only escalations routed to it |
-| `GET /escalations/{id}` (display mirror, §7 projection) | `proc:orchestrator` (read-only), `role:principal`, `role:case_officer` |
+| `GET /escalations/{id}` (display mirror, §7 projection) | `proc:orchestrator` (read-only), `role:principal`, `role:case_officer`, and a routed `role:applicant` dialogue responder |
 | `POST /escalations/{id}/disposition` | **the escalation's eligible role token only** |
 | `POST /escalations/{id}/response` (dialogue answer) | **the routed conversation partner's role token only** (ADR-004) |
 | `POST /escalations/{id}/revision` (continue after narrow/modify) | **`proc:orchestrator` only** |
@@ -171,7 +171,9 @@ transport seam `POST /w/{w}/actions/execute` continues to accept only the derive
 `ORCHESTRATOR_TOKEN_CASE_OFFICER`; browser sessions are denied there, and the static derived credential is
 denied on every browser case route.
 Services host: `POST /w/{w}/services/{service}/execute` `proc:orchestrator`;
-`GET /w/{w}/effects/{idempotency_key}` (read-only reconciliation probe) `proc:authz`; `GET /healthz` open.
+`GET /w/{w}/effects/{idempotency_key}` (read-only reconciliation probe) and
+`GET /w/{w}/registry-records/{record_id}` (immutable synthetic evidence resolution) `proc:authz`;
+`GET /healthz` open. The orchestrator is explicitly denied on both authorization-facing reads.
 `commit-verify`, effect outcomes, and reconciliation probes carry both the current services-host boot id
 and the persistent services-ledger id; only absence under the same ledger id can release a commitment.
 
@@ -259,7 +261,10 @@ values out of URLs, rendered output, and error messages. The principal surface c
 approved-card, routed-escalation, and record routes already owned by this service. The applicant surface
 calls only the server-side scoped-extract route. UI disposition controls are intersected with the general
 disposition vocabulary and appear only while the returned contract is open; the endpoint remains the
-authority and can still refuse a stale or forged request. Dialogue responses remain a later M4 slice.
+  authority and can still refuse a stale or forged request. The dialogue deep-link surface intersects the
+  returned contract with the closed dialogue vocabulary and posts directly to the authorization service;
+  wrong-role, out-of-contract, unresolved-evidence, foreign-Origin, and terminal-replay cases remain
+  endpoint refusals, not UI decisions.
 
 #### 5.1 Authorization-origin handoff to the orchestrator-origin case session
 

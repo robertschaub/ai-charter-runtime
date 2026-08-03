@@ -32,6 +32,7 @@ function runtimeSettings(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
     'SERVICES_PORT',
     'DEMO_WORLD_ID',
     'DEMO_CASE_ID',
+    'DEMO_MANDATE_ID',
     'RUNTIME_RECORDS_ROOT',
     'RUNTIME_POLICY_FILE',
     'RUNTIME_POLICY_ROOT',

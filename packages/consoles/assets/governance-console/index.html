@@ -191,6 +191,43 @@
         </section>
       </section>
 
+      <section id="dialogue-view" class="panel" aria-labelledby="dialogue-heading" hidden>
+        <div class="section-heading">
+          <div>
+            <h2 id="dialogue-heading">Dialogue response</h2>
+            <p>
+              This control reads and responds directly on the authorization origin. The orchestrator never
+              receives this role token, the question, the contract, or the answer.
+            </p>
+          </div>
+          <button id="load-dialogue" type="button" class="secondary">Load routed dialogue</button>
+        </div>
+        <div id="dialogue-detail" class="detail" aria-live="polite"></div>
+        <form id="dialogue-form" class="form-grid" hidden>
+          <label>
+            Permitted disposition
+            <select id="dialogue-disposition" required></select>
+          </label>
+          <label>
+            Answer text
+            <textarea id="dialogue-answer" rows="5" maxlength="32768"></textarea>
+          </label>
+          <label>
+            Registry evidence id
+            <input id="dialogue-evidence-id" placeholder="reg:CH-0042" maxlength="256">
+          </label>
+          <label>
+            Evidence retrieved at
+            <input id="dialogue-evidence-retrieved" placeholder="2026-08-01T09:14:02.000Z">
+          </label>
+          <label>
+            Scope item reference
+            <input id="dialogue-scope-item" pattern="[a-z0-9][a-z0-9_.:-]*">
+          </label>
+          <button type="submit">Submit direct response</button>
+        </form>
+      </section>
+
       <section class="panel activity" aria-labelledby="activity-heading">
         <h2 id="activity-heading">Console activity</h2>
         <p id="activity" role="status" aria-live="polite">No request made.</p>

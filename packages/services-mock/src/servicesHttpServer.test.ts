@@ -41,6 +41,7 @@ describe('services HTTP denial evidence', () => {
     const address = await server.listen();
     const execute = new URL('/w/w-demo/services/filing/execute', address.origin);
     const probe = new URL(`/w/w-demo/effects/${'a'.repeat(64)}`, address.origin);
+    const registry = new URL('/w/w-demo/registry-records/reg%3ACH-0042', address.origin);
     const post = (token: string) =>
       fetch(execute, {
         method: 'POST',
@@ -86,5 +87,36 @@ describe('services HTTP denial evidence', () => {
       outcome: 'forbidden',
       http_status: 403,
     });
+    expect(
+      (
+        await fetch(registry, {
+          headers: { authorization: `Bearer ${orchestratorToken}` },
+        })
+      ).status,
+    ).toBe(403);
+    expect(denials.at(-1)).toMatchObject({
+      route: 'services.registry-read',
+      authenticated_actor: 'proc:orchestrator',
+      outcome: 'forbidden',
+    });
+    const evidence = await fetch(registry, {
+      headers: { authorization: `Bearer ${authorizationToken}` },
+    });
+    expect(evidence.status).toBe(200);
+    const evidenceBody = await evidence.json();
+    expect(evidenceBody).toMatchObject({
+      kind: 'registry_record',
+      id: 'reg:CH-0042',
+      retrieved_at: '2026-08-01T09:14:02.000Z',
+      content_digest: expect.stringMatching(/^[0-9a-f]{64}$/),
+    });
+    expect(evidenceBody).not.toHaveProperty('content');
+    expect(
+      (
+        await fetch(new URL('/w/w-demo/registry-records/reg%3ACH-9999', address.origin), {
+          headers: { authorization: `Bearer ${authorizationToken}` },
+        })
+      ).status,
+    ).toBe(404);
   });
 });

@@ -5,7 +5,7 @@ A runnable proof of concept of the [Our AI Charter runtime reference model](http
 at an AI prompt, the action path **plan → prepare → check → decide → review** executes with five gates
 (**Authorize → Submit → Verify → Commit → Rely**) enforced *outside* the acting model — machine verdicts
 **allow / deny / escalate**, automatic escalation to a human console carrying a six-field intervention
-contract, two user-selectable acting models with governed switching, and hash-chained action records
+contract, two selectable acting-model evidence entries (with governed switching still an M5 task), and hash-chained action records
 sealed before effect.
 
 The authoritative build specification lives in the documentation repository:
@@ -21,7 +21,8 @@ The exact upstream revision, digest, reviewed runtime baseline, and remaining mi
 - **Institutions are simulated — two roles are absent.** Rulemaker, operator, and record keeper are surfaces
   played by one person; independent reviewer and remedy decider do not exist here. M4 now has a native
   three-process HTTP boundary and an authorization-origin governance console, but same-machine process
-  isolation is separation of duties in miniature, not independence; the case console remains unfinished.
+   isolation is separation of duties in miniature, not independence; model interaction, empathy triggers,
+   and governed switching are not active yet.
 - **A deterministic gate proves declared rules were applied** — not that the rules are lawful, fair, or legitimate.
 - **Commit-token window (interpretive choice).** Commitment binds at `commit-verify`; a revocation landing in the
   token's short TTL is too late for that action by definition. On the stricter reading of "authority in flight",
@@ -83,9 +84,13 @@ applicant extract, plus the case officer's user-initiated handoff control. It ha
 emits no CORS headers, stores a pasted role token only in that origin's `localStorage`, and presents evidence
 rather than an assurance signal. The handoff opens the fixed orchestrator-origin receiver, consumes a
 maximum-30-second boot-bound code over the authenticated process channel, and creates an independent
-maximum-15-minute session whose raw bearer is kept only in that tab's `sessionStorage`. The case-console
-model picker, credential-bearing dialogue response control, outcome polling, and raw-API beat remain the
-next M4 implementation slice; M5 remains blocked.
+maximum-15-minute session whose raw bearer is kept only in that tab's `sessionStorage`. That case surface now
+shows the mandate's signed-card evidence, requires a local evidence check before preparing a model choice,
+and polls only the authorization-owned ruling-status projection. A safe link opens the routed dialogue on the
+authorization origin, where the responder's own role token reads the question/contract and posts the answer
+directly. Raw clients still face the same ACL, Origin guard, evidence resolution, and single-use state machine.
+The browser message route remains explicitly closed until the M5 model/screening/empathy loop is implemented;
+M5 remains blocked pending the M4 acceptance pass and exact-SHA adversarial review.
 
 Offline and deterministic verification uses synthetic records and skips only the remote-presence step:
 

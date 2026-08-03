@@ -31,9 +31,9 @@ must not be treated as matching this local pin.
 ## Reviewed implementation baseline
 
 The latest maintainer-run, cross-model adversarially reviewed runtime implementation baseline is
-`4310550755bccfc3e930f512edb7d21591a366ca` (`4310550`), with a GO verdict and no findings.
+`a8345f015f9df4b89cbae090a9f4d1d240dec5da` (`a8345f0`), with a GO verdict and no findings.
 One earlier Low finding remains deliberately deferred to the anchoring-flow slice below. At this baseline,
-`npm run typecheck` passed, the Git-safety hook suite passed 4 tests, Vitest passed 247 tests across 26 files,
+`npm run typecheck` passed, the Git-safety hook suite passed 4 tests, Vitest passed 259 tests across 30 files,
 and both signed cards verified. The branch remained unpushed at review time; branch publication remains a
 maintainer decision.
 
@@ -50,7 +50,7 @@ distinguish an uncommitted latest checkpoint from confirmed remote rollback or m
 | M1 — protocol before schemas | Implemented and amended | ADRs, schemas, canonicalization, key handling, record chains, authenticated-interface contracts, and the approved case-session handoff contract are present. |
 | M2 — transactional core | Implemented and fault-tested | Authorization remains the single durable serialization point; authority defects fail closed. |
 | M3 — vertical slice | Implemented | Deterministic authorize → propose → rule → commit-verify → effect → receipt path, adapters, service ledger, and signed cards are present. |
-| M4 — escalation + governance console | **In progress** | Escalation/core, native-process lifecycle, read-side handlers, authorization-origin governance console, and handoff/session boundary are implemented and reviewed; case-console functionality remains. |
+| M4 — escalation + governance console | **In progress** | The reviewed escalation/core, native-process, read-side, governance-console, and handoff/session baseline is extended by a pending-review case-console/dialogue tranche; the M4 acceptance pass remains. |
 | M5 — screening + empathy + switching | **Blocked** | Do not begin until M4 is complete and reviewed. |
 | M6–M7 | Not started | Full capture/publication work follows the implementation milestones. |
 
@@ -117,12 +117,32 @@ Independent adversarial review returned **GO — no findings**. The reviewed val
   dynamic credential rejection, strict assets/configuration, and absence of raw credentials from records and
   process output.
 
+### Implemented in the current tranche; exact-SHA review pending
+
+- Dynamic-session case routes expose the mandate's signed-card evidence and a case-bound ruling-status mirror;
+  the static headless credential is denied, present foreign origins are refused, and the case projection never
+  includes the routed question, six-field contract, answer, role credential, or evidence payload.
+- The case surface implements find → check → prepare without claiming model use: the user must reveal the
+  signed card before a selectable current entry can be prepared, while the browser message endpoint remains
+  explicitly closed until M5.
+- Authorization-origin dialogue deep links render the routed question and contract under the responder's own
+  role token, then post the strict path/body-bound response directly to authorization. Wrong role,
+  out-of-contract disposition, unresolved third-party evidence, foreign Origin, and terminal replay fail
+  closed and are recorded.
+- This M4 channel records and terminates the response transaction but deliberately mints no successor ruling
+  and exposes no answer to the orchestrator. M5 must implement the server-owned said/confirmed/permitted-store
+  transition and re-projection before model interaction is opened; the current `501` message boundary prevents
+  a recorded dialogue disposition from being treated as model permission in the meantime.
+- Third-party confirmation resolves only the exact cited synthetic registry retrieval over the services
+  host's authorization-audience credential. The orchestrator is denied on that read, and only retrieval
+  identity, timestamps, and content digest return to authorization.
+- Unit, real-listener, and real-three-process tests cover the raw-API bypass, exact role routing, bare-confirm
+  refusal, successful cited confirmation, terminal replay, zero CORS, two-hop status projection, and absence
+  of answer text and credentials from public responses, records, and process output.
+
 ### Remaining before M4 can be called complete
 
-1. Implement the case-console model picker, credential-bearing authorization-origin dialogue control,
-   authoritative deep link, two-hop outcome polling, and the HTTP-level raw-API bypass beat without moving
-   authority into the UI.
-2. Exercise the M4 demo beats and adversarial families named by specification §10, update honest coverage
+1. Exercise the M4 demo beats and adversarial families named by specification §10, update honest coverage
    statements, and obtain an exact-SHA adversarial review. Only then may planning advance to M5.
 
 ## Resolved browser credential-handoff protocol
@@ -142,9 +162,7 @@ authorization route. The bounded handoff and session implementation was independ
 
 ## Ordered next slices
 
-1. **Case console and dialogue control** — model picker, authorization-origin response control, safe dialogue
-   link, two-hop polling, and the raw-API beat.
-2. **M4 acceptance pass** — named demo beats and adversarial families, honest coverage ledger, and exact-SHA
+1. **M4 acceptance pass** — named demo beats and adversarial families, honest coverage ledger, and exact-SHA
    review. M5 remains blocked until that review is GO.
 
 Substantive tranches are committed and reviewed at bounded integration points. A documentation-only status

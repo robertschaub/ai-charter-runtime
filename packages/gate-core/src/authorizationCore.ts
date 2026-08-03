@@ -11,11 +11,13 @@ import {
   gateRuling,
   accessEntry,
   commitToken,
+  DIALOGUE_DISPOSITIONS,
   effectIntent,
   type CommitToken,
   hexDigest,
   id,
   mandate,
+  registryRecordRef,
   role,
   screeningSignal,
   timestamp,
@@ -84,7 +86,19 @@ export interface AuthorizationCoreOptions {
     proposal: FrozenProposal,
     gate: 'submit' | 'verify',
   ) => readonly ScreeningSignal[] | Promise<readonly ScreeningSignal[]>;
+  /** Server-to-server evidence lookup; a failure or mismatch is an unresolved citation. */
+  readonly resolveRegistryEvidence?: (
+    citation: RegistryEvidenceCitation,
+  ) => RegistryEvidence | null | Promise<RegistryEvidence | null>;
 }
+
+export interface RegistryEvidenceCitation {
+  readonly kind: 'registry_record';
+  readonly id: string;
+  readonly retrieved_at: string;
+}
+
+export type RegistryEvidence = Extract<EvidenceRef, { readonly kind: 'registry_record' }>;
 
 export interface ModelEvidence {
   /** Result of the signed-card served-model comparison performed before the lock. */
@@ -137,6 +151,35 @@ export type DisposeEscalationResult =
         | 'wrong-role'
         | 'disposition-not-permitted'
         | 'late-disposition';
+      readonly terminalState?: 'disposed' | 'timed_out' | 'cancelled';
+      readonly recordEntryId: string | null;
+    };
+
+export interface RespondDialogueInput {
+  readonly escalationId: string;
+  readonly disposition: Disposition;
+  readonly actor: TransactionActor;
+  readonly answerText?: string;
+  readonly evidenceRef?: RegistryEvidenceCitation;
+  readonly scope?: Readonly<{ readonly item_ref: string; readonly applies_to: string }>;
+}
+
+export type RespondDialogueResult =
+  | {
+      readonly accepted: true;
+      readonly status: 'disposed';
+      readonly recordEntryId: string;
+      readonly reviewObligationId: string | null;
+    }
+  | {
+      readonly accepted: false;
+      readonly defect:
+        | 'missing-escalation'
+        | 'wrong-role'
+        | 'disposition-not-permitted'
+        | 'evidence-required'
+        | 'invalid-response'
+        | 'late-response';
       readonly terminalState?: 'disposed' | 'timed_out' | 'cancelled';
       readonly recordEntryId: string | null;
     };
@@ -528,6 +571,11 @@ function rulingRecord(
   recordActor: TransactionActor = input.actor,
   extraBasis: readonly string[] = [],
 ): RecordEntry {
+  const dialogue =
+    intervention !== null &&
+    intervention.contract.permitted_dispositions.every((value) =>
+      (DIALOGUE_DISPOSITIONS as readonly string[]).includes(value),
+    );
   return {
     world_id: input.proposal.world_id,
     entry_id: entryId,
@@ -556,7 +604,14 @@ function rulingRecord(
         : {
             event: 'human_intervention_event',
             escalation_id: intervention.escalationId,
-            payload: { kind: 'escalation_raised', contract: intervention.contract, reason: ruling.reason },
+            payload: dialogue
+              ? {
+                  kind: 'dialogue_trigger_raised',
+                  contract: intervention.contract,
+                  standing_class: intervention.contract.decision_and_route.standing_class,
+                  question_text: ruling.reason,
+                }
+              : { kind: 'escalation_raised', contract: intervention.contract, reason: ruling.reason },
           },
     challenge_and_remedy: null,
   };
@@ -719,6 +774,7 @@ export class AuthorizationCore {
   readonly #resolveAuthorizedAgent: (actor: TransactionActor) => string | undefined;
   readonly #resolveModelEvidence: (proposal: FrozenProposal) => ModelEvidence;
   readonly #resolveScreeningSignals: AuthorizationCoreOptions['resolveScreeningSignals'];
+  readonly #resolveRegistryEvidence: NonNullable<AuthorizationCoreOptions['resolveRegistryEvidence']>;
 
   constructor(options: AuthorizationCoreOptions) {
     this.#store = options.store;
@@ -736,6 +792,7 @@ export class AuthorizationCore {
     this.#resolveAuthorizedAgent = options.resolveAuthorizedAgent;
     this.#resolveModelEvidence = options.resolveModelEvidence;
     this.#resolveScreeningSignals = options.resolveScreeningSignals;
+    this.#resolveRegistryEvidence = options.resolveRegistryEvidence ?? (() => null);
   }
 
   async #screeningEvidence(
@@ -1561,6 +1618,215 @@ export class AuthorizationCore {
             recordEntryId,
             reviewObligationId,
           },
+        };
+      },
+    );
+    return completed.result;
+  }
+
+  async respondDialogue(input: RespondDialogueInput): Promise<RespondDialogueResult> {
+    const escalationId = id.parse(input.escalationId);
+    const disposition = input.disposition;
+    const answerText = input.answerText?.trim();
+    const responseShapeValid =
+      ((disposition !== 'correct' && disposition !== 'narrow') || (answerText !== undefined && answerText.length > 0)) &&
+      ((disposition !== 'permit' && disposition !== 'narrow') || input.scope !== undefined);
+    let resolvedEvidence: RegistryEvidence | null = null;
+    const initialEscalation = this.#store.snapshot().escalations.get(escalationId);
+    const initialResponderRole = input.actor.credential.startsWith('role:')
+      ? role.safeParse(input.actor.credential.slice('role:'.length))
+      : null;
+    const shouldResolveEvidence =
+      input.evidenceRef !== undefined &&
+      disposition === 'confirm' &&
+      initialEscalation?.state === 'open' &&
+      initialEscalation.contract.decision_and_route.standing_class === 'third-party-fact' &&
+      initialEscalation.contract.permitted_dispositions.includes(disposition) &&
+      initialResponderRole?.success === true &&
+      [
+        initialEscalation.contract.decision_and_route.eligible_role,
+        ...initialEscalation.contract.decision_and_route.substitute_roles,
+      ].includes(initialResponderRole.data);
+    if (shouldResolveEvidence && input.evidenceRef !== undefined) {
+      try {
+        timestamp.parse(input.evidenceRef.retrieved_at);
+        const candidate = await this.#resolveRegistryEvidence(input.evidenceRef);
+        const parsed = registryRecordRef.safeParse(candidate);
+        if (
+          parsed.success &&
+          parsed.data.id === input.evidenceRef.id &&
+          parsed.data.retrieved_at === input.evidenceRef.retrieved_at
+        ) {
+          resolvedEvidence = parsed.data;
+        }
+      } catch {
+        resolvedEvidence = null;
+      }
+    }
+
+    const completed = await this.#store.transactWithState<RespondDialogueResult>(
+      'dialogue_response',
+      input.actor,
+      (state, at) => {
+        const escalation = state.escalations.get(escalationId);
+        if (escalation === undefined) {
+          return { ops: [], result: { accepted: false, defect: 'missing-escalation', recordEntryId: null } };
+        }
+        const ruling = state.rulings.get(escalation.ruling_id);
+        if (ruling === undefined) throw new Error(`escalation ${escalationId} lost its ruling`);
+        const lateRecord = (
+          terminalState: 'disposed' | 'timed_out' | 'cancelled',
+        ): TransactionBuild<RespondDialogueResult> => {
+          const recordEntryId = this.#ids.next('rec');
+          return {
+            ops: [
+              {
+                op: 'record.action.append',
+                entry: escalationEventRecord(state, ruling, input.actor, recordEntryId, at, {
+                  event: 'late_disposition_ignored',
+                  escalation_id: escalationId,
+                  attempted_disposition: disposition,
+                  authenticated_actor: input.actor.credential,
+                  terminal_state: terminalState,
+                  at,
+                }),
+              },
+            ],
+            result: {
+              accepted: false,
+              defect: 'late-response',
+              terminalState,
+              recordEntryId,
+            },
+          };
+        };
+        if (escalation.state !== 'open') return lateRecord(escalation.state);
+
+        if (at >= escalation.expires_at) {
+          const appliedDefault = escalation.contract.response_bound_and_default.safe_default.disposition;
+          const timeoutRecordEntryId = this.#ids.next('rec');
+          const late = lateRecord('timed_out');
+          const ops: WalOp[] = [
+            { op: 'escalation.timeout', escalation_id: escalationId, applied_default: appliedDefault },
+          ];
+          if (ruling.status === 'issued') {
+            if (at >= ruling.binding.validity_window.not_after) ops.push({ op: 'ruling.expire', ruling_id: ruling.ruling_id });
+            else ops.push({ op: 'ruling.invalidate', ruling_id: ruling.ruling_id, reason: 'dialogue-timeout' });
+            for (const reservation of ruling.counter_reservations) {
+              if (state.reservations.get(reservation.id)?.state === 'reserved') {
+                ops.push({ op: 'reservation.release', reservation_id: reservation.id, reason: 'dialogue-timeout' });
+              }
+            }
+          }
+          ops.push({
+            op: 'record.action.append',
+            entry: escalationEventRecord(state, ruling, { credential: 'proc:authz', claimed_role: null }, timeoutRecordEntryId, at, {
+              event: 'human_intervention_event',
+              escalation_id: escalationId,
+              payload: { kind: 'dialogue_timeout', applied_default: appliedDefault, at },
+            }),
+          });
+          return { ops: [...ops, ...late.ops], result: late.result };
+        }
+
+        const refuse = (
+          defect: 'wrong-role' | 'disposition-not-permitted' | 'evidence-required' | 'invalid-response',
+        ): TransactionBuild<RespondDialogueResult> => {
+          const recordEntryId = this.#ids.next('rec');
+          const reasonCode =
+            defect === 'wrong-role'
+              ? 'wrong_role'
+              : defect === 'disposition-not-permitted'
+                ? 'disposition_not_permitted'
+                : defect === 'evidence-required'
+                  ? 'evidence_required'
+                  : 'invalid_response';
+          return {
+            ops: [
+              {
+                op: 'record.action.append',
+                entry: escalationEventRecord(state, ruling, input.actor, recordEntryId, at, {
+                  event: 'human_intervention_event',
+                  escalation_id: escalationId,
+                  payload: { kind: 'dialogue_response_refused', reason_code: reasonCode, at },
+                }),
+              },
+            ],
+            result: { accepted: false, defect, recordEntryId },
+          };
+        };
+        const dialogueContract = escalation.contract.permitted_dispositions.every((value) =>
+          (DIALOGUE_DISPOSITIONS as readonly string[]).includes(value),
+        );
+        if (!dialogueContract) return refuse('disposition-not-permitted');
+        const responderRole = input.actor.credential.startsWith('role:')
+          ? role.parse(input.actor.credential.slice('role:'.length))
+          : null;
+        const eligibleRoles = [
+          escalation.contract.decision_and_route.eligible_role,
+          ...escalation.contract.decision_and_route.substitute_roles,
+        ];
+        if (responderRole === null || !eligibleRoles.includes(responderRole)) return refuse('wrong-role');
+        if (!escalation.contract.permitted_dispositions.includes(disposition)) {
+          return refuse('disposition-not-permitted');
+        }
+        if (!responseShapeValid) return refuse('invalid-response');
+        if (
+          disposition === 'confirm' &&
+          escalation.contract.decision_and_route.standing_class === 'third-party-fact' &&
+          resolvedEvidence === null
+        ) {
+          return refuse('evidence-required');
+        }
+
+        const recordEntryId = this.#ids.next('rec');
+        const ops: WalOp[] = [{ op: 'escalation.dispose', escalation_id: escalationId, disposition }];
+        if (ruling.status === 'issued') {
+          ops.push({ op: 'ruling.invalidate', ruling_id: ruling.ruling_id, reason: `dialogue-${disposition}` });
+          for (const reservation of ruling.counter_reservations) {
+            if (state.reservations.get(reservation.id)?.state === 'reserved') {
+              ops.push({ op: 'reservation.release', reservation_id: reservation.id, reason: `dialogue-${disposition}` });
+            }
+          }
+        }
+        ops.push({
+          op: 'record.action.append',
+          entry: escalationEventRecord(state, ruling, input.actor, recordEntryId, at, {
+            event: 'human_intervention_event',
+            escalation_id: escalationId,
+            payload: {
+              kind: 'dialogue_response_recorded',
+              disposition,
+              responder_role: responderRole,
+              evidence_ref: resolvedEvidence,
+              answer_digest: answerText === undefined || answerText.length === 0 ? null : sha256Hex(answerText),
+            },
+          }),
+        });
+        let reviewObligationId: string | null = null;
+        if (disposition === 'route') {
+          const proposalId = state.proposalByHash.get(escalation.frozen_proposal_hash);
+          const originalProposal = proposalId === undefined ? undefined : state.proposals.get(proposalId);
+          if (originalProposal === undefined) throw new Error(`escalation ${escalationId} lost its proposal`);
+          reviewObligationId = this.#ids.next('rev');
+          ops.push({
+            op: 'review.open',
+            obligation: {
+              world_id: state.worldId,
+              obligation_id: reviewObligationId,
+              case_id: originalProposal.action_id,
+              source_entry_id: recordEntryId,
+              route: 'review',
+              recovery_owner_role: escalation.contract.decision_and_route.eligible_role,
+              opened_at: at,
+              state: 'open',
+              resolved_at: null,
+            },
+          });
+        }
+        return {
+          ops,
+          result: { accepted: true, status: 'disposed', recordEntryId, reviewObligationId },
         };
       },
     );

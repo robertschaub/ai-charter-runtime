@@ -357,7 +357,7 @@ export class AuthorizationReadSide {
     escalationId: string,
     actor: TransactionActor,
   ): EscalationDetailProjection | EscalationStatusProjection | null {
-    requireCredential(actor, ['proc:orchestrator', 'role:principal', 'role:case_officer']);
+    requireCredential(actor, ['proc:orchestrator', 'role:principal', 'role:case_officer', 'role:applicant']);
     const state = this.#store.snapshot();
     const escalation = state.escalations.get(escalationId);
     if (escalation === undefined) return null;

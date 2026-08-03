@@ -72,4 +72,58 @@ describe('services reconciliation probe client', () => {
       await expect(client.probe(key)).rejects.toThrow('did not match');
     }
   });
+
+  it('accepts only the exact cited synthetic registry retrieval', async () => {
+    const fetchImplementation = vi.fn(async (input: string | URL | Request) => {
+      expect(String(input)).toContain('/w/w-demo/registry-records/reg%3ACH-0042');
+      return new Response(
+        JSON.stringify({
+          kind: 'registry_record',
+          id: 'reg:CH-0042',
+          retrieved_at: '2026-08-01T09:14:02.000Z',
+          resolved_at: '2026-08-03T10:00:00.000Z',
+          content_digest: 'd'.repeat(64),
+        }),
+        { status: 200 },
+      );
+    });
+    const client = new ServicesProbeHttpClient({
+      origin: 'http://127.0.0.1:7803',
+      token: '1'.repeat(64),
+      worldId: 'w-demo',
+      fetchImplementation,
+    });
+    await expect(
+      client.resolveRegistryEvidence({
+        kind: 'registry_record',
+        id: 'reg:CH-0042',
+        retrieved_at: '2026-08-01T09:14:02.000Z',
+      }),
+    ).resolves.toMatchObject({ id: 'reg:CH-0042', content_digest: 'd'.repeat(64) });
+
+    const mismatch = new ServicesProbeHttpClient({
+      origin: 'http://127.0.0.1:7803',
+      token: '1'.repeat(64),
+      worldId: 'w-demo',
+      fetchImplementation: vi.fn(async () =>
+        new Response(
+          JSON.stringify({
+            kind: 'registry_record',
+            id: 'reg:CH-0042',
+            retrieved_at: '2026-08-01T09:14:03.000Z',
+            resolved_at: '2026-08-03T10:00:00.000Z',
+            content_digest: 'd'.repeat(64),
+          }),
+          { status: 200 },
+        ),
+      ),
+    });
+    await expect(
+      mismatch.resolveRegistryEvidence({
+        kind: 'registry_record',
+        id: 'reg:CH-0042',
+        retrieved_at: '2026-08-01T09:14:02.000Z',
+      }),
+    ).resolves.toBeNull();
+  });
 });

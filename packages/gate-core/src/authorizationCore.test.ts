@@ -11,8 +11,14 @@ import {
   bindMandate,
   freezeProposal,
   type IdFactory,
+  type RegistryEvidence,
+  type RegistryEvidenceCitation,
 } from './authorizationCore.js';
 import { verifyChain } from './chain.js';
+import { AuthorizationHttpAdapter } from './authorizationHttpAdapter.js';
+import { AuthorizationHttpServer } from './authorizationHttpServer.js';
+import type { AuthorizationReadSide } from './authorizationReadSide.js';
+import type { CaseSessionHandoffService } from './caseSessionHandoff.js';
 import { digestFor } from './hash.js';
 import { Keyring, verifyEmbeddedMac } from './keyring.js';
 import { loadPolicyFile, type LoadedPolicy } from './policyLoader.js';
@@ -66,11 +72,63 @@ afterEach(() => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
 
-function harness(initialNow = '2026-08-01T09:00:00.000Z'): Harness {
+function harness(
+  initialNow = '2026-08-01T09:00:00.000Z',
+  options: {
+    readonly dialogue?: boolean;
+    readonly resolveRegistryEvidence?: (citation: RegistryEvidenceCitation) => RegistryEvidence | null;
+  } = {},
+): Harness {
   const root = mkdtempSync(join(tmpdir(), 'gate-core-m2-'));
   roots.push(root);
   let now = initialNow;
-  const policy = loadPolicyFile(POLICY_FILE, BUILD_DIGEST);
+  const loadedPolicy = loadPolicyFile(POLICY_FILE, BUILD_DIGEST);
+  const policy: LoadedPolicy = options.dialogue
+    ? {
+        ...loadedPolicy,
+        policy: {
+          ...loadedPolicy.policy,
+          rules: [
+            {
+              id: 'dialogue-third-party-fact',
+              priority: 200,
+              gate: 'commit',
+              matcher: { kind: 'field', source: 'context', path: ['dialogue_trigger'], operator: 'eq', value: true },
+              verdict: 'escalate',
+              ux_class: 'stop',
+              reason_template: 'Can the applicant confirm the cited third-party registry fact?',
+              intervention_contract: {
+                trigger_and_state: { trigger: 'unconfirmed-inference-as-fact', state: 'open' },
+                decision_and_route: {
+                  eligible_role: 'applicant',
+                  standing_class: 'third-party-fact',
+                  competence_declared: 'Synthetic applicant response (declared, not verified).',
+                  independence_declared: 'Same-operator POC; no independent reviewer exists.',
+                  substitute_roles: [],
+                  substitute_rule: 'A bare assertion cannot confirm a third party fact.',
+                },
+                decision_basis_shown: ['inf_7', 'registry read reg:CH-0042'],
+                response_bound_and_default: {
+                  response_bound_ms: 900_000,
+                  safe_default: {
+                    kind: 'stop-remains',
+                    disposition: 'abstain',
+                    authority_basis: { kind: 'no-new-authority' },
+                    reversible: true,
+                  },
+                },
+                permitted_dispositions: ['confirm', 'correct', 'narrow', 'permit', 'abstain', 'route'],
+                record_and_feedback: {
+                  record_events: ['dialogue_trigger_raised', 'dialogue_response_recorded'],
+                  feedback_consequence: 'Increment the dialogue ask-rate counter.',
+                },
+              },
+            },
+            ...loadedPolicy.policy.rules,
+          ],
+        },
+      }
+    : loadedPolicy;
   const keyring = new Keyring(new Map([[KEY_ID, KEY]]), KEY_ID);
   const ids = new SequentialIds();
   const store = WalStore.open({
@@ -102,6 +160,12 @@ function harness(initialNow = '2026-08-01T09:00:00.000Z'): Harness {
       cardKeyId: 'card-test',
       cardDigest: CARD_DIGEST,
     }),
+    ...(options.resolveRegistryEvidence === undefined
+      ? {}
+      : {
+          resolveRegistryEvidence: (citation: RegistryEvidenceCitation) =>
+            options.resolveRegistryEvidence?.(citation) ?? null,
+        }),
   });
   return {
     root,
@@ -1713,5 +1777,220 @@ describe('M2 authorization transactions', () => {
         '2026-08-01T09:00:01.000Z',
       ),
     ).toThrow(/differs from its ruling or proposal/);
+  });
+
+  it('keeps dialogue answers on the routed role path and makes bare third-party confirmation a recorded no-op', async () => {
+    const evidenceLookups: RegistryEvidenceCitation[] = [];
+    const h = harness('2026-08-01T09:00:00.000Z', {
+      dialogue: true,
+      resolveRegistryEvidence: (citation) => {
+        evidenceLookups.push(citation);
+        return citation.id === 'reg:CH-0042' && citation.retrieved_at === '2026-08-01T09:14:02.000Z'
+          ? {
+              kind: 'registry_record',
+              id: citation.id,
+              retrieved_at: citation.retrieved_at,
+              resolved_at: '2026-08-01T09:15:00.000Z',
+              content_digest: 'd'.repeat(64),
+            }
+          : null;
+      },
+    });
+    await initialize(h);
+    const original = proposal(60, { action_id: 'act_dialogue' });
+    const ruled = await h.core.ruleProposal(ruleInput(original, { context: { dialogue_trigger: true } }));
+    const escalationId = ruled.escalationId;
+    if (escalationId === null) throw new Error('expected dialogue escalation');
+    expect(ruled.ruling).toMatchObject({ verdict: 'escalate', ux_class: 'stop', status: 'issued' });
+    expect(
+      h.store.snapshot().actionRecords.find((entry) => entry.entry_id === ruled.recordEntryId)?.human_intervention_event,
+    ).toMatchObject({
+      payload: {
+        kind: 'dialogue_trigger_raised',
+        standing_class: 'third-party-fact',
+        question_text: 'Can the applicant confirm the cited third-party registry fact?',
+      },
+    });
+
+    await expect(
+      h.core.respondDialogue({
+        escalationId,
+        disposition: 'confirm',
+        actor: CASE_OFFICER,
+        evidenceRef: {
+          kind: 'registry_record',
+          id: 'reg:CH-0042',
+          retrieved_at: '2026-08-01T09:14:02.000Z',
+        },
+      }),
+    ).resolves.toMatchObject({ accepted: false, defect: 'wrong-role' });
+    expect(evidenceLookups).toHaveLength(0);
+    await expect(
+      h.core.respondDialogue({ escalationId, disposition: 'confirm', actor: APPLICANT }),
+    ).resolves.toMatchObject({ accepted: false, defect: 'evidence-required' });
+    await expect(
+      h.core.respondDialogue({ escalationId, disposition: 'allow-within-scope', actor: APPLICANT }),
+    ).resolves.toMatchObject({ accepted: false, defect: 'disposition-not-permitted' });
+    expect(h.store.snapshot().escalations.get(escalationId)?.state).toBe('open');
+
+    const answerText = 'The cited synthetic registry record supports the registration date.';
+    const accepted = await h.core.respondDialogue({
+      escalationId,
+      disposition: 'confirm',
+      actor: APPLICANT,
+      answerText,
+      evidenceRef: {
+        kind: 'registry_record',
+        id: 'reg:CH-0042',
+        retrieved_at: '2026-08-01T09:14:02.000Z',
+      },
+    });
+    expect(accepted).toMatchObject({ accepted: true, status: 'disposed', reviewObligationId: null });
+    expect(evidenceLookups).toHaveLength(1);
+    const after = h.store.snapshot();
+    expect(after.escalations.get(escalationId)).toMatchObject({
+      state: 'disposed',
+      terminal_disposition: 'confirm',
+      successor_ruling_id: null,
+    });
+    expect(after.rulings.get(ruled.ruling.ruling_id)?.status).toBe('invalidated');
+    const recorded = after.actionRecords.find(
+      (entry) => entry.human_intervention_event?.event === 'human_intervention_event' &&
+        entry.human_intervention_event.payload.kind === 'dialogue_response_recorded',
+    );
+    expect(recorded?.human_intervention_event).toMatchObject({
+      payload: {
+        kind: 'dialogue_response_recorded',
+        disposition: 'confirm',
+        responder_role: 'applicant',
+        evidence_ref: { id: 'reg:CH-0042', content_digest: 'd'.repeat(64) },
+      },
+    });
+    expect(JSON.stringify(recorded)).not.toContain(answerText);
+
+    await expect(
+      h.core.respondDialogue({ escalationId, disposition: 'abstain', actor: APPLICANT }),
+    ).resolves.toMatchObject({ accepted: false, defect: 'late-response', terminalState: 'disposed' });
+    const { proposal_hash: ignoredHash, ...originalBody } = original;
+    void ignoredHash;
+    const revised = freezeProposal({
+      ...originalBody,
+      proposal_id: 'prp_dialogue_revision',
+      revision: 2,
+      proposed_action: 'Submit the revised filing after the recorded confirmation.',
+    });
+    const continued = await h.core.continueEscalationRevision({
+      escalationId,
+      proposal: revised,
+      actor: ORCHESTRATOR,
+    });
+    expect(continued).toMatchObject({ accepted: false, defect: 'wrong-state' });
+  });
+
+  it('enforces dialogue response status codes and raw-client bypass resistance on a real listener', async () => {
+    const h = harness('2026-08-01T09:00:00.000Z', {
+      dialogue: true,
+      resolveRegistryEvidence: (citation) =>
+        citation.id === 'reg:CH-0042' && citation.retrieved_at === '2026-08-01T09:14:02.000Z'
+          ? {
+              kind: 'registry_record',
+              id: citation.id,
+              retrieved_at: citation.retrieved_at,
+              resolved_at: '2026-08-01T09:15:00.000Z',
+              content_digest: 'd'.repeat(64),
+            }
+          : null,
+    });
+    await initialize(h);
+    const ruled = await h.core.ruleProposal(
+      ruleInput(proposal(61, { action_id: 'act_dialogue_http' }), { context: { dialogue_trigger: true } }),
+    );
+    const escalationId = ruled.escalationId;
+    if (escalationId === null) throw new Error('expected dialogue escalation');
+    const tokens = {
+      principal: '1'.repeat(64),
+      caseOfficer: '2'.repeat(64),
+      applicant: '3'.repeat(64),
+      orchestrator: '4'.repeat(64),
+      services: '5'.repeat(64),
+    };
+    const adapter = new AuthorizationHttpAdapter({
+      authorization: h.core,
+      ownOrigin: 'http://127.0.0.1:7801',
+      demoWorldId: 'w-demo',
+      credentials: [
+        { label: 'role:principal', token: tokens.principal, worldId: 'w-demo' },
+        { label: 'role:case_officer', token: tokens.caseOfficer, worldId: 'w-demo' },
+        { label: 'role:applicant', token: tokens.applicant, worldId: 'w-demo' },
+        { label: 'proc:orchestrator', token: tokens.orchestrator, worldId: 'w-demo' },
+        { label: 'proc:services_host', token: tokens.services, worldId: 'w-demo' },
+      ],
+    });
+    const server = new AuthorizationHttpServer({
+      authorization: h.core,
+      reads: {} as AuthorizationReadSide,
+      adapter,
+      keyring: h.keyring,
+      caseHandoffs: {} as CaseSessionHandoffService,
+      runtimeConfig: {
+        authorization_origin: 'http://127.0.0.1:7801',
+        orchestrator_origin: 'http://127.0.0.1:7802',
+      },
+      consoleAssets: { shell: '', script: '', stylesheet: '' },
+      host: '127.0.0.1',
+      port: 0,
+    });
+    const address = await server.listen();
+    const post = (token: string, body: unknown, origin?: string) =>
+      fetch(`${address.origin}/w/w-demo/escalations/${escalationId}/response`, {
+        method: 'POST',
+        headers: {
+          authorization: `Bearer ${token}`,
+          'content-type': 'application/json',
+          ...(origin === undefined ? {} : { origin }),
+        },
+        body: JSON.stringify(body),
+      });
+    const baseBody = { escalation_id: escalationId, disposition: 'confirm' };
+    try {
+      const processBypass = await post(tokens.orchestrator, baseBody);
+      expect(processBypass.status).toBe(403);
+      const foreignOrigin = await post(tokens.applicant, baseBody, 'http://127.0.0.1:9999');
+      expect(foreignOrigin.status).toBe(403);
+      const wrongRole = await post(tokens.caseOfficer, baseBody);
+      expect(wrongRole.status).toBe(403);
+      await expect(wrongRole.json()).resolves.toMatchObject({ accepted: false, defect: 'wrong-role' });
+      const bareConfirm = await post(tokens.applicant, baseBody);
+      expect(bareConfirm.status).toBe(422);
+      await expect(bareConfirm.json()).resolves.toMatchObject({ accepted: false, defect: 'evidence-required' });
+      const accepted = await post(tokens.applicant, {
+        ...baseBody,
+        answer_text: 'The cited synthetic record supports the date.',
+        evidence_ref: {
+          kind: 'registry_record',
+          id: 'reg:CH-0042',
+          retrieved_at: '2026-08-01T09:14:02.000Z',
+        },
+      });
+      expect(accepted.status).toBe(200);
+      const replay = await post(tokens.applicant, { escalation_id: escalationId, disposition: 'abstain' });
+      expect(replay.status).toBe(409);
+      await expect(replay.json()).resolves.toMatchObject({
+        accepted: false,
+        defect: 'late-response',
+        terminalState: 'disposed',
+      });
+    } finally {
+      await server.close();
+    }
+    expect(
+      h.store.snapshot().accessRecords.some(
+        (entry) =>
+          'route' in entry &&
+          entry.route === 'POST /w/{world_id}/escalations/{id}/response' &&
+          entry.authenticated_actor === 'proc:orchestrator' &&
+          entry.outcome === 'forbidden',
+      ),
+    ).toBe(true);
   });
 });

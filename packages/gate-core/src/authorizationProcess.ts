@@ -211,6 +211,7 @@ export async function startAuthorizationProcess(
         actor.credential === 'proc:orchestrator' ? (env['RUNTIME_AUTHORIZED_AGENT_ID'] ?? 'agent_demo') : undefined,
       resolveScreeningSignals: () => [],
       resolveModelEvidence: (proposal) => cards.resolve(proposal),
+      resolveRegistryEvidence: (citation) => servicesProbe.resolveRegistryEvidence(citation),
     });
     await authorization.activatePolicy();
     const maintain = async () => {

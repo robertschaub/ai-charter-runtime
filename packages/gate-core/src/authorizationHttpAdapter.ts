@@ -144,7 +144,7 @@ export const AUTHORIZATION_ROUTES = [
     id: 'escalation.read',
     method: 'GET',
     template: '/w/{world_id}/escalations/{id}',
-    allowed: ['proc:orchestrator', 'role:principal', 'role:case_officer'],
+    allowed: ['proc:orchestrator', 'role:principal', 'role:case_officer', 'role:applicant'],
     authorityChanging: false,
   },
   {
