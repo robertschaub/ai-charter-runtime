@@ -70,6 +70,14 @@ export const AUTHORIZATION_ROUTES = [
     authorityChanging: true,
   },
   {
+    id: 'conversation.project-acting',
+    method: 'POST',
+    template: '/w/{world_id}/model-projections/acting',
+    allowed: ['proc:orchestrator'],
+    authorityChanging: false,
+    accessLoggedOnServe: true,
+  },
+  {
     id: 'ruling.read',
     method: 'GET',
     template: '/w/{world_id}/rulings/{id}',

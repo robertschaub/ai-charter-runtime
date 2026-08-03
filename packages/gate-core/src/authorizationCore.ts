@@ -13,6 +13,7 @@ import {
   commitToken,
   DIALOGUE_DISPOSITIONS,
   effectIntent,
+  evidenceRef,
   GENERAL_DISPOSITIONS,
   type CommitToken,
   hexDigest,
@@ -86,11 +87,19 @@ export interface AuthorizationCoreOptions {
   readonly resolveAuthorizedAgent: (actor: TransactionActor) => string | undefined;
   /** Server-owned signed-card lookup; the orchestrator cannot attest its own model. */
   readonly resolveModelEvidence: (proposal: FrozenProposal) => ModelEvidence;
-  /** Server-owned screening over the frozen hash; success, including an empty result, means performed. */
-  readonly resolveScreeningSignals: (
+  /** Server-owned screening over the frozen hash; callers cannot claim that screening occurred. */
+  readonly resolveScreening: (
     proposal: FrozenProposal,
     gate: 'submit' | 'verify',
-  ) => readonly ScreeningSignal[] | Promise<readonly ScreeningSignal[]>;
+    caseId?: string,
+  ) => ScreeningResolution | Promise<ScreeningResolution>;
+  /** Recompute local projection/card/fixture evidence while the world lock is held. */
+  readonly validateScreeningResolution: (
+    resolution: ScreeningResolution,
+    proposal: FrozenProposal,
+    gate: 'submit' | 'verify',
+    caseId?: string,
+  ) => boolean;
   /** Server-to-server evidence lookup; a failure or mismatch is an unresolved citation. */
   readonly resolveRegistryEvidence?: (
     citation: RegistryEvidenceCitation,
@@ -128,6 +137,13 @@ export interface RuleProposalInput {
 interface PreparedRuleProposalInput extends RuleProposalInput {
   readonly signals: readonly ScreeningSignal[];
   readonly screeningPerformed: boolean;
+  readonly screeningEvidenceRefs: readonly EvidenceRef[];
+}
+
+export interface ScreeningResolution {
+  readonly performed: boolean;
+  readonly signals: readonly ScreeningSignal[];
+  readonly evidenceRefs: readonly EvidenceRef[];
 }
 
 export interface RuleProposalResult {
@@ -813,7 +829,8 @@ export class AuthorizationCore {
   readonly #ids: IdFactory;
   readonly #resolveAuthorizedAgent: (actor: TransactionActor) => string | undefined;
   readonly #resolveModelEvidence: (proposal: FrozenProposal) => ModelEvidence;
-  readonly #resolveScreeningSignals: AuthorizationCoreOptions['resolveScreeningSignals'];
+  readonly #resolveScreening: AuthorizationCoreOptions['resolveScreening'];
+  readonly #validateScreeningResolution: AuthorizationCoreOptions['validateScreeningResolution'];
   readonly #resolveRegistryEvidence: NonNullable<AuthorizationCoreOptions['resolveRegistryEvidence']>;
 
   constructor(options: AuthorizationCoreOptions) {
@@ -831,21 +848,66 @@ export class AuthorizationCore {
     this.#ids = options.ids ?? defaultIds;
     this.#resolveAuthorizedAgent = options.resolveAuthorizedAgent;
     this.#resolveModelEvidence = options.resolveModelEvidence;
-    this.#resolveScreeningSignals = options.resolveScreeningSignals;
+    this.#resolveScreening = options.resolveScreening;
+    this.#validateScreeningResolution = options.validateScreeningResolution;
     this.#resolveRegistryEvidence = options.resolveRegistryEvidence ?? (() => null);
   }
 
   async #screeningEvidence(
     proposal: FrozenProposal,
     gate: Gate,
-  ): Promise<{ readonly signals: readonly ScreeningSignal[]; readonly performed: boolean }> {
-    if (gate !== 'submit' && gate !== 'verify') return { signals: [], performed: false };
+    caseId?: string,
+  ): Promise<ScreeningResolution> {
+    if (gate !== 'submit' && gate !== 'verify') return { signals: [], performed: false, evidenceRefs: [] };
     try {
-      const resolved = await this.#resolveScreeningSignals(proposal, gate);
-      return { signals: resolved.map((signal) => screeningSignal.parse(signal)), performed: true };
+      const resolved = await this.#resolveScreening(proposal, gate, caseId);
+      return {
+        signals: resolved.signals.map((signal) => screeningSignal.parse(signal)),
+        performed: resolved.performed,
+        evidenceRefs: resolved.evidenceRefs.map((reference) => evidenceRef.parse(reference)),
+      };
     } catch {
-      return { signals: [], performed: false };
+      return {
+        signals: [],
+        performed: false,
+        evidenceRefs: [
+          evidenceRef.parse({
+            kind: 'screening_skipped',
+            provider: null,
+            role: 'screening',
+            reason: 'resolver-error',
+            suspect_item_ids: [],
+          }),
+        ],
+      };
     }
+  }
+
+  #validatedScreening(input: PreparedRuleProposalInput): ScreeningResolution {
+    if (input.gate !== 'submit' && input.gate !== 'verify') {
+      return { signals: [], performed: false, evidenceRefs: [] };
+    }
+    const candidate = {
+      signals: input.signals,
+      performed: input.screeningPerformed,
+      evidenceRefs: input.screeningEvidenceRefs,
+    };
+    try {
+      if (this.#validateScreeningResolution(candidate, input.proposal, input.gate, input.caseId)) return candidate;
+    } catch {}
+    return {
+      signals: [],
+      performed: false,
+      evidenceRefs: [
+        evidenceRef.parse({
+          kind: 'screening_skipped',
+          provider: null,
+          role: 'screening',
+          reason: 'resolver-error',
+          suspect_item_ids: [],
+        }),
+      ],
+    };
   }
 
   #resolveModelEvidenceFailClosed(proposal: FrozenProposal): ModelEvidence {
@@ -1060,7 +1122,7 @@ export class AuthorizationCore {
     }
     const proposal = frozenProposal.parse(input.proposal);
     verifyProposalHash(proposal);
-    const screening = await this.#screeningEvidence(proposal, input.gate);
+    const screening = await this.#screeningEvidence(proposal, input.gate, input.caseId);
     const completed = await this.#store.transactWithState('ruling_issue', input.actor, (state, at) =>
       this.#buildRuling(
         {
@@ -1068,6 +1130,7 @@ export class AuthorizationCore {
           proposal,
           signals: screening.signals,
           screeningPerformed: screening.performed,
+          screeningEvidenceRefs: screening.evidenceRefs,
         },
         state,
         at,
@@ -1088,6 +1151,7 @@ export class AuthorizationCore {
   ): TransactionBuild<RuleProposalResult> {
     const proposal = input.proposal;
     const policy = this.#policy;
+    const screening = this.#validatedScreening(input);
       const existing = state.proposals.get(proposal.proposal_id);
       if (existing !== undefined && existing.proposal_hash !== proposal.proposal_hash) {
         throw new AuthorizationError('proposal-conflict', `proposal id ${proposal.proposal_id} is already frozen`);
@@ -1159,8 +1223,8 @@ export class AuthorizationCore {
         mandate: defects.mandate,
         context: input.context ?? {},
         counters,
-        signals: input.signals ?? [],
-        screeningPerformed: input.screeningPerformed ?? false,
+        signals: screening.signals,
+        screeningPerformed: screening.performed,
         patternEvents: state.patternEvents,
         now: at,
         authorityDefects: defects.defects,
@@ -1220,7 +1284,7 @@ export class AuthorizationCore {
         },
         ux_class: evaluation.uxClass,
         reason: evaluation.reason,
-        evidence_refs: input.signals ?? [],
+        evidence_refs: [...screening.evidenceRefs, ...screening.signals],
         counter_reservations: reservations,
         issued_at: at,
         status: 'issued',
@@ -1395,9 +1459,10 @@ export class AuthorizationCore {
   async disposeEscalation(input: DisposeEscalationInput): Promise<DisposeEscalationResult> {
     const escalationId = id.parse(input.escalationId);
     const disposition = input.disposition;
-    let allowScreening: { readonly signals: readonly ScreeningSignal[]; readonly performed: boolean } = {
+    let allowScreening: ScreeningResolution = {
       signals: [],
       performed: false,
+      evidenceRefs: [],
     };
     if (disposition === 'allow-within-scope') {
       const snapshot = this.#store.snapshot();
@@ -1424,7 +1489,11 @@ export class AuthorizationCore {
         ruling !== undefined &&
         proposal !== undefined
       ) {
-        allowScreening = await this.#screeningEvidence(proposal, ruling.gate);
+        allowScreening = await this.#screeningEvidence(
+          proposal,
+          ruling.gate,
+          escalation.case_id === null ? undefined : escalation.case_id,
+        );
       }
     }
 
@@ -1682,6 +1751,7 @@ export class AuthorizationCore {
             context: { intervention_disposition: disposition, intervention_escalation_id: escalationId },
             signals: allowScreening.signals,
             screeningPerformed: allowScreening.performed,
+            screeningEvidenceRefs: allowScreening.evidenceRefs,
           },
           state,
           at,
@@ -2101,9 +2171,11 @@ export class AuthorizationCore {
     const escalationId = id.parse(input.escalationId);
     const proposal = frozenProposal.parse(input.proposal);
     verifyProposalHash(proposal);
+    const initialEscalation = this.#store.snapshot().escalations.get(escalationId);
+    const screeningCaseId = initialEscalation?.case_id ?? undefined;
     const [submitScreening, verifyScreening] = await Promise.all([
-      this.#screeningEvidence(proposal, 'submit'),
-      this.#screeningEvidence(proposal, 'verify'),
+      this.#screeningEvidence(proposal, 'submit', screeningCaseId),
+      this.#screeningEvidence(proposal, 'verify', screeningCaseId),
     ]);
     const completed = await this.#store.transactWithState<ContinueEscalationRevisionResult>(
       'escalation_revision_continue',
@@ -2189,7 +2261,7 @@ export class AuthorizationCore {
               ? submitScreening
               : gate === 'verify'
                 ? verifyScreening
-                : { signals: [], performed: false };
+                : { signals: [], performed: false, evidenceRefs: [] };
           const build = this.#buildRuling(
             {
               gate,
@@ -2205,6 +2277,7 @@ export class AuthorizationCore {
               },
               signals: screening.signals,
               screeningPerformed: screening.performed,
+              screeningEvidenceRefs: screening.evidenceRefs,
             },
             state,
             at,

@@ -142,7 +142,8 @@ export async function runVerticalSlice(options: VerticalSliceOptions): Promise<L
       keyring: options.keyring,
       policy,
       resolveAuthorizedAgent: (actor) => (actor.credential === 'proc:orchestrator' ? 'agent_demo' : undefined),
-      resolveScreeningSignals: () => [],
+      resolveScreening: () => ({ performed: true, signals: [], evidenceRefs: [] }),
+      validateScreeningResolution: () => true,
       resolveModelEvidence: (proposal) => options.cardRegistry.resolve(proposal),
     });
     await authorization.activatePolicy();

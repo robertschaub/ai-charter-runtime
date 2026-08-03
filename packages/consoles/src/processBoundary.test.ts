@@ -393,6 +393,42 @@ describe('M4 native three-process boundary', () => {
       const grant = await postJson(authorizationOrigin, '/w/w-demo/mandates', tokens.principal, mandate);
       expect(grant.status).toBe(201);
 
+      const actingProjectionRequest = {
+        mandate_id: 'mdt_demo_grant',
+        mandate_version: 1,
+        card_id: 'publicai-apertus-v1.5-70b',
+        card_version: 1,
+        requested_id: 'swiss-ai/apertus-v1.5-70b',
+      };
+      const actingProjection = await postJson(
+        authorizationOrigin,
+        '/w/w-demo/model-projections/acting',
+        tokens.orchestratorAtAuthz,
+        actingProjectionRequest,
+      );
+      expect(actingProjection.status).toBe(200);
+      await expect(actingProjection.json()).resolves.toMatchObject({
+        world_id: 'w-demo',
+        case_id: 'case_demo',
+        provider: 'publicai-apertus-v1.5-70b',
+        role: 'acting',
+        summary: { included: 3, dropped: 0 },
+      });
+      const callerScopedProjection = await postJson(
+        authorizationOrigin,
+        '/w/w-demo/model-projections/acting',
+        tokens.orchestratorAtAuthz,
+        { ...actingProjectionRequest, case_id: 'other_case', role: 'screening', item_ids: ['inf_7'] },
+      );
+      expect(callerScopedProjection.status).toBe(422);
+      const principalProjection = await postJson(
+        authorizationOrigin,
+        '/w/w-demo/model-projections/acting',
+        tokens.principal,
+        actingProjectionRequest,
+      );
+      expect(principalProjection.status).toBe(403);
+
       const foreignOriginGrant = await fetch(`${authorizationOrigin}/w/w-demo/mandates`, {
         method: 'POST',
         headers: {
@@ -914,6 +950,15 @@ describe('M4 native three-process boundary', () => {
           (entry) => entry['authenticated_actor'] === 'proc:orchestrator' && entry['http_status'] === 403,
         ),
       ).toHaveLength(deniedRoutes.length + 2);
+      expect(accessEntries).toContainEqual(
+        expect.objectContaining({
+          route: 'POST /w/{world_id}/model-projections/acting',
+          authenticated_actor: 'proc:orchestrator',
+          outcome: 'served',
+          http_status: 200,
+          read_lengths: { conversation_items: 3 },
+        }),
+      );
       expect(accessEntries).toContainEqual(
         expect.objectContaining({
           route: 'POST /w/{world_id}/services/{service}/execute',

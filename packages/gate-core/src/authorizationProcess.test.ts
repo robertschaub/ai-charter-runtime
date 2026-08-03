@@ -9,7 +9,10 @@ import { fileURLToPath } from 'node:url';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
+import { freezeProposal } from './authorizationCore.js';
+import { startAuthorizationProcess } from './authorizationProcess.js';
 import { writeCheckpoint } from './checkpoint.js';
+import { frozenProposal } from './schemas/index.js';
 import { WalStore } from './walStore.js';
 
 const ROOT = fileURLToPath(new URL('../../..', import.meta.url));
@@ -113,6 +116,96 @@ async function startHealthyServices(): Promise<number> {
 }
 
 describe('authorization process fail-stop lifecycle', () => {
+  it('runs exact fixture-pinned screening and fails a changed proposal closed on the native listener', async () => {
+    const recordsRoot = mkdtempSync(join(tmpdir(), 'authorization-screening-fixture-'));
+    roots.push(recordsRoot);
+    const checkpointsRoot = join(recordsRoot, 'checkpoints');
+    const servicesPort = await startHealthyServices();
+    const authorizationPort = await freePort();
+    const orchestratorPort = await freePort();
+    const handle = await startAuthorizationProcess({
+      ...systemEnvironment(),
+      ...CREDENTIALS,
+      GATE_HMAC_KEY_ID: 'hmac-test',
+      GATE_KEYRING_PATH: join(recordsRoot, 'absent-keyring.json'),
+      RUNTIME_HOST: '127.0.0.1',
+      AUTHZ_PORT: String(authorizationPort),
+      ORCHESTRATOR_PORT: String(orchestratorPort),
+      SERVICES_PORT: String(servicesPort),
+      DEMO_WORLD_ID: 'w-demo',
+      RUNTIME_RECORDS_ROOT: recordsRoot,
+      RUNTIME_CHECKPOINTS_ROOT: checkpointsRoot,
+      CHECKPOINT_VERIFY_LOCAL: '1',
+    });
+    const post = (path: string, token: string, value: unknown) =>
+      fetch(new URL(path, handle.address.origin), {
+        method: 'POST',
+        headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+        body: JSON.stringify(value),
+        signal: AbortSignal.timeout(5_000),
+      });
+    try {
+      const now = Date.now();
+      const mandate = JSON.parse(readFileSync(join(ROOT, 'fixtures', 'demo', 'mandate.json'), 'utf8')) as Record<
+        string,
+        unknown
+      >;
+      mandate['issued_at'] = new Date(now - 60_000).toISOString();
+      mandate['expires_at'] = new Date(now + 3_600_000).toISOString();
+      mandate['limits'] = {
+        ...(mandate['limits'] as Record<string, unknown>),
+        time_window: {
+          not_before: new Date(now - 60_000).toISOString(),
+          not_after: new Date(now + 3_600_000).toISOString(),
+        },
+      };
+      const grant = await post('/w/w-demo/mandates', CREDENTIALS.AUTHZ_TOKEN_PRINCIPAL, mandate);
+      expect(grant.status).toBe(201);
+
+      const proposal = frozenProposal.parse(
+        JSON.parse(readFileSync(join(ROOT, 'fixtures', 'demo', 'screening-proposal.json'), 'utf8')),
+      );
+      const exact = await post('/w/w-demo/proposals', CREDENTIALS.AUTHZ_TOKEN_PROC_ORCHESTRATOR, {
+        gate: 'submit',
+        proposal,
+        service: 'filing',
+        action_class: 'grant-filing',
+      });
+      expect(exact.status).toBe(200);
+      await expect(exact.json()).resolves.toMatchObject({
+        ruling: { verdict: 'escalate', reason: 'A screening signal requires human review.' },
+        escalation_id: expect.any(String),
+      });
+
+      const { proposal_hash: ignoredHash, ...proposalBody } = proposal;
+      void ignoredHash;
+      const changed = freezeProposal({
+        ...proposalBody,
+        proposal_id: 'prp_screening_unpinned',
+        action_id: 'act_screening_unpinned',
+      });
+      const missing = await post('/w/w-demo/proposals', CREDENTIALS.AUTHZ_TOKEN_PROC_ORCHESTRATOR, {
+        gate: 'submit',
+        proposal: changed,
+        service: 'filing',
+        action_class: 'grant-filing',
+      });
+      expect(missing.status).toBe(200);
+      await expect(missing.json()).resolves.toMatchObject({
+        ruling: { verdict: 'escalate', reason: 'A required screening check is unavailable.' },
+        escalation_id: expect.any(String),
+      });
+
+      const wal = readFileSync(join(recordsRoot, 'w-demo', 'wal.jsonl'), 'utf8');
+      expect(wal).toContain('"kind":"submit_projection"');
+      expect(wal).toContain('"kind":"screening_signal"');
+      expect(wal).toContain('"kind":"screening_skipped"');
+      expect(wal).toContain('"reason":"fixture-unavailable"');
+    } finally {
+      await handle.close();
+    }
+  });
+
   it(
     'fails stop on periodic maintenance failure without leaking credentials or its writer lease',
     async () => {

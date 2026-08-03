@@ -41,6 +41,12 @@ challenge route binds an action id to one existing record entry. Authorization a
 marks reliance withdrawn pending review, and opens one principal-owned routing obligation atomically. It does
 not rewrite the contested entry, reverse an effect, or claim an independent remedy decision.
 
+**Amendment (M5.2 authorization-resolved projection boundary, 2026-08-03):** authorization exposes one
+authenticated read-only acting-projection route to `proc:orchestrator`. Its strict request names only the
+pinned mandate and acting-card approval; authorization injects the configured case and acting role, reloads
+the signed card, computes the mandate/card clearance intersection, projects whole items, and access-records
+the disclosure. No caller may supply case, role, items, tags, or effective clearances.
+
 ## Context
 
 Three OS processes make "the model proposes, a component outside the model decides, the executing service
@@ -130,6 +136,7 @@ Authorization service, all data routes under `/w/{world_id}/…`:
 | Route | Allowed |
 |---|---|
 | `POST /proposals` (submit frozen proposal → ruling) | `proc:orchestrator` |
+| `POST /model-projections/acting` (authorization-resolved conversation projection) | `proc:orchestrator` only; read-only and access-recorded |
 | `GET /rulings/{id}` (status projection, §7) | `proc:orchestrator` (own submissions), `proc:services_host` |
 | `GET /mandates/{id}/approved-models` (picker and principal card-evidence source, card-verified) | `proc:orchestrator`, `role:principal`, `role:case_officer` |
 | `POST /case-session-handoffs` (mint; adapter `authorityChanging: true`, `originGuarded: true`) | **`role:case_officer` only** |
@@ -183,9 +190,10 @@ Services host: `POST /w/{w}/services/{service}/execute` `proc:orchestrator`;
 `commit-verify`, effect outcomes, and reconciliation probes carry both the current services-host boot id
 and the persistent services-ledger id; only absence under the same ledger id can release a commitment.
 
-**The orchestrator's process credential appears on exactly five gate/data routes plus the dedicated
-case-session-handoff redemption route.** The five remain proposal submission, revised-proposal continuation,
-ruling read, approved-model read, and the read-only escalation mirror ADR-004 §7 requires. Redemption
+**The orchestrator's process credential appears on exactly six gate/data routes plus the dedicated
+case-session-handoff redemption route.** The six are proposal submission, acting-projection read,
+revised-proposal continuation, ruling read, approved-model read, and the read-only escalation mirror ADR-004
+§7 requires. Redemption
 returns only `{handoff_id, role, world_id, case_id, target_origin, authorization_boot_id, consumed_at}`
 after atomic consumption; it is an
 authentication claim, not a ruling or authorization. Nothing else changes: the process credential is
@@ -352,6 +360,9 @@ allowlist projection**, decided per route and per credential:
 - proposal submission → `{ruling: {ruling_id, verdict, ux_class, reason, status,
   successor_ruling_id, validity_window}, escalation_id}`;
 - ruling → `{ruling_id, verdict, ux_class, reason, status, successor_ruling_id, validity_window}`;
+- acting projection → `{world_id, case_id, provider, role: "acting", items, summary}` where the case and
+  role are authorization-owned and `summary` names exact included/dropped counts, dropped ids, and unmet
+  tags. Every attempt is access-recorded; the response carries no mandate binding or effective-clearance input;
 - approved models → for the orchestrator, case officer, and principal, the mandate id/version/state and
   acting-role entries only, each carrying its pinned
   approval, current signed public card, current digest and verifying key id, factual
@@ -411,6 +422,9 @@ disposition route is rejected and recorded. Cross-world token use is 403. A dupl
 `.env.local` fails startup. Beat 17's raw-API client works precisely because the ACL and the console are
 independent layers: the console renders only permitted dispositions, and the API still refuses an
 out-of-scope one — and `commit-verify` refuses it again.
+The M5.2 listener/process coverage additionally proves that non-orchestrator credentials receive 403,
+caller-added scope fields receive 422, the configured case and acting role are injected, and every successful
+or refused projection disclosure is represented in the access chain.
 
 **Required with the browser handoff implementation.** Real-listener tests cover exact-origin/exact-window
 message acceptance and wrong/opaque origin or wrong-window refusal; mint-role confinement; absence from URLs,

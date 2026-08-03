@@ -66,6 +66,31 @@ export const submitProjectionRef = z.object({
   unmet_tags: restrictionTagSet,
 }).strict();
 
+/** M5.2: a screening projection could not be performed; absence never counts as a pass. */
+export const screeningSkippedRef = z
+  .object({
+    kind: z.literal('screening_skipped'),
+    provider: cardSlug.nullable(),
+    role: z.literal('screening'),
+    reason: z.enum([
+      'fixture-unavailable',
+      'case-mismatch',
+      'mandate-unavailable',
+      'model-unavailable',
+      'proposal-item-mismatch',
+      'disclosure-restricted',
+      'resolver-error',
+    ]),
+    suspect_item_ids: z
+      .array(id)
+      .refine((values) => new Set(values).size === values.length, 'suspect item ids must be unique')
+      .refine(
+        (values) => values.every((value, index) => index === 0 || (values[index - 1] as string) < value),
+        'suspect item ids must use deterministic sort order',
+      ),
+  })
+  .strict();
+
 /** ADR-004 §4: the cited evidence behind a `confirm` on a third-party fact. */
 export const registryRecordRef = z.object({
   kind: z.literal('registry_record'),
@@ -89,6 +114,7 @@ export const recordEntryRef = z.object({
 export const evidenceRef = z.discriminatedUnion('kind', [
   screeningSignal,
   submitProjectionRef,
+  screeningSkippedRef,
   registryRecordRef,
   humanInterventionRef,
   recordEntryRef,

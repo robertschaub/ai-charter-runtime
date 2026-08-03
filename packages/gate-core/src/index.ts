@@ -18,6 +18,8 @@ export * from './checkpoint.js';
 export * from './keyring.js';
 export * from './servedModel.js';
 export * from './conversationProjection.js';
+export * from './conversationProjectionService.js';
+export * from './screeningFixture.js';
 export * from './worldLock.js';
 export * from './state.js';
 export * from './writerLease.js';

@@ -39,4 +39,11 @@ question, contract, response, evidence payload, or responder identity.
 The applicant challenge path binds one extract-visible record entry to its action, appends the synthetic
 correction, marks reliance withdrawn pending review, and opens one principal-owned routing obligation. It
 never edits the contested record or claims that the POC supplies an independent remedy decision.
+
+The M5.2 candidate resolves the current active mandate and exact role approval inside authorization,
+reloads and verifies the signed card, intersects mandate and card clearances, and serves a strict
+orchestrator-only acting projection for the configured case. Screening projects only fixture-named suspect
+proposal items under the screening role. Fixtures are keyed by exact proposal hash and gate; absent,
+mismatched, unavailable, or restricted evidence records a skipped check and required screening escalates.
+The native process makes no screening-provider call and the browser message route remains closed.
 Run `npm test` and `npm run typecheck` from the repository root.

@@ -83,12 +83,17 @@
       "card_digest": "0577111a4a86dd783d0a9aa9138427c534364994368a85e622abcc33a3c7decf",
       "requested_id": "gpt-5.5",
       "roles": [
-        "acting"
+        "acting",
+        "screening"
       ],
       "data_classes": {
         "acting": [
           "conf:public",
           "conf:case",
+          "purpose:grant-assessment"
+        ],
+        "screening": [
+          "conf:public",
           "purpose:grant-assessment"
         ]
       }

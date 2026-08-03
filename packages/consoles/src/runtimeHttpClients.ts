@@ -2,9 +2,13 @@
 /** Narrow HTTP clients held by the orchestrator process. */
 import {
   classToken,
+  cardSlug,
+  conversationProjection,
   effectIntent,
   frozenProposal,
   id,
+  integer,
+  modelId,
   approvedModelsProjection,
   proposalRulingProjection,
   rulingProjection,
@@ -14,6 +18,7 @@ import {
   type EffectIntent,
   type FrozenProposal,
   type ApprovedModelsProjection,
+  type ConversationProjection,
   type ProposalRulingProjection,
   type RulingProjection,
 } from 'gate-core';
@@ -122,6 +127,27 @@ abstract class JsonHttpClient {
 }
 
 export class OrchestratorAuthorizationHttpClient extends JsonHttpClient {
+  async actingProjection(input: {
+    readonly worldId: string;
+    readonly mandateId: string;
+    readonly mandateVersion: number;
+    readonly cardId: string;
+    readonly cardVersion: number;
+    readonly requestedId: string;
+  }): Promise<ConversationProjection> {
+    const world = worldId.parse(input.worldId);
+    const request = {
+      mandate_id: id.parse(input.mandateId),
+      mandate_version: integer.min(1).parse(input.mandateVersion),
+      card_id: cardSlug.parse(input.cardId),
+      card_version: integer.min(1).parse(input.cardVersion),
+      requested_id: modelId.parse(input.requestedId),
+    };
+    return conversationProjection.parse(
+      await this.post(`/w/${world}/model-projections/acting`, request),
+    );
+  }
+
   async ruleCommit(input: {
     readonly proposal: FrozenProposal;
     readonly service: string;

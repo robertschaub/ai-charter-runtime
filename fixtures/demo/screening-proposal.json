@@ -1,0 +1,61 @@
+{
+  "world_id": "w-demo",
+  "proposal_id": "prp_screening_fixture",
+  "revision": 1,
+  "action_id": "act_screening_fixture",
+  "created_at": "2026-08-01T09:00:00.000Z",
+  "declared_objective": "File the synthetic grant application.",
+  "proposed_action": "Submit the synthetic grant filing.",
+  "target": {
+    "recipient": "grant-office",
+    "resource": "application-42"
+  },
+  "exact_parameters": {
+    "amount_minor_units": 5000,
+    "reference": "screening-fixture"
+  },
+  "material_inputs": [
+    {
+      "id": "said_public",
+      "store": "said",
+      "turn": "turn_0",
+      "text": "The synthetic grant criterion is published for public review.",
+      "provenance": {
+        "derived_from": [],
+        "hops": []
+      },
+      "tags": [
+        "conf:public",
+        "purpose:grant-assessment"
+      ],
+      "origin_actor": "document:grant-criteria"
+    }
+  ],
+  "derived_claims": [],
+  "data_to_be_disclosed": [
+    "applicant_name"
+  ],
+  "cost_obligation": {
+    "amount_minor_units": 5000,
+    "description": "Synthetic grant amount."
+  },
+  "material_consequences": [
+    "Creates a synthetic public-funds commitment."
+  ],
+  "reversibility_class": "partially-reversible",
+  "commercial_influence": {
+    "applicable": false,
+    "note": "Not applicable."
+  },
+  "acting_model": {
+    "requested_id": "swiss-ai/apertus-v1.5-70b",
+    "served_id": "swiss-ai/apertus-v1.5-70b",
+    "card_id": "publicai-apertus-v1.5-70b",
+    "card_version": 1
+  },
+  "mandate_ref": {
+    "mandate_id": "mdt_demo_grant",
+    "version": 1
+  },
+  "proposal_hash": "7f416cafebfb8a251df701f4ad9d79c35255c2b4f1659e790284a26b66f135a2"
+}

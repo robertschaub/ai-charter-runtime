@@ -19,6 +19,7 @@ import { AuthorizationHttpAdapter } from './authorizationHttpAdapter.js';
 import { AuthorizationHttpServer } from './authorizationHttpServer.js';
 import type { AuthorizationReadSide } from './authorizationReadSide.js';
 import type { CaseSessionHandoffService } from './caseSessionHandoff.js';
+import type { ConversationProjectionService } from './conversationProjectionService.js';
 import { digestFor } from './hash.js';
 import { Keyring, verifyEmbeddedMac } from './keyring.js';
 import { loadPolicyFile, type LoadedPolicy } from './policyLoader.js';
@@ -149,11 +150,12 @@ function harness(
     policy,
     ids,
     resolveAuthorizedAgent: (actor) => (actor.credential === 'proc:orchestrator' ? 'agent_demo' : undefined),
-    resolveScreeningSignals: (proposal) => {
+    resolveScreening: (proposal) => {
       const value = screenings.get(proposal.proposal_id) ?? [];
       if (value instanceof Error) throw value;
-      return value;
+      return { performed: true, signals: value, evidenceRefs: [] };
     },
+    validateScreeningResolution: () => true,
     resolveModelEvidence: () => ({
       servedModelAccepted: true,
       cardStatus: 'current',
@@ -821,7 +823,8 @@ describe('M2 authorization transactions', () => {
       policy: substituted.policy,
       ids: substituted.ids,
       resolveAuthorizedAgent: () => 'agent_demo',
-      resolveScreeningSignals: () => [],
+      resolveScreening: () => ({ performed: true, signals: [], evidenceRefs: [] }),
+      validateScreeningResolution: () => true,
       resolveModelEvidence: () => ({
         servedModelAccepted: false,
         cardStatus: 'current',
@@ -955,7 +958,8 @@ describe('M2 authorization transactions', () => {
       policy: superseded.policy,
       ids: superseded.ids,
       resolveAuthorizedAgent: () => 'agent_demo',
-      resolveScreeningSignals: () => [],
+      resolveScreening: () => ({ performed: true, signals: [], evidenceRefs: [] }),
+      validateScreeningResolution: () => true,
       resolveModelEvidence: () => ({
         servedModelAccepted: true,
         cardStatus: 'superseded',
@@ -976,7 +980,8 @@ describe('M2 authorization transactions', () => {
       policy: withdrawn.policy,
       ids: withdrawn.ids,
       resolveAuthorizedAgent: () => 'agent_demo',
-      resolveScreeningSignals: () => [],
+      resolveScreening: () => ({ performed: true, signals: [], evidenceRefs: [] }),
+      validateScreeningResolution: () => true,
       resolveModelEvidence: () => ({
         servedModelAccepted: true,
         cardStatus: 'withdrawn',
@@ -999,7 +1004,8 @@ describe('M2 authorization transactions', () => {
       policy: h.policy,
       ids: h.ids,
       resolveAuthorizedAgent: () => 'agent_demo',
-      resolveScreeningSignals: () => [],
+      resolveScreening: () => ({ performed: true, signals: [], evidenceRefs: [] }),
+      validateScreeningResolution: () => true,
       resolveModelEvidence: () => ({
         servedModelAccepted: true,
         cardStatus,
@@ -1032,7 +1038,8 @@ describe('M2 authorization transactions', () => {
       policy: atRuling.policy,
       ids: atRuling.ids,
       resolveAuthorizedAgent: () => 'agent_demo',
-      resolveScreeningSignals: () => [],
+      resolveScreening: () => ({ performed: true, signals: [], evidenceRefs: [] }),
+      validateScreeningResolution: () => true,
       resolveModelEvidence: () => {
         throw new Error('synthetic card reload failure');
       },
@@ -1056,7 +1063,8 @@ describe('M2 authorization transactions', () => {
       policy: atCommit.policy,
       ids: atCommit.ids,
       resolveAuthorizedAgent: () => 'agent_demo',
-      resolveScreeningSignals: () => [],
+      resolveScreening: () => ({ performed: true, signals: [], evidenceRefs: [] }),
+      validateScreeningResolution: () => true,
       resolveModelEvidence: () => {
         if (!registryAvailable) throw new Error('synthetic card reload failure');
         return {
@@ -1301,6 +1309,68 @@ describe('M2 authorization transactions', () => {
         { ruling: { gate: 'authorize', verdict: 'allow' } },
         { ruling: { gate: 'submit', verdict: 'escalate', matched_rule_id: 'default:required-screening-missing' } },
       ],
+    });
+  });
+
+  it('revalidates screening inside the world lock and records a fail-closed skip when evidence changed', async () => {
+    const h = harness();
+    await initialize(h);
+    const core = new AuthorizationCore({
+      store: h.store,
+      keyring: h.keyring,
+      policy: h.policy,
+      ids: h.ids,
+      resolveAuthorizedAgent: () => 'agent_demo',
+      resolveScreening: () => ({ performed: true, signals: [], evidenceRefs: [] }),
+      validateScreeningResolution: () => false,
+      resolveModelEvidence: () => ({
+        servedModelAccepted: true,
+        cardStatus: 'current',
+        cardKeyId: 'card-test',
+        cardDigest: CARD_DIGEST,
+      }),
+    });
+    const ruled = await core.ruleProposal(ruleInput(proposal(85), { gate: 'submit' }));
+    expect(ruled.ruling).toMatchObject({
+      verdict: 'escalate',
+      matched_rule_id: 'default:required-screening-missing',
+      evidence_refs: [{ kind: 'screening_skipped', reason: 'resolver-error' }],
+    });
+  });
+
+  it('binds projection summaries and fixture signals into ruling evidence without allowing the signal', async () => {
+    const h = harness();
+    await initialize(h);
+    const projectionRef = {
+      kind: 'submit_projection' as const,
+      provider: 'openai-gpt-5.5',
+      role: 'screening' as const,
+      included: 1,
+      dropped: 0,
+      dropped_item_ids: [],
+      unmet_tags: [],
+    };
+    const signal = conflictSignal('Synthetic fixture conflict.');
+    const core = new AuthorizationCore({
+      store: h.store,
+      keyring: h.keyring,
+      policy: h.policy,
+      ids: h.ids,
+      resolveAuthorizedAgent: () => 'agent_demo',
+      resolveScreening: () => ({ performed: true, signals: [signal], evidenceRefs: [projectionRef] }),
+      validateScreeningResolution: () => true,
+      resolveModelEvidence: () => ({
+        servedModelAccepted: true,
+        cardStatus: 'current',
+        cardKeyId: 'card-test',
+        cardDigest: CARD_DIGEST,
+      }),
+    });
+    const ruled = await core.ruleProposal(ruleInput(proposal(86), { gate: 'submit' }));
+    expect(ruled.ruling).toMatchObject({
+      verdict: 'escalate',
+      matched_rule_id: 'escalate-submit-signal',
+      evidence_refs: [projectionRef, signal],
     });
   });
 
@@ -2293,6 +2363,7 @@ describe('M2 authorization transactions', () => {
     });
     const server = new AuthorizationHttpServer({
       authorization: h.core,
+      conversationProjections: {} as ConversationProjectionService,
       reads: {} as AuthorizationReadSide,
       adapter,
       keyring: h.keyring,

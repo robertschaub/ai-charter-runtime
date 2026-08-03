@@ -9,6 +9,12 @@ item shape remains the one used in frozen proposals. Dialogue transitions requir
 against both the durable store and the frozen source proposal. Projection and tag union are implemented as
 pure deterministic operations, but no provider call or case-message route is opened in this slice.
 
+**Amendment (M5.2 authorization-resolved projections and fixture-pinned screening, 2026-08-03):** the
+authorization process now resolves the active mandate, exact role approval, and freshly verified signed
+card before every acting or screening projection. The acting HTTP request cannot name projection scope.
+Offline screening accepts only checked-in synthetic fixture results keyed by exact frozen proposal hash and
+gate, minimizes to fixture-named suspect proposal items, and revalidates the result under the world lock.
+
 ## Context
 Derived content inherits the **union of the restriction tags** of its inputs — a set over confidentiality, purpose and recipient, not a scalar level. Projection to a provider is a subset check against the mandate ∩ card permissions for that provider's **role** (acting or screening); membership in the approved-model set authorizes acting, not blanket disclosure.
 
@@ -82,13 +88,22 @@ Every projection records a summary in the ruling's evidence refs (no new record 
 A switch additionally invalidates all prior rulings by the §4 binding rule (acting-model id is in the binding tuple).
 
 M5.1 implements the pure projection core and its fixed output schema: one world, one case, one card slug and
-role, included whole items, and an exact summary of dropped ids and unmet tags. Its clearance input must be
-the server-resolved mandate and card sets; the core computes their intersection rather than accepting an
-effective set from its caller. Wiring that projection across the authenticated process boundary belongs to
-the next M5 slice; accepting caller-supplied effective clearance would be an authority bypass.
+role, included whole items, and an exact summary of dropped ids and unmet tags. M5.2 wires the acting role
+through an authenticated authorization route while keeping the case, role, store contents, and effective
+clearance server-owned. The caller supplies only exact mandate/card approval identifiers; accepting
+caller-supplied projection scope or effective clearance remains an authority bypass.
 
 ### 6. Screening projections
 Screening carries the same tags and the same check, against the **screening-role** clearance set — permission to screen is not permission to act. Order: minimize first (the suspect input item only, not the case file), then subset-check. If the suspect item is not disclosable to any configured screening provider, no call is made and `screening_skipped: disclosure_restricted` is recorded. Because a signal can only raise and never allow, the deterministic rules simply stand — except where the policy file marks screening as **required** for that action class, in which case the missing check escalates (fail closed).
+
+M5.2 supplies no live screening call. Its deterministic synthetic fixture set is parsed at startup and each
+entry is unique by `(proposal_hash, gate)`. Authorization selects the screening provider and suspect item ids
+from that exact match, requires each whole item to be canonically identical in the frozen proposal and the
+active configured-case store, then resolves the current screening-role mandate/card intersection. A missing
+fixture, case mismatch, item mismatch, inactive mandate, unusable card, or restricted disclosure yields
+`performed: false` plus a `screening_skipped` evidence reference. The ruling stores the projection summary
+and any fixture signals; a signal still cannot accompany an allow ruling. Authorization recomputes the
+resolution while the world lock is held, so changed mandate/card/store evidence cannot validate a stale pass.
 
 ### 7. Revocation of a `permitted` item
 Revocation removes the item and blocks it from future projections. Items already derived from it keep their (monotone) tags and are **not** retroactively deleted — deletion/retention propagation is already marked *not assessed* in the §7 family-2 coverage table, and this ADR does not quietly upgrade that claim.

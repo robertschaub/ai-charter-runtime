@@ -17,6 +17,7 @@ import {
 import { AuthorizationReadSide } from './authorizationReadSide.js';
 import { CaseSessionHandoffService } from './caseSessionHandoff.js';
 import { CardRegistry } from './cardRegistry.js';
+import { ConversationProjectionService } from './conversationProjectionService.js';
 import {
   recordVerificationAccess,
   verifyRecords,
@@ -26,6 +27,7 @@ import { digestFileSet } from './fileSetDigest.js';
 import { loadKeyring } from './keyring.js';
 import { loadPolicyFile } from './policyLoader.js';
 import { runRuntimeMaintenance } from './runtimeMaintenance.js';
+import { screeningFixtureSet } from './screeningFixture.js';
 import { id, storeItem, worldId } from './schemas/index.js';
 import { ServicesProbeHttpClient } from './servicesProbeHttpClient.js';
 import { WalStore } from './walStore.js';
@@ -144,6 +146,9 @@ export async function startAuthorizationProcess(
   const conversationFixture = resolve(
     env['RUNTIME_CONVERSATION_FIXTURE'] ?? 'fixtures/demo/conversation.json',
   );
+  const screeningFixtureFile = resolve(
+    env['RUNTIME_SCREENING_FIXTURE'] ?? 'fixtures/demo/screening.json',
+  );
   const consolesRoot = fileURLToPath(new URL('../../consoles/', import.meta.url));
   const consoleAssetsRoot = resolve(
     env['RUNTIME_CONSOLE_ASSETS_ROOT'] ?? join(consolesRoot, 'assets', 'governance-console'),
@@ -157,6 +162,9 @@ export async function startAuthorizationProcess(
   const loadedPolicy = loadPolicyFile(policyFile, digestFileSet(sourceRoot, 'evaluator-build'));
   const policy = { ...loadedPolicy, policyContentDigest: digestFileSet(policyRoot, 'policy-set') };
   const cards = CardRegistry.load(cardsRoot);
+  const screeningFixtures = screeningFixtureSet.parse(
+    JSON.parse(readFileSync(screeningFixtureFile, 'utf8')),
+  );
   const servicesProbe = new ServicesProbeHttpClient({
     origin: servicesOrigin,
     token: servicesProbeToken,
@@ -209,13 +217,23 @@ export async function startAuthorizationProcess(
     await recordVerificationAccess(store, recordVerification.readLengths);
     await caseHandoffs.expireIssued();
     await servicesProbe.requireHealthy();
+    const conversationProjections = new ConversationProjectionService({
+      store,
+      cards,
+      keyring,
+      caseId: demoCaseId,
+      screeningFixtures,
+    });
     const authorization = new AuthorizationCore({
       store,
       keyring,
       policy,
       resolveAuthorizedAgent: (actor) =>
         actor.credential === 'proc:orchestrator' ? (env['RUNTIME_AUTHORIZED_AGENT_ID'] ?? 'agent_demo') : undefined,
-      resolveScreeningSignals: () => [],
+      resolveScreening: (proposal, gate, caseId) =>
+        conversationProjections.screening({ proposal, gate, ...(caseId === undefined ? {} : { caseId }) }),
+      validateScreeningResolution: (resolution, proposal, gate, caseId) =>
+        conversationProjections.validateScreeningResolution(resolution, proposal, gate, caseId),
       resolveModelEvidence: (proposal) => cards.resolve(proposal),
       resolveRegistryEvidence: (citation) => servicesProbe.resolveRegistryEvidence(citation),
     });
@@ -252,6 +270,7 @@ export async function startAuthorizationProcess(
     });
     server = new AuthorizationHttpServer({
       authorization,
+      conversationProjections,
       reads,
       adapter,
       keyring,

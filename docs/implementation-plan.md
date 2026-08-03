@@ -55,7 +55,7 @@ distinguish an uncommitted latest checkpoint from confirmed remote rollback or m
 | M2 — transactional core | Implemented and fault-tested | Authorization remains the single durable serialization point; authority defects fail closed. |
 | M3 — vertical slice | Implemented | Deterministic authorize → propose → rule → commit-verify → effect → receipt path, adapters, service ledger, and signed cards are present. |
 | M4 — escalation + governance console | **Complete** | Final exact-SHA review of `e326562` returned GO with no findings; the offline acceptance ledger preserves the remaining partial and not-assessed boundaries. |
-| M5 — screening + empathy + switching | **In progress** | M5.1 is implemented and reviewed at `c1b5eb0`; model ingress remains closed and M5.2 requires separate approval. |
+| M5 — screening + empathy + switching | **In progress** | M5.1 is reviewed at `c1b5eb0`; M5.2 is an implementation candidate awaiting exact-SHA review. Model ingress remains closed. |
 | M6–M7 | Not started | Full capture/publication work follows the implementation milestones. |
 
 These labels describe repository implementation status, not assurance, certification, or independent
@@ -199,6 +199,31 @@ reproduced the candidate validation: `npm run typecheck`; 4 Git-safety hook test
 wording corrected in this documentation-only follow-up. M5.1 is a reviewed integration point, not an M5
 completion claim.
 
+### M5.2 implementation candidate — authorization-resolved projections and fixture-pinned screening
+
+- Authorization resolves the current active mandate and exact acting/screening role approval, reloads and
+  verifies the signed card, and computes the mandate/card intersection internally for the configured case.
+- `POST /w/{world_id}/model-projections/acting` is authenticated only for `proc:orchestrator`, read-only,
+  strict-body, and access-recorded. The request cannot carry a case, role, item list, tags, or clearances.
+- Screening is internal to the ruling path and minimizes to suspect proposal items selected by a checked-in
+  synthetic fixture keyed by exact frozen proposal hash plus gate. The provider must have an exact screening
+  role approval; the item must match the active configured-case store canonically and remain disclosable.
+- Missing, mismatched, inactive, unusable, or disclosure-restricted screening returns `performed: false` and
+  a typed `screening_skipped` evidence reference. Policies that require screening therefore escalate. A
+  fixture signal remains escalation-only and can never create an allow.
+- Projection summaries and fixture signals are stored in ruling evidence. The resolution is recomputed under
+  the world lock before issue, closing the prior unconditional empty-success callback in the native process.
+- Unit, real-listener, and native-process coverage exercises exact role/case resolution, whole-item drops,
+  strict request rejection, disclosure access evidence, exact fixture success, changed-hash failure, and
+  durable screening evidence.
+- The slice makes no provider call, ingests no model output, changes no signed card, and leaves the browser
+  message route at `501 model-interaction-not-active`. Switching, empathy triggers, output ingestion, and
+  output red-line controls remain deferred.
+
+This is a review candidate, not a reviewed baseline or M5 completion claim.
+Candidate validation is `npm run typecheck` clean, 4 Git-safety hook tests plus 285 Vitest tests across
+33 files passing, `git diff --check` clean, and both unchanged signed cards verified.
+
 ## Resolved browser credential-handoff protocol
 
 The normative decision is pinned above at Charter commit `00c32f5`: a user-initiated authorization-origin
@@ -216,10 +241,11 @@ authorization route. The bounded handoff and session implementation was independ
 
 ## Ordered next slices
 
-1. **M5.2 approval and planning** — define the smallest authenticated cross-process projection and
-   deterministic screening slice. Keep mandate/card clearance resolution inside authorization, preserve the
-   rule that a screening signal can only flag or escalate, and leave governed model switching and output
-   red-line checks for separately approved slices. Do not implement M5.2 without maintainer approval.
+1. **Exact-SHA adversarial review of M5.2** — review the committed candidate against the pinned Charter
+   specification, ADR-002, ADR-005, the no-signal-to-allow invariant, strict route/request scope, signed-card
+   reload, world-lock revalidation, fixture exactness, access evidence, and the full validation output.
+2. **Stop after review.** Do not start provider ingress, browser messages, output ingestion, empathy/model
+   switching, or red-line controls without a separately approved bounded slice.
 
 Substantive tranches are committed and reviewed at bounded integration points. A documentation-only status
 acknowledgement does not trigger a recursive review round; changes to ADRs, gates, invariants, ACLs,

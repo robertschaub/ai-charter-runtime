@@ -25,12 +25,17 @@ import {
 import { proposalRulingProjection } from './authorizationProjection.js';
 import { AuthorizationReadSide, AuthorizationReadSideError } from './authorizationReadSide.js';
 import {
+  ConversationProjectionService,
+  ConversationProjectionServiceError,
+} from './conversationProjectionService.js';
+import {
   CaseSessionHandoffError,
   type CaseSessionHandoffService,
 } from './caseSessionHandoff.js';
 import type { Keyring } from './keyring.js';
 import {
   classToken,
+  cardSlug,
   browserOrigin,
   disposition,
   effectIntent,
@@ -40,6 +45,7 @@ import {
   hexDigest,
   id,
   integer,
+  modelId,
   timestamp,
   worldId,
   type Mandate,
@@ -53,6 +59,15 @@ const proposalRequest = z
     service: id,
     action_class: classToken,
     context: jsonObject.optional(),
+  })
+  .strict();
+const actingProjectionRequest = z
+  .object({
+    mandate_id: id,
+    mandate_version: integer.min(1),
+    card_id: cardSlug,
+    card_version: integer.min(1),
+    requested_id: modelId,
   })
   .strict();
 const commitVerifyRequest = z
@@ -265,6 +280,7 @@ type Handler = (
 
 export interface AuthorizationHttpServerOptions {
   readonly authorization: AuthorizationCore;
+  readonly conversationProjections: ConversationProjectionService;
   readonly reads: AuthorizationReadSide;
   readonly adapter: AuthorizationHttpAdapter;
   readonly keyring: Keyring;
@@ -363,6 +379,22 @@ export class AuthorizationHttpServer {
             },
             escalation_id: result.escalationId,
           }),
+        };
+      },
+      'conversation.project-acting': async (request, context) => {
+        const parsed = actingProjectionRequest.parse(await body(request));
+        const projection = options.conversationProjections.acting({
+          mandateId: parsed.mandate_id,
+          mandateVersion: parsed.mandate_version,
+          cardId: parsed.card_id,
+          cardVersion: parsed.card_version,
+          requestedId: parsed.requested_id,
+          actor: requireActor(context),
+        });
+        return {
+          status: 200,
+          body: projection,
+          readLengths: { conversation_items: projection.items.length },
         };
       },
       'ruling.read': async (_request, context) => {
@@ -590,6 +622,12 @@ export class AuthorizationHttpServer {
             if (error instanceof AuthorizationReadSideError) {
               return {
                 status: error.code === 'forbidden' ? 403 : 409,
+                body: { error: error.code },
+              };
+            }
+            if (error instanceof ConversationProjectionServiceError) {
+              return {
+                status: error.code === 'forbidden' ? 403 : error.code === 'invalid-scope' ? 422 : 409,
                 body: { error: error.code },
               };
             }

@@ -73,7 +73,8 @@ function setup(
     policy,
     ids: new SequentialIds(),
     resolveAuthorizedAgent: (actor) => (actor.credential === 'proc:orchestrator' ? 'agent_demo' : undefined),
-    resolveScreeningSignals: () => [],
+    resolveScreening: () => ({ performed: true, signals: [], evidenceRefs: [] }),
+    validateScreeningResolution: () => true,
     resolveModelEvidence: () => ({
       servedModelAccepted: true,
       cardStatus: 'current',
@@ -275,6 +276,46 @@ describe('ADR-002 authorization HTTP adapter', () => {
     expect(operation).toHaveBeenCalledOnce();
     expect(JSON.stringify(operation.mock.calls)).not.toContain('4'.repeat(64));
     expect(store.snapshot().accessRecords).toHaveLength(0);
+  });
+
+  it('serves the acting projection only to the orchestrator and records every disclosure attempt', async () => {
+    const { adapter, store } = setup();
+    const operation = vi.fn(async (context) => ({ status: 200, body: { actor: context.actor?.credential } }));
+    await expect(
+      adapter.dispatch(
+        {
+          method: 'POST',
+          pathname: '/w/w-demo/model-projections/acting',
+          authorization: `Bearer ${'4'.repeat(64)}`,
+        },
+        operation,
+      ),
+    ).resolves.toMatchObject({ status: 200, body: { actor: 'proc:orchestrator' } });
+    await expect(
+      adapter.dispatch(
+        {
+          method: 'POST',
+          pathname: '/w/w-demo/model-projections/acting',
+          authorization: `Bearer ${'1'.repeat(64)}`,
+        },
+        operation,
+      ),
+    ).resolves.toMatchObject({ status: 403, body: { error: 'forbidden' } });
+    expect(operation).toHaveBeenCalledOnce();
+    expect(store.snapshot().accessRecords).toEqual([
+      expect.objectContaining({
+        route: 'POST /w/{world_id}/model-projections/acting',
+        authenticated_actor: 'proc:orchestrator',
+        outcome: 'served',
+        http_status: 200,
+      }),
+      expect.objectContaining({
+        route: 'POST /w/{world_id}/model-projections/acting',
+        authenticated_actor: 'role:principal',
+        outcome: 'forbidden',
+        http_status: 403,
+      }),
+    ]);
   });
 
   it('records dynamic role refusals and successful record-family reads', async () => {

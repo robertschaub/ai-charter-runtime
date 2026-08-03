@@ -1,5 +1,20 @@
 [
   {
+    "id": "said_public",
+    "store": "said",
+    "turn": "turn_0",
+    "text": "The synthetic grant criterion is published for public review.",
+    "provenance": {
+      "derived_from": [],
+      "hops": []
+    },
+    "tags": [
+      "conf:public",
+      "purpose:grant-assessment"
+    ],
+    "origin_actor": "document:grant-criteria"
+  },
+  {
     "id": "said_3",
     "store": "said",
     "turn": "turn_1",

@@ -1,0 +1,29 @@
+[
+  {
+    "proposal_hash": "7f416cafebfb8a251df701f4ad9d79c35255c2b4f1659e790284a26b66f135a2",
+    "gate": "submit",
+    "provider": "openai-gpt-5.5",
+    "suspect_item_ids": [
+      "said_public"
+    ],
+    "signals": [
+      {
+        "kind": "screening_signal",
+        "signal": "evidence_conflict",
+        "confidence_pct": 90,
+        "rationale": "Deterministic synthetic fixture for the M5.2 screening boundary.",
+        "model_id": "deterministic-screening-fixture",
+        "model_version_reported": "deterministic-screening-fixture-v1"
+      }
+    ]
+  },
+  {
+    "proposal_hash": "7f416cafebfb8a251df701f4ad9d79c35255c2b4f1659e790284a26b66f135a2",
+    "gate": "verify",
+    "provider": "openai-gpt-5.5",
+    "suspect_item_ids": [
+      "said_public"
+    ],
+    "signals": []
+  }
+]

@@ -62,8 +62,10 @@ describe('M4 headless escalation slice', () => {
       keyring,
       policy,
       resolveAuthorizedAgent: (actor) => (actor.credential === 'proc:orchestrator' ? 'agent_demo' : undefined),
-      resolveScreeningSignals: (proposal) =>
-        proposal.proposal_id === 'prp_beat_3_1'
+      resolveScreening: (proposal) => ({
+        performed: true,
+        evidenceRefs: [],
+        signals: proposal.proposal_id === 'prp_beat_3_1'
           ? [
               {
                 kind: 'screening_signal',
@@ -75,6 +77,8 @@ describe('M4 headless escalation slice', () => {
               },
             ]
           : [],
+      }),
+      validateScreeningResolution: () => true,
       resolveModelEvidence: (proposal) => registry.resolve(proposal),
     });
     const adapter = new AuthorizationHttpAdapter({
