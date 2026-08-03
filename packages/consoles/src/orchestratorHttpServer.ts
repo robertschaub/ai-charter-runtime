@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: MIT
 /** Native HTTP host for the model-side orchestrator process. */
+import { readFileSync } from 'node:fs';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 
 import {
   classToken,
+  browserOrigin,
   effectIntent,
   frozenProposal,
   id,
@@ -16,10 +18,23 @@ import {
   OrchestratorAuthorizationHttpClient,
   OrchestratorServicesHttpClient,
 } from './runtimeHttpClients.js';
+import { CaseSessionStore } from './caseSessionStore.js';
 
 const executeRequest = z
   .object({ proposal: frozenProposal, service: id, action_class: classToken })
   .strict();
+const caseSessionRedeemRequest = z
+  .object({
+    handoff_id: id,
+    handoff_code: z.string().regex(/^[0-9a-f]{64,}$/),
+    role: z.literal('case_officer'),
+    world_id: worldId,
+    case_id: id,
+    target_origin: browserOrigin,
+    authorization_boot_id: id,
+  })
+  .strict();
+const closeSessionRequest = z.object({}).strict();
 
 async function readJson(request: IncomingMessage, maxBytes: number): Promise<unknown> {
   if (!request.headers['content-type']?.toLowerCase().startsWith('application/json')) throw new Error('json-required');
@@ -45,15 +60,73 @@ function sendJson(response: ServerResponse, status: number, body: unknown): void
     'content-type': 'application/json; charset=utf-8',
     'content-length': bytes.length,
     'cache-control': 'no-store',
+    'content-security-policy': "frame-ancestors 'none'",
+    'x-content-type-options': 'nosniff',
   });
   response.end(bytes);
+}
+
+const CONSOLE_CSP = [
+  "default-src 'none'",
+  "script-src 'self'",
+  "style-src 'self'",
+  "connect-src 'self'",
+  "base-uri 'none'",
+  "form-action 'self'",
+  "frame-ancestors 'none'",
+  "object-src 'none'",
+].join('; ');
+
+function sendConsoleAsset(response: ServerResponse, body: string, contentType: string): void {
+  const bytes = Buffer.from(body, 'utf8');
+  response.writeHead(200, {
+    'content-type': `${contentType}; charset=utf-8`,
+    'content-length': bytes.length,
+    'cache-control': 'no-store',
+    'content-security-policy': CONSOLE_CSP,
+    'cross-origin-resource-policy': 'same-origin',
+    'permissions-policy': 'camera=(), microphone=(), geolocation=()',
+    'referrer-policy': 'no-referrer',
+    'x-content-type-options': 'nosniff',
+  });
+  response.end(bytes);
+}
+
+function requestOrigin(request: IncomingMessage): string | undefined {
+  const value = request.headers.origin;
+  return Array.isArray(value) ? value[0] : value;
+}
+
+export interface CaseConsoleAssetPaths {
+  readonly shell: string;
+  readonly script: string;
+  readonly stylesheet: string;
+}
+
+export interface CaseConsoleAssets {
+  readonly shell: string;
+  readonly script: string;
+  readonly stylesheet: string;
+}
+
+/** Load all browser bytes before the process is allowed to bind its listener. */
+export function loadCaseConsoleAssets(paths: CaseConsoleAssetPaths): CaseConsoleAssets {
+  return {
+    shell: readFileSync(paths.shell, 'utf8'),
+    script: readFileSync(paths.script, 'utf8').replace(/\r?\n\/\/# sourceMappingURL=.*\r?\n?$/u, '\n'),
+    stylesheet: readFileSync(paths.stylesheet, 'utf8'),
+  };
 }
 
 export interface OrchestratorHttpServerOptions {
   readonly authorization: OrchestratorAuthorizationHttpClient;
   readonly services: OrchestratorServicesHttpClient;
   readonly worldId: string;
+  readonly demoCaseId: string;
   readonly caseOfficerToken: string;
+  readonly authorizationOrigin: string;
+  readonly caseConsoleAssets: CaseConsoleAssets;
+  readonly caseSessions?: CaseSessionStore;
   readonly host: string;
   readonly port: number;
   readonly maxBodyBytes?: number;
@@ -69,19 +142,113 @@ export class OrchestratorHttpServer {
   readonly #server: Server;
   readonly #host: string;
   readonly #port: number;
+  #origin: string | null;
 
   constructor(options: OrchestratorHttpServerOptions) {
     const configuredWorld = worldId.parse(options.worldId);
+    const configuredCase = id.parse(options.demoCaseId);
+    const authorizationOrigin = browserOrigin.parse(options.authorizationOrigin);
+    const sessions = options.caseSessions ?? new CaseSessionStore();
     const maxBodyBytes = options.maxBodyBytes ?? 1024 * 1024;
     if (!/^[0-9a-fA-F]{64,}$/.test(options.caseOfficerToken)) throw new Error('invalid case-console credential');
     this.#host = options.host;
     this.#port = options.port;
+    this.#origin = options.port === 0 ? null : `http://${options.host}:${options.port}`;
     this.#server = createServer((request, response) => {
       void (async () => {
         try {
           const url = new URL(request.url ?? '/', `http://${options.host}`);
           if (request.method === 'GET' && url.pathname === '/healthz') {
             sendJson(response, 200, { status: 'ready', service: 'orchestrator' });
+            return;
+          }
+          const ownOrigin = this.#origin;
+          if (ownOrigin === null) throw new Error('listener origin is unavailable');
+          if (request.method === 'GET' && url.pathname === '/console/runtime-config.json') {
+            sendJson(response, 200, {
+              authorization_origin: authorizationOrigin,
+              orchestrator_origin: ownOrigin,
+            });
+            return;
+          }
+          if (request.method === 'GET' && (url.pathname === '/console/handoff' || url.pathname === '/console/handoff/')) {
+            sendConsoleAsset(response, options.caseConsoleAssets.shell, 'text/html');
+            return;
+          }
+          if (request.method === 'GET' && url.pathname === '/console/handoff.js') {
+            sendConsoleAsset(response, options.caseConsoleAssets.script, 'text/javascript');
+            return;
+          }
+          if (request.method === 'GET' && url.pathname === '/console/case-styles.css') {
+            sendConsoleAsset(response, options.caseConsoleAssets.stylesheet, 'text/css');
+            return;
+          }
+          const redeemMatch = /^\/w\/([^/]+)\/case-sessions\/redeem$/.exec(url.pathname);
+          if (request.method === 'POST' && redeemMatch !== null) {
+            const requestedWorld = worldId.safeParse(redeemMatch[1]);
+            if (!requestedWorld.success || requestedWorld.data !== configuredWorld) {
+              sendJson(response, 404, { error: 'not-found' });
+              return;
+            }
+            if (request.headers.authorization !== undefined) {
+              sendJson(response, 403, { error: 'handoff-refused' });
+              return;
+            }
+            const origin = requestOrigin(request);
+            if (origin !== undefined && origin !== ownOrigin) {
+              sendJson(response, 403, { error: 'handoff-refused' });
+              return;
+            }
+            const parsed = caseSessionRedeemRequest.parse(await readJson(request, maxBodyBytes));
+            if (
+              parsed.world_id !== configuredWorld ||
+              parsed.case_id !== configuredCase ||
+              parsed.target_origin !== ownOrigin
+            ) {
+              sendJson(response, 403, { error: 'handoff-refused' });
+              return;
+            }
+            let claim;
+            try {
+              claim = await options.authorization.redeemCaseSessionHandoff(parsed);
+            } catch {
+              sendJson(response, 403, { error: 'handoff-refused' });
+              return;
+            }
+            if (
+              claim.world_id !== configuredWorld ||
+              claim.case_id !== configuredCase ||
+              claim.target_origin !== ownOrigin
+            ) {
+              sendJson(response, 403, { error: 'handoff-refused' });
+              return;
+            }
+            sendJson(response, 201, sessions.create(claim));
+            return;
+          }
+          const closeMatch = /^\/w\/([^/]+)\/case-sessions\/close$/.exec(url.pathname);
+          if (request.method === 'POST' && closeMatch !== null) {
+            const requestedWorld = worldId.safeParse(closeMatch[1]);
+            if (!requestedWorld.success || requestedWorld.data !== configuredWorld) {
+              sendJson(response, 404, { error: 'not-found' });
+              return;
+            }
+            const origin = requestOrigin(request);
+            if (origin !== undefined && origin !== ownOrigin) {
+              sendJson(response, 403, { error: 'forbidden' });
+              return;
+            }
+            const presented = bearer(request.headers.authorization);
+            if (presented === null || sessions.authenticate(presented, configuredWorld) === null) {
+              sendJson(response, 401, { error: 'unauthenticated' });
+              return;
+            }
+            closeSessionRequest.parse(await readJson(request, maxBodyBytes));
+            if (!sessions.close(presented, configuredWorld)) {
+              sendJson(response, 401, { error: 'unauthenticated' });
+              return;
+            }
+            sendJson(response, 200, { closed: true });
             return;
           }
           const match = /^\/w\/([^/]+)\/actions\/execute$/.exec(url.pathname);
@@ -143,7 +310,8 @@ export class OrchestratorHttpServer {
         this.#server.off('error', onError);
         const address = this.#server.address();
         if (address === null || typeof address === 'string') return reject(new Error('orchestrator listener has no TCP address'));
-        resolve({ host: this.#host, port: address.port, origin: `http://${this.#host}:${address.port}` });
+        this.#origin = `http://${this.#host}:${address.port}`;
+        resolve({ host: this.#host, port: address.port, origin: this.#origin });
       });
     });
   }

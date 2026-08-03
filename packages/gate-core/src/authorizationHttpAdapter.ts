@@ -28,6 +28,7 @@ interface RouteDefinition {
   readonly template: string;
   readonly allowed: readonly InboundLabel[] | 'open';
   readonly authorityChanging: boolean;
+  readonly originGuarded?: boolean;
   readonly accessLoggedOnServe?: boolean;
 }
 
@@ -35,7 +36,32 @@ export const AUTHORIZATION_ROUTES = [
   { id: 'health', method: 'GET', template: '/healthz', allowed: 'open', authorityChanging: false },
   { id: 'console.script', method: 'GET', template: '/console/app.js', allowed: 'open', authorityChanging: false },
   { id: 'console.style', method: 'GET', template: '/console/styles.css', allowed: 'open', authorityChanging: false },
+  {
+    id: 'console.config',
+    method: 'GET',
+    template: '/console/runtime-config.json',
+    allowed: 'open',
+    authorityChanging: false,
+  },
   { id: 'console.shell', method: 'GET', template: '/console/*', allowed: 'open', authorityChanging: false },
+  {
+    id: 'case-handoff.mint',
+    method: 'POST',
+    template: '/w/{world_id}/case-session-handoffs',
+    allowed: ['role:case_officer'],
+    authorityChanging: true,
+    originGuarded: true,
+    accessLoggedOnServe: true,
+  },
+  {
+    id: 'case-handoff.redeem',
+    method: 'POST',
+    template: '/w/{world_id}/case-session-handoffs/{id}/redeem',
+    allowed: ['proc:orchestrator'],
+    authorityChanging: false,
+    originGuarded: true,
+    accessLoggedOnServe: true,
+  },
   {
     id: 'proposal.submit',
     method: 'POST',
@@ -431,7 +457,7 @@ export class AuthorizationHttpAdapter {
     if (requestedWorld === null || !worldId.safeParse(requestedWorld).success) return deny(403, 'forbidden');
     if (binding.worldId !== requestedWorld || requestedWorld !== this.#demoWorldId) return deny(403, 'forbidden');
     if (!route.allowed.includes(binding.label)) return deny(403, 'forbidden');
-    if (route.authorityChanging && request.origin !== undefined && request.origin !== this.#ownOrigin) {
+    if ((route.authorityChanging || route.originGuarded === true) && request.origin !== undefined && request.origin !== this.#ownOrigin) {
       return deny(403, 'forbidden');
     }
 

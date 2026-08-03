@@ -6,6 +6,45 @@ import { classToken, hexDigest, id, integer, modelId, role, timestamp, worldId }
 import { disposition, interventionContract } from './intervention.js';
 import { counterName, gateRuling } from './ruling.js';
 
+export const browserOrigin = z
+  .string()
+  .url()
+  .refine((value) => {
+    const parsed = new URL(value);
+    return (parsed.protocol === 'http:' || parsed.protocol === 'https:') && parsed.origin === value;
+  }, 'expected an exact HTTP(S) origin');
+
+export const CASE_SESSION_HANDOFF_STATES = ['issued', 'consumed', 'expired'] as const;
+export const caseSessionHandoffState = z.enum(CASE_SESSION_HANDOFF_STATES);
+export const caseSessionHandoffRecord = z
+  .object({
+    world_id: worldId,
+    handoff_id: id,
+    case_id: id,
+    role: z.literal('case_officer'),
+    target_origin: browserOrigin,
+    authorization_boot_id: id,
+    code_digest: hexDigest,
+    created_at: timestamp,
+    expires_at: timestamp,
+    consumed_at: timestamp.nullable(),
+    state: caseSessionHandoffState,
+  })
+  .strict()
+  .superRefine((record, ctx) => {
+    if (record.created_at > record.expires_at) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['expires_at'], message: 'handoff expires before creation' });
+    }
+    if ((record.state === 'consumed') !== (record.consumed_at !== null)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['consumed_at'],
+        message: 'only a consumed handoff carries a consumption timestamp',
+      });
+    }
+  });
+export type CaseSessionHandoffRecord = z.infer<typeof caseSessionHandoffRecord>;
+
 export const NONCE_STATES = ['issued', 'consumed', 'expired'] as const;
 export const nonceState = z.enum(NONCE_STATES);
 export const nonceRecord = z

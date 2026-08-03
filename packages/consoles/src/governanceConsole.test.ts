@@ -5,7 +5,9 @@ import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 import {
+  acceptsHandoffReady,
   consoleApiPath,
+  parseGovernanceRuntimeConfig,
   parseConsoleDeepLink,
   permittedGeneralDispositions,
   validWorldId,
@@ -40,6 +42,22 @@ describe('authorization-origin governance console contract', () => {
     ).toEqual(['deny', 'route-to-remedy']);
     expect(permittedGeneralDispositions('disposed', ['deny'])).toEqual([]);
     expect(permittedGeneralDispositions('open', 'deny')).toEqual([]);
+  });
+
+  it('accepts a handoff readiness message only from the exact opened window and configured origin', () => {
+    const child = {} as WindowProxy;
+    const other = {} as WindowProxy;
+    const ready = { origin: 'http://127.0.0.1:7802', source: child, data: { type: 'runtime.case-handoff.ready' } };
+    expect(acceptsHandoffReady(ready, ready.origin, child)).toBe(true);
+    expect(acceptsHandoffReady({ ...ready, origin: 'null' }, ready.origin, child)).toBe(false);
+    expect(acceptsHandoffReady({ ...ready, source: other }, ready.origin, child)).toBe(false);
+    expect(acceptsHandoffReady({ ...ready, data: { type: 'runtime.case-handoff.ready', extra: true } }, ready.origin, child)).toBe(false);
+    expect(
+      parseGovernanceRuntimeConfig({
+        authorization_origin: 'http://127.0.0.1:7801',
+        orchestrator_origin: 'http://127.0.0.1:7802',
+      }),
+    ).not.toBeNull();
   });
 
   it('keeps the static shell free of inline or third-party executable content', () => {

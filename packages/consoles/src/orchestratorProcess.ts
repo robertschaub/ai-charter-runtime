@@ -1,11 +1,15 @@
 // SPDX-License-Identifier: MIT
 /** Model-side orchestrator process bootstrap. */
-import { resolve } from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { join, resolve } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
-import { worldId } from 'gate-core';
+import { id, worldId } from 'gate-core';
 
-import { OrchestratorHttpServer, type OrchestratorListeningAddress } from './orchestratorHttpServer.js';
+import {
+  OrchestratorHttpServer,
+  loadCaseConsoleAssets,
+  type OrchestratorListeningAddress,
+} from './orchestratorHttpServer.js';
 import {
   OrchestratorAuthorizationHttpClient,
   OrchestratorServicesHttpClient,
@@ -103,6 +107,15 @@ export async function startOrchestratorProcess(
     env['SERVICES_ORIGIN'] ?? `http://${host}:${servicesPort}`,
     'SERVICES_ORIGIN',
   );
+  const consolesRoot = fileURLToPath(new URL('../', import.meta.url));
+  const caseConsoleAssetsRoot = resolve(
+    env['RUNTIME_CASE_CONSOLE_ASSETS_ROOT'] ?? join(consolesRoot, 'assets', 'case-console'),
+  );
+  const caseConsoleAssets = loadCaseConsoleAssets({
+    shell: join(caseConsoleAssetsRoot, 'handoff.html'),
+    stylesheet: join(caseConsoleAssetsRoot, 'styles.css'),
+    script: resolve(env['RUNTIME_CASE_CONSOLE_SCRIPT'] ?? join(consolesRoot, 'dist', 'caseHandoffConsole.js')),
+  });
   await requireHealthy(authorizationOrigin, 'authorization service', 'authorization');
   await requireHealthy(servicesOrigin, 'services host', 'services');
   const server = new OrchestratorHttpServer({
@@ -115,7 +128,10 @@ export async function startOrchestratorProcess(
       token: servicesToken,
     }),
     worldId: worldId.parse(env['DEMO_WORLD_ID'] ?? 'w-demo'),
+    demoCaseId: id.parse(env['DEMO_CASE_ID'] ?? 'case_demo'),
     caseOfficerToken,
+    authorizationOrigin,
+    caseConsoleAssets,
     host,
     port,
   });

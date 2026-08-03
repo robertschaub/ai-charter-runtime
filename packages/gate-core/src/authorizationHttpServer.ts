@@ -22,9 +22,14 @@ import {
 } from './authorizationHttpAdapter.js';
 import { proposalRulingProjection } from './authorizationProjection.js';
 import { AuthorizationReadSide, AuthorizationReadSideError } from './authorizationReadSide.js';
+import {
+  CaseSessionHandoffError,
+  type CaseSessionHandoffService,
+} from './caseSessionHandoff.js';
 import type { Keyring } from './keyring.js';
 import {
   classToken,
+  browserOrigin,
   disposition,
   effectIntent,
   frozenProposal,
@@ -33,6 +38,7 @@ import {
   id,
   integer,
   timestamp,
+  worldId,
   type Mandate,
 } from './schemas/index.js';
 
@@ -73,6 +79,24 @@ const revokeRequest = z.object({ version: integer.min(1) }).strict();
 const dispositionRequest = z.object({ disposition }).strict();
 const revisionRequest = z
   .object({ proposal: frozenProposal, context: jsonObject.optional() })
+  .strict();
+const caseHandoffMintRequest = z.object({ case_id: id }).strict();
+const caseHandoffRedeemRequest = z
+  .object({
+    handoff_id: id,
+    handoff_code: z.string().regex(/^[0-9a-f]{64,}$/),
+    role: z.literal('case_officer'),
+    world_id: worldId,
+    case_id: id,
+    target_origin: browserOrigin,
+    authorization_boot_id: id,
+  })
+  .strict();
+const runtimeConsoleConfig = z
+  .object({
+    authorization_origin: browserOrigin,
+    orchestrator_origin: browserOrigin,
+  })
   .strict();
 const servicesAccessRoute = z.enum(['services.execute', 'services.effect-probe']);
 const servicesAccessReportRequest = z.discriminatedUnion('outcome', [
@@ -218,6 +242,11 @@ export interface AuthorizationHttpServerOptions {
   readonly reads: AuthorizationReadSide;
   readonly adapter: AuthorizationHttpAdapter;
   readonly keyring: Keyring;
+  readonly caseHandoffs: CaseSessionHandoffService;
+  readonly runtimeConfig: {
+    readonly authorization_origin: string;
+    readonly orchestrator_origin: string;
+  };
   readonly consoleAssets: GovernanceConsoleAssets;
   readonly host: string;
   readonly port: number;
@@ -251,6 +280,7 @@ export class AuthorizationHttpServer {
     }
     this.#host = options.host;
     this.#port = options.port;
+    const configuredRuntimeOrigins = runtimeConsoleConfig.parse(options.runtimeConfig);
 
     const body = (request: IncomingMessage) => readJson(request, maxBodyBytes);
     const requireActor = (context: AuthorizationAdapterContext) => {
@@ -259,9 +289,26 @@ export class AuthorizationHttpServer {
     };
     const handlers: Record<string, Handler> = {
       health: async () => ({ status: 200, body: { status: 'ready', service: 'authorization' } }),
+      'console.config': async () => ({ status: 200, body: configuredRuntimeOrigins }),
       'console.shell': async () => ({ status: 200, body: options.consoleAssets.shell }),
       'console.script': async () => ({ status: 200, body: options.consoleAssets.script }),
       'console.style': async () => ({ status: 200, body: options.consoleAssets.stylesheet }),
+      'case-handoff.mint': async (request, context) => {
+        const parsed = caseHandoffMintRequest.parse(await body(request));
+        const minted = await options.caseHandoffs.mint(parsed.case_id, requireActor(context));
+        return { status: 201, body: minted };
+      },
+      'case-handoff.redeem': async (request, context) => {
+        const parsed = caseHandoffRedeemRequest.parse(await body(request));
+        if (
+          parsed.handoff_id !== context.params['id'] ||
+          parsed.world_id !== context.worldId
+        ) {
+          return { status: 403, body: { error: 'handoff-refused' } };
+        }
+        const claim = await options.caseHandoffs.redeem(parsed, requireActor(context));
+        return { status: 200, body: claim };
+      },
       'proposal.submit': async (request, context) => {
         const parsed = proposalRequest.parse(await body(request));
         const result: RuleProposalResult = await options.authorization.ruleProposal({
@@ -479,6 +526,9 @@ export class AuthorizationHttpServer {
                 status: error.code === 'forbidden' ? 403 : 409,
                 body: { error: error.code },
               };
+            }
+            if (error instanceof CaseSessionHandoffError) {
+              return { status: 403, body: { error: 'handoff-refused' } };
             }
             throw error;
           }

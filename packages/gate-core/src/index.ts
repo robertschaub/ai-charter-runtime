@@ -24,6 +24,7 @@ export * from './walStore.js';
 export * from './policyLoader.js';
 export * from './evaluator.js';
 export * from './authorizationCore.js';
+export * from './caseSessionHandoff.js';
 export * from './authorizationHttpAdapter.js';
 export * from './authorizationProjection.js';
 export * from './authorizationReadSide.js';

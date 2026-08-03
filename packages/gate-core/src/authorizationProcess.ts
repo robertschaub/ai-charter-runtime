@@ -12,6 +12,7 @@ import {
   type ListeningAddress,
 } from './authorizationHttpServer.js';
 import { AuthorizationReadSide } from './authorizationReadSide.js';
+import { CaseSessionHandoffService } from './caseSessionHandoff.js';
 import { CardRegistry } from './cardRegistry.js';
 import {
   recordVerificationAccess,
@@ -22,7 +23,7 @@ import { digestFileSet } from './fileSetDigest.js';
 import { loadKeyring } from './keyring.js';
 import { loadPolicyFile } from './policyLoader.js';
 import { runRuntimeMaintenance } from './runtimeMaintenance.js';
-import { worldId } from './schemas/index.js';
+import { id, worldId } from './schemas/index.js';
 import { ServicesProbeHttpClient } from './servicesProbeHttpClient.js';
 import { WalStore } from './walStore.js';
 
@@ -105,13 +106,19 @@ export async function startAuthorizationProcess(
 ): Promise<AuthorizationProcessHandle> {
   const host = loopbackHost(env);
   const port = portFrom(env, 'AUTHZ_PORT', 7801);
+  const orchestratorPort = portFrom(env, 'ORCHESTRATOR_PORT', 7802);
   const servicesPort = portFrom(env, 'SERVICES_PORT', 7803);
   const servicesOrigin = loopbackOrigin(
     env['SERVICES_ORIGIN'] ?? `http://${host}:${servicesPort}`,
     'SERVICES_ORIGIN',
   );
+  const orchestratorOrigin = loopbackOrigin(
+    env['ORCHESTRATOR_ORIGIN'] ?? `http://${host}:${orchestratorPort}`,
+    'ORCHESTRATOR_ORIGIN',
+  );
   const maintenanceIntervalMs = intervalFrom(env);
   const world = worldId.parse(env['DEMO_WORLD_ID'] ?? 'w-demo');
+  const demoCaseId = id.parse(env['DEMO_CASE_ID'] ?? 'case_demo');
   const servicesProbeToken = credential(env, 'SERVICES_TOKEN_PROC_AUTHZ');
   const credentials: CredentialBinding[] = [
     { label: 'role:principal', token: credential(env, 'AUTHZ_TOKEN_PRINCIPAL'), worldId: world },
@@ -160,6 +167,13 @@ export async function startAuthorizationProcess(
     evaluatorBuildDigest: policy.evaluatorBuildDigest,
     deferRunHeader: true,
   });
+  const caseHandoffs = new CaseSessionHandoffService({
+    store,
+    worldId: world,
+    authorizationBootId: bootId,
+    targetOrigin: orchestratorOrigin,
+    caseExists: (caseId) => caseId === demoCaseId,
+  });
   let server: AuthorizationHttpServer | undefined;
   let maintenanceTimer: NodeJS.Timeout | undefined;
   let maintenancePromise: Promise<void> | undefined;
@@ -187,6 +201,7 @@ export async function startAuthorizationProcess(
     const recordVerification = await verifyCurrentRecords();
     store.beginRun();
     await recordVerificationAccess(store, recordVerification.readLengths);
+    await caseHandoffs.expireIssued();
     await servicesProbe.requireHealthy();
     const authorization = new AuthorizationCore({
       store,
@@ -206,6 +221,7 @@ export async function startAuthorizationProcess(
         policy,
         probe: (idempotencyKey) => servicesProbe.probe(idempotencyKey),
       });
+      await caseHandoffs.expireIssued();
     };
     await maintain();
     const adapter = new AuthorizationHttpAdapter({
@@ -221,7 +237,20 @@ export async function startAuthorizationProcess(
       worldId: world,
       verifyRecordLayer: verifyCurrentRecords,
     });
-    server = new AuthorizationHttpServer({ authorization, reads, adapter, keyring, consoleAssets, host, port });
+    server = new AuthorizationHttpServer({
+      authorization,
+      reads,
+      adapter,
+      keyring,
+      caseHandoffs,
+      runtimeConfig: {
+        authorization_origin: `http://${host}:${port}`,
+        orchestrator_origin: orchestratorOrigin,
+      },
+      consoleAssets,
+      host,
+      port,
+    });
     const address = await server.listen();
     const scheduleMaintenance = () => {
       if (maintenancePromise !== undefined || closed) return;

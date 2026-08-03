@@ -33,6 +33,7 @@
             Role
             <select id="role" name="role">
               <option value="principal">Principal</option>
+              <option value="case_officer">Case officer</option>
               <option value="applicant">Applicant</option>
             </select>
           </label>
@@ -55,6 +56,7 @@
 
       <nav class="view-tabs" aria-label="Console views">
         <button type="button" data-view="principal" aria-pressed="true">Principal governance</button>
+        <button type="button" data-view="case_officer" aria-pressed="false">Case session</button>
         <button type="button" data-view="applicant" aria-pressed="false">Applicant extract</button>
       </nav>
 
@@ -158,6 +160,23 @@
             <pre id="record-output" class="data-output tall" tabindex="0"></pre>
           </section>
         </div>
+      </section>
+
+      <section id="case-officer-view" class="view" aria-labelledby="case-officer-heading" hidden>
+        <h2 id="case-officer-heading">Case-session handoff</h2>
+        <p class="boundary-note">
+          This user-initiated control creates a short-lived authentication handoff for one configured
+          orchestrator window. It does not authorize a ruling, commitment, effect, or dialogue response.
+        </p>
+        <section class="panel">
+          <form id="case-session-form" class="inline-form">
+            <label>
+              Synthetic case id
+              <input id="case-id" value="case_demo" required pattern="[a-z0-9][a-z0-9_.:-]*">
+            </label>
+            <button id="open-case-session" type="submit" disabled>Open case session</button>
+          </form>
+        </section>
       </section>
 
       <section id="applicant-view" class="view" aria-labelledby="applicant-heading" hidden>

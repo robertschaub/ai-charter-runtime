@@ -1,12 +1,14 @@
 // SPDX-License-Identifier: MIT
 /** Authorization-origin governance console. No authority decision is made in this client. */
 
-export const CONSOLE_ROLES = ['principal', 'applicant'] as const;
+export const CONSOLE_ROLES = ['principal', 'case_officer', 'applicant'] as const;
 export type ConsoleRole = (typeof CONSOLE_ROLES)[number];
 
 const WORLD_ID = /^[a-z0-9][a-z0-9-]{0,31}$/;
 const OPAQUE_ID = /^[a-z0-9][a-z0-9_.:-]*$/;
 const TOKEN = /^[0-9a-fA-F]{64,}$/;
+const READY_TYPE = 'runtime.case-handoff.ready';
+const TRANSFER_TYPE = 'runtime.case-handoff.transfer';
 const WINDOWS_RESERVED = new Set([
   'con',
   'prn',
@@ -32,6 +34,21 @@ export interface ConsoleDeepLink {
   readonly kind: 'dialogue';
   readonly worldId: string;
   readonly escalationId: string;
+}
+
+export interface GovernanceRuntimeConfig {
+  readonly authorization_origin: string;
+  readonly orchestrator_origin: string;
+}
+
+interface MintedCaseHandoff {
+  readonly handoff_id: string;
+  readonly handoff_code: string;
+  readonly role: 'case_officer';
+  readonly world_id: string;
+  readonly case_id: string;
+  readonly target_origin: string;
+  readonly authorization_boot_id: string;
 }
 
 export function validWorldId(value: string): boolean {
@@ -75,6 +92,66 @@ interface ConsoleState {
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
+
+function exactOrigin(value: unknown): value is string {
+  if (typeof value !== 'string') return false;
+  try {
+    const parsed = new URL(value);
+    return (parsed.protocol === 'http:' || parsed.protocol === 'https:') && parsed.origin === value;
+  } catch {
+    return false;
+  }
+}
+
+export function parseGovernanceRuntimeConfig(value: unknown): GovernanceRuntimeConfig | null {
+  if (!isRecord(value) || Object.keys(value).length !== 2) return null;
+  if (!exactOrigin(value['authorization_origin']) || !exactOrigin(value['orchestrator_origin'])) return null;
+  return {
+    authorization_origin: value['authorization_origin'],
+    orchestrator_origin: value['orchestrator_origin'],
+  };
+}
+
+export function acceptsHandoffReady(
+  event: Pick<MessageEvent<unknown>, 'origin' | 'source' | 'data'>,
+  orchestratorOrigin: string,
+  expectedChild: WindowProxy,
+): boolean {
+  return (
+    event.origin === orchestratorOrigin &&
+    event.source === expectedChild &&
+    isRecord(event.data) &&
+    Object.keys(event.data).length === 1 &&
+    event.data['type'] === READY_TYPE
+  );
+}
+
+function parseMintedCaseHandoff(value: unknown, config: GovernanceRuntimeConfig): MintedCaseHandoff | null {
+  if (!isRecord(value) || Object.keys(value).length !== 8) return null;
+  if (
+    typeof value['handoff_id'] !== 'string' || !OPAQUE_ID.test(value['handoff_id']) ||
+    typeof value['handoff_code'] !== 'string' || !/^[0-9a-f]{64,}$/.test(value['handoff_code']) ||
+    value['role'] !== 'case_officer' ||
+    typeof value['world_id'] !== 'string' || !validWorldId(value['world_id']) ||
+    typeof value['case_id'] !== 'string' || !OPAQUE_ID.test(value['case_id']) ||
+    value['target_origin'] !== config.orchestrator_origin ||
+    typeof value['authorization_boot_id'] !== 'string' || !OPAQUE_ID.test(value['authorization_boot_id']) ||
+    typeof value['expires_at'] !== 'string'
+  ) {
+    return null;
+  }
+  return {
+    handoff_id: value['handoff_id'],
+    handoff_code: value['handoff_code'],
+    role: 'case_officer',
+    world_id: value['world_id'],
+    case_id: value['case_id'],
+    target_origin: value['target_origin'],
+    authorization_boot_id: value['authorization_boot_id'],
+  };
+}
+
+let runtimeConfig: GovernanceRuntimeConfig | null = null;
 
 function element<T extends HTMLElement>(id: string): T {
   const found = document.getElementById(id);
@@ -340,6 +417,74 @@ async function loadExtract(): Promise<void> {
   setActivity('Loaded the server-side applicant extract and local receipt.');
 }
 
+async function loadRuntimeConfig(): Promise<void> {
+  const response = await fetch('/console/runtime-config.json', {
+    cache: 'no-store',
+    credentials: 'omit',
+    redirect: 'error',
+    referrerPolicy: 'no-referrer',
+  });
+  const parsed = parseGovernanceRuntimeConfig(await response.json());
+  if (!response.ok || parsed === null || parsed.authorization_origin !== window.location.origin) {
+    throw new Error('invalid runtime console configuration');
+  }
+  runtimeConfig = parsed;
+  element<HTMLButtonElement>('open-case-session').disabled = false;
+}
+
+async function openCaseSession(): Promise<void> {
+  const state = currentState();
+  requireRole(state, 'case_officer');
+  const config = runtimeConfig;
+  if (config === null) throw new Error('runtime console configuration is not ready');
+  const caseId = element<HTMLInputElement>('case-id').value.trim();
+  if (!OPAQUE_ID.test(caseId)) throw new Error('enter a valid case id');
+
+  let child: WindowProxy | null = null;
+  let timeout = 0;
+  let removeReadyListener: () => void = () => undefined;
+  const ready = new Promise<void>((resolve, reject) => {
+    const onReady = (event: MessageEvent<unknown>) => {
+      if (child === null || !acceptsHandoffReady(event, config.orchestrator_origin, child)) return;
+      window.clearTimeout(timeout);
+      window.removeEventListener('message', onReady);
+      resolve();
+    };
+    removeReadyListener = () => window.removeEventListener('message', onReady);
+    window.addEventListener('message', onReady);
+    timeout = window.setTimeout(() => {
+      window.removeEventListener('message', onReady);
+      reject(new Error('case-session window did not become ready'));
+    }, 30_000);
+  });
+  child = window.open(`${config.orchestrator_origin}/console/handoff`, '_blank');
+  if (child === null) {
+    window.clearTimeout(timeout);
+    removeReadyListener();
+    throw new Error('case-session window was blocked');
+  }
+
+  return (async () => {
+    try {
+      await ready;
+      const raw = await apiRequest(
+        state,
+        consoleApiPath(state.worldId, 'case-session-handoffs'),
+        { method: 'POST', body: { case_id: caseId } },
+      );
+      const handoff = parseMintedCaseHandoff(raw, config);
+      if (handoff === null || handoff.world_id !== state.worldId || handoff.case_id !== caseId) {
+        throw new Error('authorization service returned an invalid handoff');
+      }
+      child?.postMessage({ type: TRANSFER_TYPE, ...handoff }, config.orchestrator_origin);
+      setActivity('One-time case-session handoff transferred to the exact orchestrator window.');
+    } catch (error) {
+      child?.close();
+      throw error;
+    }
+  })();
+}
+
 function reportError(error: unknown): void {
   const message = error instanceof Error ? error.message : 'unexpected console error';
   setActivity(`Request refused: ${message}`);
@@ -347,6 +492,7 @@ function reportError(error: unknown): void {
 
 function setView(view: ConsoleRole): void {
   element<HTMLElement>('principal-view').hidden = view !== 'principal';
+  element<HTMLElement>('case-officer-view').hidden = view !== 'case_officer';
   element<HTMLElement>('applicant-view').hidden = view !== 'applicant';
   for (const button of document.querySelectorAll<HTMLButtonElement>('[data-view]')) {
     button.setAttribute('aria-pressed', String(button.dataset['view'] === view));
@@ -414,6 +560,8 @@ export function mountGovernanceConsole(): void {
   );
   element<HTMLButtonElement>('load-records').addEventListener('click', () => void loadRecords().catch(reportError));
   element<HTMLButtonElement>('load-extract').addEventListener('click', () => void loadExtract().catch(reportError));
+  wireForm('case-session-form', openCaseSession);
+  void loadRuntimeConfig().catch(reportError);
 }
 
 if (typeof document !== 'undefined') {

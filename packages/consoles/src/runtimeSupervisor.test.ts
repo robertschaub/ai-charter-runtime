@@ -12,6 +12,7 @@ const baseKeys = [
   'ORCHESTRATOR_PORT',
   'SERVICES_PORT',
   'DEMO_WORLD_ID',
+  'DEMO_CASE_ID',
   'RUNTIME_RECORDS_ROOT',
   'SWEEP_INTERVAL_MS',
 ];
@@ -34,6 +35,7 @@ describe('runtime supervisor credential custody', () => {
       ORCHESTRATOR_PORT: '17802',
       SERVICES_PORT: '17803',
       DEMO_WORLD_ID: 'w-demo',
+      DEMO_CASE_ID: 'case_demo',
       RUNTIME_RECORDS_ROOT: 'synthetic-records',
       SWEEP_INTERVAL_MS: '5000',
       RUNTIME_CHECKPOINTS_ROOT: 'synthetic-checkpoints',

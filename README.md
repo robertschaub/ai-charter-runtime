@@ -45,7 +45,7 @@ The exact upstream revision, digest, reviewed runtime baseline, and remaining mi
 | `packages/gate-core/` | Authorization service — the independent gate (AGPL-3.0-only) | M2 |
 | `packages/adapters/` | OpenAI-compatible model adapters (MIT) | M3 |
 | `packages/services-mock/` | Executing services with commitment verification (MIT) | M3 |
-| `packages/consoles/` | M3 deterministic loop, M4 orchestrator process, and authorization-origin governance-console assets (MIT) | M3–M4 |
+| `packages/consoles/` | M3 deterministic loop, M4 orchestrator process, governance console, and case-session handoff assets (MIT) | M3–M4 |
 | `fixtures/` | Synthetic grant-scenario data and pinned test fixtures (MIT) | M3+ |
 
 Licensing is per-directory — see [LICENSE.md](LICENSE.md).
@@ -79,10 +79,13 @@ use `127.0.0.1` by default.
 The authorization-origin read-side APIs now serve strict ruling, model-card, mandate, escalation,
 record-verification, chain-view, and applicant-extract projections. The governance console at
 `http://127.0.0.1:7801/console` now provides the principal mandate/card/escalation/record surfaces and the
-applicant extract. It has no third-party content, emits no CORS headers, stores a pasted role token only in
-that origin's `localStorage`, and presents evidence rather than an assurance signal. The case console,
-credential-bearing dialogue response control, and approved one-time browser credential handoff are not yet
-built; their pinned protocol and order are recorded in the implementation plan.
+applicant extract, plus the case officer's user-initiated handoff control. It has no third-party content,
+emits no CORS headers, stores a pasted role token only in that origin's `localStorage`, and presents evidence
+rather than an assurance signal. The handoff opens the fixed orchestrator-origin receiver, consumes a
+maximum-30-second boot-bound code over the authenticated process channel, and creates an independent
+maximum-15-minute session whose raw bearer is kept only in that tab's `sessionStorage`. The case-console
+model picker, credential-bearing dialogue response control, outcome polling, and raw-API beat remain the
+next M4 implementation slice; M5 remains blocked.
 
 Offline and deterministic verification uses synthetic records and skips only the remote-presence step:
 

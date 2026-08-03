@@ -4,6 +4,7 @@ import type { z } from 'zod';
 
 import { digestFor, verifyDigest } from './hash.js';
 import type {
+  CaseSessionHandoffRecord,
   CommitmentRecord,
   EffectRecord,
   EscalationRecord,
@@ -47,6 +48,7 @@ export interface WorldState {
   readonly mandateStatus: Map<string, MandateRuntimeStatus>;
   readonly proposals: Map<string, FrozenProposal>;
   readonly proposalByHash: Map<string, string>;
+  readonly caseSessionHandoffs: Map<string, CaseSessionHandoffRecord>;
   readonly nonces: Map<string, NonceRecord>;
   readonly reservations: Map<string, ReservationRecord>;
   readonly rulings: Map<string, GateRuling>;
@@ -75,6 +77,7 @@ export function createWorldState(worldId: string): WorldState {
     mandateStatus: new Map(),
     proposals: new Map(),
     proposalByHash: new Map(),
+    caseSessionHandoffs: new Map(),
     nonces: new Map(),
     reservations: new Map(),
     rulings: new Map(),
@@ -100,6 +103,7 @@ export function cloneWorldState(state: WorldState): WorldState {
     mandateStatus: new Map(state.mandateStatus),
     proposals: new Map(state.proposals),
     proposalByHash: new Map(state.proposalByHash),
+    caseSessionHandoffs: new Map(state.caseSessionHandoffs),
     nonces: new Map(state.nonces),
     reservations: new Map(state.reservations),
     rulings: new Map(state.rulings),
@@ -200,6 +204,50 @@ export function applyWorldOp(state: WorldState, op: WalOp, transactionTimestamp:
       }
       state.proposals.set(op.proposal.proposal_id, op.proposal);
       state.proposalByHash.set(op.proposal.proposal_hash, op.proposal.proposal_id);
+      break;
+    }
+    case 'case_session_handoff.issue': {
+      requireWorld(state, op.handoff, 'case-session handoff');
+      if (op.handoff.state !== 'issued' || op.handoff.consumed_at !== null) {
+        fail('illegal-initial-state', 'a new case-session handoff must be issued and unconsumed');
+      }
+      requireUnique(
+        state.caseSessionHandoffs,
+        op.handoff.handoff_id,
+        `case-session handoff ${op.handoff.handoff_id}`,
+      );
+      state.caseSessionHandoffs.set(op.handoff.handoff_id, op.handoff);
+      break;
+    }
+    case 'case_session_handoff.consume': {
+      const current = requireValue(
+        state.caseSessionHandoffs,
+        op.handoff_id,
+        `case-session handoff ${op.handoff_id}`,
+      );
+      if (current.state !== 'issued') {
+        fail('illegal-transition', `case-session handoff ${op.handoff_id}: ${current.state} -> consumed`);
+      }
+      if (op.consumed_at !== transactionTimestamp) {
+        fail('binding-mismatch', 'handoff consumption must use the transaction timestamp');
+      }
+      state.caseSessionHandoffs.set(op.handoff_id, {
+        ...current,
+        state: 'consumed',
+        consumed_at: op.consumed_at,
+      });
+      break;
+    }
+    case 'case_session_handoff.expire': {
+      const current = requireValue(
+        state.caseSessionHandoffs,
+        op.handoff_id,
+        `case-session handoff ${op.handoff_id}`,
+      );
+      if (current.state !== 'issued') {
+        fail('illegal-transition', `case-session handoff ${op.handoff_id}: ${current.state} -> expired`);
+      }
+      state.caseSessionHandoffs.set(op.handoff_id, { ...current, state: 'expired' });
       break;
     }
     case 'nonce.issue': {

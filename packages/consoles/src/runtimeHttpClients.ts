@@ -6,12 +6,40 @@ import {
   frozenProposal,
   id,
   proposalRulingProjection,
+  browserOrigin,
+  timestamp,
+  worldId,
   type EffectIntent,
   type FrozenProposal,
   type ProposalRulingProjection,
 } from 'gate-core';
 import type { ServicesHostExecution } from 'services-mock';
 import { z } from 'zod';
+
+const handoffRedeemInput = z
+  .object({
+    handoff_id: id,
+    handoff_code: z.string().regex(/^[0-9a-f]{64,}$/),
+    role: z.literal('case_officer'),
+    world_id: worldId,
+    case_id: id,
+    target_origin: browserOrigin,
+    authorization_boot_id: id,
+  })
+  .strict();
+const handoffClaim = z
+  .object({
+    handoff_id: id,
+    role: z.literal('case_officer'),
+    world_id: worldId,
+    case_id: id,
+    target_origin: browserOrigin,
+    authorization_boot_id: id,
+    consumed_at: timestamp,
+  })
+  .strict();
+export type HandoffRedeemInput = z.infer<typeof handoffRedeemInput>;
+export type HandoffClaim = z.infer<typeof handoffClaim>;
 
 async function responseJson(response: Response, maxBytes: number): Promise<unknown> {
   const declared = response.headers.get('content-length');
@@ -89,6 +117,16 @@ export class OrchestratorAuthorizationHttpClient extends JsonHttpClient {
         service,
         action_class: actionClass,
       }),
+    );
+  }
+
+  async redeemCaseSessionHandoff(input: HandoffRedeemInput): Promise<HandoffClaim> {
+    const parsed = handoffRedeemInput.parse(input);
+    return handoffClaim.parse(
+      await this.post(
+        `/w/${parsed.world_id}/case-session-handoffs/${parsed.handoff_id}/redeem`,
+        parsed,
+      ),
     );
   }
 }

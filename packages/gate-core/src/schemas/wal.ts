@@ -9,6 +9,7 @@ import { frozenProposal } from './proposal.js';
 import { accessChainEntry, recordEntry } from './record.js';
 import { gateRuling } from './ruling.js';
 import {
+  caseSessionHandoffRecord,
   commitmentRecord,
   effectRecord,
   escalationRecord,
@@ -25,6 +26,10 @@ const transitionReason = z.string().min(1);
 
 export const walOp = z.discriminatedUnion('op', [
   z.object({ op: z.literal('proposal.freeze'), proposal: frozenProposal }).strict(),
+
+  z.object({ op: z.literal('case_session_handoff.issue'), handoff: caseSessionHandoffRecord }).strict(),
+  z.object({ op: z.literal('case_session_handoff.consume'), handoff_id: id, consumed_at: timestamp }).strict(),
+  z.object({ op: z.literal('case_session_handoff.expire'), handoff_id: id }).strict(),
 
   z.object({ op: z.literal('nonce.issue'), nonce: nonceRecord }).strict(),
   z.object({ op: z.literal('nonce.consume'), nonce_id: id }).strict(),

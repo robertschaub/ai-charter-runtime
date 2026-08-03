@@ -220,6 +220,44 @@ describe('ADR-002 authorization HTTP adapter', () => {
     expect(store.snapshot().accessRecords).toHaveLength(2);
   });
 
+  it('keeps handoff mint and redemption roles disjoint and origin-guards non-authority redemption', async () => {
+    const { adapter, store } = setup();
+    const operation = vi.fn(async () => ({ status: 200, body: { ok: true } }));
+    await expect(
+      adapter.dispatch(
+        {
+          method: 'POST',
+          pathname: '/w/w-demo/case-session-handoffs',
+          authorization: `Bearer ${'4'.repeat(64)}`,
+        },
+        operation,
+      ),
+    ).resolves.toMatchObject({ status: 403, body: { error: 'forbidden' } });
+    await expect(
+      adapter.dispatch(
+        {
+          method: 'POST',
+          pathname: '/w/w-demo/case-session-handoffs/handoff_one/redeem',
+          authorization: `Bearer ${'2'.repeat(64)}`,
+        },
+        operation,
+      ),
+    ).resolves.toMatchObject({ status: 403, body: { error: 'forbidden' } });
+    await expect(
+      adapter.dispatch(
+        {
+          method: 'POST',
+          pathname: '/w/w-demo/case-session-handoffs/handoff_one/redeem',
+          authorization: `Bearer ${'4'.repeat(64)}`,
+          origin: 'null',
+        },
+        operation,
+      ),
+    ).resolves.toMatchObject({ status: 403, body: { error: 'forbidden' } });
+    expect(operation).not.toHaveBeenCalled();
+    expect(store.snapshot().accessRecords).toHaveLength(3);
+  });
+
   it('passes an allowed process identity to the operation without exposing its token', async () => {
     const { adapter, store } = setup();
     const operation = vi.fn(async (context) => ({ status: 200, body: { actor: context.actor?.credential } }));
@@ -277,6 +315,12 @@ describe('ADR-002 authorization HTTP adapter', () => {
     await expect(adapter.dispatch({ method: 'GET', pathname: '/console/styles.css' }, consoleOperation)).resolves.toMatchObject({
       status: 200,
       body: { params: {}, routeId: 'console.style' },
+    });
+    await expect(
+      adapter.dispatch({ method: 'GET', pathname: '/console/runtime-config.json' }, consoleOperation),
+    ).resolves.toMatchObject({
+      status: 200,
+      body: { params: {}, routeId: 'console.config' },
     });
     const recordOperation = vi.fn(async ({ params }) => ({ status: 200, body: { params } }));
     await expect(

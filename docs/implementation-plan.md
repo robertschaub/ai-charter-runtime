@@ -47,10 +47,10 @@ distinguish an uncommitted latest checkpoint from confirmed remote rollback or m
 | Milestone | Runtime status | Evidence boundary |
 |---|---|---|
 | M0 — probe | Baseline artifacts implemented | Live re-probing remains approval-gated; existing evidence is not silently refreshed. |
-| M1 — protocol before schemas | Implemented and amended | ADRs, schemas, canonicalization, key handling, record chains, authenticated-interface contracts, and the approved case-session handoff contract are present; its M4 implementation remains pending. |
+| M1 — protocol before schemas | Implemented and amended | ADRs, schemas, canonicalization, key handling, record chains, authenticated-interface contracts, and the approved case-session handoff contract are present. |
 | M2 — transactional core | Implemented and fault-tested | Authorization remains the single durable serialization point; authority defects fail closed. |
 | M3 — vertical slice | Implemented | Deterministic authorize → propose → rule → commit-verify → effect → receipt path, adapters, service ledger, and signed cards are present. |
-| M4 — escalation + governance console | **In progress** | Escalation/core, native-process lifecycle, read-side handlers, and the authorization-origin governance console are implemented and reviewed; handoff and case-console work remains. |
+| M4 — escalation + governance console | **In progress** | Escalation/core, native-process lifecycle, read-side handlers, and the authorization-origin governance console are implemented and reviewed; the handoff/session implementation awaits exact-SHA review, and case-console functionality remains. |
 | M5 — screening + empathy + switching | **Blocked** | Do not begin until M4 is complete and reviewed. |
 | M6–M7 | Not started | Full capture/publication work follows the implementation milestones. |
 
@@ -98,11 +98,25 @@ review. Test-family coverage continues to be reported as exercised, partial, or 
   refusal, principal card projection, credential absence, and preservation of the three-process authority
   boundary.
 
+### Implemented in the current tranche; exact-SHA review pending
+
+- Authorization-owned, digest-only `issued`/`consumed`/`expired` handoff state bound to role, world, case,
+  configured orchestrator origin, and authorization boot id; single-use redemption and expiry share the
+  world's WAL serialization point, and prior-boot issued values expire before the listener binds.
+- Exact same-origin runtime configuration on both origins, a user-gesture popup before mint, reciprocal
+  `event.origin` plus `event.source` checks, strict one-shot messages, exact `targetOrigin`, opener severing,
+  and no credential in a URL, cookie, `localStorage`, rendered output, or error message.
+- Process-authenticated backchannel redemption followed by an independent orchestrator-generated browser
+  bearer stored digest-only in process memory and raw only in the tab's `sessionStorage`; world/case/role
+  scope, maximum lifetimes, explicit close, expiry, and orchestrator-restart invalidation are enforced.
+- Unit and real-listener adversarial coverage for role, world, case, origin, target-window, boot, digest,
+  expiry, replay, concurrent redemption, missing process authentication, both process restarts, static versus
+  dynamic credential rejection, strict assets/configuration, and absence of raw credentials from records and
+  process output.
+
 ### Remaining before M4 can be called complete
 
-1. Implement the approved browser handoff and dynamic case-session protocol below, including exact-origin
-   messaging, atomic single-use redemption, restart/expiry/replay tests, and strict separation from the
-   headless derived credential.
+1. Obtain an independent adversarial review of the exact committed SHA for the handoff/session tranche.
 2. Implement the case-console model picker, credential-bearing authorization-origin dialogue control,
    authoritative deep link, two-hop outcome polling, and the HTTP-level raw-API bypass beat without moving
    authority into the UI.
@@ -121,13 +135,14 @@ Expiry, replay, concurrent redemption, binding mismatch, or either process resta
 ADR-002 and ADR-004 freeze the route, custody, origin, and dialogue-boundary mechanics. The existing
 `ORCHESTRATOR_TOKEN_CASE_OFFICER` remains only a headless synthetic-test seam: browser case routes must reject
 it, and the dynamic browser session must be rejected on the headless route and every authority-bearing
-authorization route. The protocol is specified but not yet implemented.
+authorization route. The bounded handoff and session implementation is now present; its exact committed SHA
+must receive independent adversarial review before this ledger moves it into the reviewed baseline.
 
 ## Ordered next slices
 
-1. **Handoff and case-session implementation** — durable boot-bound mint/consume state, exact-window browser
-   transfer, authenticated backchannel redemption, in-memory case sessions, logout/expiry/restart behaviour,
-   and the complete adversarial matrix from ADR-002.
+1. **Review the implemented handoff and case-session tranche** — exact-SHA adversarial review of the durable
+   boot-bound lifecycle, exact-window transfer, authenticated backchannel, in-memory session boundary, and
+   its adversarial matrix.
 2. **Case console and dialogue control** — model picker, authorization-origin response control, safe dialogue
    link, two-hop polling, and the raw-API beat.
 3. **M4 acceptance pass** — named demo beats and adversarial families, honest coverage ledger, and exact-SHA
