@@ -11,6 +11,7 @@ import {
   accessEntry,
   cardRevocation,
   commitToken,
+  escalationRecord,
   frozenProposal,
   gateRuling,
   interventionContract,
@@ -376,6 +377,7 @@ describe('schemas — accept the shapes the ADRs specify', () => {
             content_digest: DIGEST,
           },
           answer_digest: DIGEST,
+          scope: { item_ref: 'inf_7', applies_to: 'this_case_only' },
         },
       },
       {
@@ -401,6 +403,43 @@ describe('schemas — accept the shapes the ADRs specify', () => {
       const parsed = recordEvent.safeParse(event);
       expect(parsed.success, JSON.stringify(parsed.error?.issues)).toBe(true);
     }
+
+    const historicalDialogueResponse = recordEvent.parse({
+      event: 'human_intervention_event',
+      escalation_id: 'esc_legacy',
+      payload: {
+        kind: 'dialogue_response_recorded',
+        disposition: 'confirm',
+        responder_role: 'case_officer',
+        evidence_ref: null,
+        answer_digest: null,
+      },
+    });
+    if (
+      historicalDialogueResponse.event !== 'human_intervention_event' ||
+      historicalDialogueResponse.payload.kind !== 'dialogue_response_recorded'
+    ) {
+      throw new Error('expected historical dialogue response');
+    }
+    expect(historicalDialogueResponse.payload.scope).toBeUndefined();
+  });
+
+  it('replays a historical M4 escalation without inventing case scope', () => {
+    expect(
+      escalationRecord.parse({
+        world_id: 'w-demo',
+        escalation_id: 'esc_legacy',
+        ruling_id: 'rul_legacy',
+        source_commitment_id: null,
+        frozen_proposal_hash: DIGEST,
+        contract: validContract(),
+        opened_at: '2026-08-01T09:00:00.000Z',
+        expires_at: '2026-08-01T09:15:00.000Z',
+        state: 'disposed',
+        terminal_disposition: 'confirm',
+        successor_ruling_id: null,
+      }).case_id,
+    ).toBeNull();
   });
 
   it('the split-custody record entry and the access-log entry', () => {

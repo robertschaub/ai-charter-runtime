@@ -20,7 +20,7 @@ import {
   reservationRecord,
   reviewObligation,
 } from './state.js';
-import { storeItem } from './store.js';
+import { conversationStoreEntry } from './store.js';
 
 const transitionReason = z.string().min(1);
 
@@ -104,8 +104,8 @@ export const walOp = z.discriminatedUnion('op', [
     .strict(),
   z.object({ op: z.literal('policy.reload'), policy: policyActivation }).strict(),
 
-  z.object({ op: z.literal('store.put'), item: storeItem }).strict(),
-  z.object({ op: z.literal('store.remove'), item_id: id, reason: transitionReason }).strict(),
+  z.object({ op: z.literal('store.put'), entry: conversationStoreEntry }).strict(),
+  z.object({ op: z.literal('store.remove'), case_id: id, item_id: id, reason: transitionReason }).strict(),
   z.object({ op: z.literal('pattern.record'), event: patternEvent }).strict(),
   z.object({ op: z.literal('model.select'), selection: modelSelectionRecord }).strict(),
   z.object({ op: z.literal('review.open'), obligation: reviewObligation }).strict(),

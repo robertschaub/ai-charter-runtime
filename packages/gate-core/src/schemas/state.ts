@@ -135,6 +135,8 @@ export const escalationRecord = z
   .object({
     world_id: worldId,
     escalation_id: id,
+    /** Required on dialogue escalations so a response cannot update another case. */
+    case_id: id.nullable().default(null),
     ruling_id: id,
     /** Null for a ruling escalation; set when an unknown commitment opens recovery. */
     source_commitment_id: id.nullable().default(null),

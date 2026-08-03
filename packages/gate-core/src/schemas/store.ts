@@ -10,7 +10,7 @@
  */
 import { z } from 'zod';
 
-import { id, modelId, sortedRestrictionTags } from './common.js';
+import { id, modelId, sortedRestrictionTags, worldId } from './common.js';
 
 export const STORES = ['said', 'inferred', 'confirmed', 'permitted'] as const;
 export const store = z.enum(STORES);
@@ -66,3 +66,20 @@ export const storeItem = z
   });
 
 export type StoreItem = z.infer<typeof storeItem>;
+
+/**
+ * M5.1: the authorization-owned durable envelope around a four-store item.
+ *
+ * `case_id` is protocol scope rather than model-authored content. Keeping it outside
+ * `storeItem` lets the same immutable item shape remain embedded in frozen proposals
+ * while the WAL and replay state can reject cross-case references.
+ */
+export const conversationStoreEntry = z
+  .object({
+    world_id: worldId,
+    case_id: id,
+    item: storeItem,
+  })
+  .strict();
+
+export type ConversationStoreEntry = z.infer<typeof conversationStoreEntry>;

@@ -3,6 +3,12 @@
 
 **Status:** accepted (M1, 2026-08-01). **Spec:** §5 (model navigation; per-provider projections), §4 (structured proposal; screening signal; model card), §7 beats 19–21.
 
+**Amendment (M5.1 conversation custody and projection core, 2026-08-03):** authorization durably wraps each
+item in `{world_id, case_id, item}`. The wrapper is protocol scope, not model-authored content; the embedded
+item shape remains the one used in frozen proposals. Dialogue transitions require an exact case/item match
+against both the durable store and the frozen source proposal. Projection and tag union are implemented as
+pure deterministic operations, but no provider call or case-message route is opened in this slice.
+
 ## Context
 Derived content inherits the **union of the restriction tags** of its inputs — a set over confidentiality, purpose and recipient, not a scalar level. Projection to a provider is a subset check against the mandate ∩ card permissions for that provider's **role** (acting or screening); membership in the approved-model set authorizes acting, not blanket disclosure.
 
@@ -41,6 +47,12 @@ Items in `said`, `confirmed`, and `permitted` additionally carry **`origin_actor
 
 Original items get their tags at the **entry boundary**, from source configuration — published criteria `conf:public`; registry reads `conf:case`; applicant-uploaded documents `conf:case` (plus `conf:sensitive` where the fixture marks it); the officer's typed notes per case default. Tags are never taken from model output.
 
+The durable authorization state stores a case-scoped envelope around each item. Item ids are unique within
+the world; replay refuses an id rebound to different content or another case. The M5.1 process startup seam
+loads only the checked-in synthetic demo fixture under the authorization-process credential. No browser or
+orchestrator route can seed or rewrite the store. Corrections and narrowing remove an item only from the
+active materialized case view; the append-only WAL preserves the earlier value and the reason for removal.
+
 ### 4. Union propagation is turn-level
 A *turn* is one model call (request→response) or one tool-output ingestion. Every item created from that turn carries `U = ⋃ tags(items in that turn's projection) ∪ tags imposed by the source`.
 
@@ -68,6 +80,12 @@ Every projection records a summary in the ruling's evidence refs (no new record 
 ```
 
 A switch additionally invalidates all prior rulings by the §4 binding rule (acting-model id is in the binding tuple).
+
+M5.1 implements the pure projection core and its fixed output schema: one world, one case, one card slug and
+role, included whole items, and an exact summary of dropped ids and unmet tags. Its clearance input must be
+the server-resolved mandate and card sets; the core computes their intersection rather than accepting an
+effective set from its caller. Wiring that projection across the authenticated process boundary belongs to
+the next M5 slice; accepting caller-supplied effective clearance would be an authority bypass.
 
 ### 6. Screening projections
 Screening carries the same tags and the same check, against the **screening-role** clearance set — permission to screen is not permission to act. Order: minimize first (the suspect input item only, not the case file), then subset-check. If the suspect item is not disclosable to any configured screening provider, no call is made and `screening_skipped: disclosure_restricted` is recorded. Because a signal can only raise and never allow, the deterministic rules simply stand — except where the policy file marks screening as **required** for that action class, in which case the missing check escalates (fail closed).

@@ -10,6 +10,14 @@ handoff authenticates entry to the orchestrator-origin case console without tran
 does not alter this dialogue channel: answers still post directly from the authorization-origin control
 under the responder's own role token, and the case-session claim has no standing there.
 
+**Amendment (M5.1 conversation transition, 2026-08-03):** every disposition that changes conversation
+state (`confirm`, `correct`, `narrow`, or `permit`) now requires the exact case-only `scope.item_ref`. The
+dialogue escalation is bound to a server-validated case id when it opens; at response time authorization
+requires the referenced item to be active in that case and canonically equivalent to an item in the frozen
+source proposal. The response event, ruling invalidation, escalation consumption, and resulting four-store
+operations are one WAL transaction. Historical M4 events without a scope remain replayable but cannot be
+used to create an M5 state transition.
+
 ## Context
 A dialogue trigger is an ordinary escalation routed to the conversation partner — same single-use state machine, same six-field intervention contract — but two boundary rules constrain the channel. The answer posts **directly from the browser to the authorization service** under the responder's role token, from a control served by the **authorization service's own origin**, so the orchestrator neither serves the credential-bearing control nor carries the answer. And standing is **evidentiary, not managerial**: a responder answers only within their own standing; a third party's facts are resolved by cited evidence or routed to that party, never by bare assertion.
 
@@ -56,7 +64,9 @@ both carry the escalation id and must match.
 - `escalation_id` in path and body must match (else `400`) — the body echo binds the payload to the target.
 - `answer_text` is required for `correct` and `narrow`, optional otherwise; it enters the `said` store as the responder's testimony.
 - `evidence_ref` is **required for `confirm` when the escalation's standing class is `third-party-fact`**, and must resolve against the mock registry read service.
-- `scope` is required for `permit` (what may be remembered, revocably) and for `narrow`.
+- `scope` is required for every state-changing response: `confirm`, `correct`, `narrow`, and `permit`. It
+  binds the transition to one active item in this case; a missing, foreign-case, or proposal-mismatched item
+  is refused while the escalation stays open.
 
 **Deviation, flagged:** the leaning's five-value set is extended with `route`. Beat 4 requires that confirmation of a third party's fact be satisfiable by "cited evidence **or** routing to the applicant", and `abstain` does not carry that obligation — it leaves nothing pending, whereas `route` opens a recorded routing obligation and a fresh escalation to the named role. Without it the refusal path has no affirmative exit.
 
@@ -76,7 +86,19 @@ Enforcement is in the **endpoint**, not the UI, because beat 17's raw API client
 The console renders only permitted dispositions enabled; the endpoint is the authority.
 
 ### 6. Next states
-`confirm` / `correct` → a new proposal revision that re-runs the gates (confirmation writes to the `confirmed` store with its scope and the cited evidence; correction updates the current case only, never persistent memory). `narrow` → new proposal revision with the narrowed scope. `permit` → an entry in the revocable `permitted` store, then re-run. `abstain` → the item stays unconfirmed, uncertainty carried forward; the Stop remains unless a declared reversible fallback within existing authority exists. `route` → recorded routing obligation plus a fresh escalation to the named role; the case parks. No dialogue disposition ever issues an `allow` ruling directly.
+`confirm` / `correct` → a new proposal revision that re-runs the gates. Confirmation writes a case-scoped
+`confirmed` item derived from the referenced inference; correction records the responder's `said` item and
+removes the corrected item from the active case projection without deleting its WAL history. `narrow`
+records the responder's `said` item and removes the superseded active item before a revised proposal is
+prepared. `permit` → a case-scoped entry in the revocable `permitted` store, then re-run. `abstain` → the
+item stays unconfirmed, uncertainty carried forward; the Stop remains unless a declared reversible fallback
+within existing authority exists. `route` → recorded routing obligation plus a fresh escalation to the named
+role; the case parks. No dialogue disposition ever issues an `allow` ruling directly.
+
+The answer text is durable only inside the authorization-owned conversation-store WAL entry. The action
+record carries its digest, scope, responder role, and resolved evidence; the HTTP response returns none of
+the answer. M5.1 does not expose a provider projection route or open the case-message endpoint, which remains
+`501 model-interaction-not-active` until the later M5 transport and output-control slices are reviewed.
 
 **Timeout is decided by the authorization service**, atomically, against the contract's response bound — never by the browser or the orchestrator, so no client clock can manufacture one. Default is the declared `abstain` or `narrow`; never proceed.
 

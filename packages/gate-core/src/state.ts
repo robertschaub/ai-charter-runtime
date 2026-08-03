@@ -6,6 +6,7 @@ import { digestFor, verifyDigest } from './hash.js';
 import type {
   CaseSessionHandoffRecord,
   CommitmentRecord,
+  ConversationStoreEntry,
   EffectRecord,
   EscalationRecord,
   FrozenProposal,
@@ -18,7 +19,6 @@ import type {
   RecordEntry,
   ReservationRecord,
   ReviewObligation,
-  StoreItem,
   WalOp,
 } from './schemas/index.js';
 import type { accessChainEntry } from './schemas/record.js';
@@ -56,7 +56,7 @@ export interface WorldState {
   readonly effects: Map<string, EffectRecord>;
   readonly effectByIdempotencyKey: Map<string, string>;
   readonly escalations: Map<string, EscalationRecord>;
-  readonly storeItems: Map<string, StoreItem>;
+  readonly storeItems: Map<string, ConversationStoreEntry>;
   readonly patternEvents: PatternEvent[];
   readonly modelSelections: ModelSelectionRecord[];
   readonly reviews: Map<string, ReviewObligation>;
@@ -605,13 +605,18 @@ export function applyWorldOp(state: WorldState, op: WalOp, transactionTimestamp:
       state.policy = op.policy;
       break;
     case 'store.put':
-      requireUnique(state.storeItems, op.item.id, `store item ${op.item.id}`);
-      state.storeItems.set(op.item.id, op.item);
+      requireWorld(state, op.entry, 'conversation store entry');
+      requireUnique(state.storeItems, op.entry.item.id, `store item ${op.entry.item.id}`);
+      state.storeItems.set(op.entry.item.id, op.entry);
       break;
-    case 'store.remove':
-      requireValue(state.storeItems, op.item_id, `store item ${op.item_id}`);
+    case 'store.remove': {
+      const current = requireValue(state.storeItems, op.item_id, `store item ${op.item_id}`);
+      if (current.case_id !== op.case_id) {
+        fail('case-mismatch', `store item ${op.item_id} belongs to ${current.case_id}, not ${op.case_id}`);
+      }
       state.storeItems.delete(op.item_id);
       break;
+    }
     case 'pattern.record':
       requireWorld(state, op.event, 'pattern event');
       if (state.patternEvents.some((event) => event.event_id === op.event.event_id)) {

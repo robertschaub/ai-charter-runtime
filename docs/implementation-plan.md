@@ -3,7 +3,7 @@
 
 **Status date:** 2026-08-03
 
-**Current milestone:** M4 complete; M5 is unblocked for planning and has not begun.
+**Current milestone:** M4 complete; M5 implementation is in progress.
 
 This file tracks implementation status and sequencing in `ai-charter-runtime`. It does not replace or
 reinterpret the authoritative specification. On divergence, the specification and its linked Charter
@@ -54,7 +54,7 @@ distinguish an uncommitted latest checkpoint from confirmed remote rollback or m
 | M2 — transactional core | Implemented and fault-tested | Authorization remains the single durable serialization point; authority defects fail closed. |
 | M3 — vertical slice | Implemented | Deterministic authorize → propose → rule → commit-verify → effect → receipt path, adapters, service ledger, and signed cards are present. |
 | M4 — escalation + governance console | **Complete** | Final exact-SHA review of `e326562` returned GO with no findings; the offline acceptance ledger preserves the remaining partial and not-assessed boundaries. |
-| M5 — screening + empathy + switching | **Not started; planning unblocked** | M4's completion gate is satisfied. No M5 implementation has begun. |
+| M5 — screening + empathy + switching | **In progress** | M5.1 implements the authorization-owned, case-scoped conversation transition and deterministic projection core while model ingress remains closed. |
 | M6–M7 | Not started | Full capture/publication work follows the implementation milestones. |
 
 These labels describe repository implementation status, not assurance, certification, or independent
@@ -173,6 +173,32 @@ Independent adversarial review returned **GO — no findings**. The reviewed val
 The required exact-SHA adversarial review returned GO at `e326562`. M4 is complete. This closes the M4 review
 cycle and permits M5 planning; it does not itself start M5 implementation.
 
+## M5 implementation ledger
+
+### M5.1 review candidate — authoritative conversation transition and projection core
+
+- Authorization owns the durable, case-scoped four-store state. Its process startup may seed only the
+  checked-in synthetic fixture through an authorization-process-only core seam; no HTTP route accepts store
+  writes or caller-selected clearances.
+- A dialogue escalation is bound to one case. `confirm`, `correct`, `narrow`, and `permit` require an exact
+  case-only item reference that is both active in that case and canonically present in the frozen proposal.
+  The authorization server injects its configured case binding; the orchestrator cannot select it.
+- The response record, ruling invalidation, escalation consumption, and all resulting store changes commit
+  in one WAL transaction. Replays and cross-case references fail closed without partial mutation.
+- Conversation state keeps `said`, `inferred`, `confirmed`, and `permitted` distinct. Derived items inherit a
+  deterministic monotone union of restriction tags.
+- The pure provider-projection core includes only whole items whose tags are a subset of the server-resolved
+  mandate/card clearance intersection and emits a fixed, deterministic included/dropped/unmet summary.
+- The browser case-message route remains `501 model-interaction-not-active`. M5.1 makes no provider call,
+  performs no live screening, and does not implement model switching or red-line output control.
+
+This is an implementation candidate, not a reviewed baseline or M5 completion claim. It becomes the next
+reviewed integration point only after the full local checks pass and an independent reviewer returns GO on
+the exact committed SHA.
+
+Candidate validation before commit: `npm run typecheck` passed; `npm test` passed 4 Git-safety hook tests and
+277 Vitest tests across 32 files; `npm run cards:verify` verified both signed cards unchanged.
+
 ## Resolved browser credential-handoff protocol
 
 The normative decision is pinned above at Charter commit `00c32f5`: a user-initiated authorization-origin
@@ -190,14 +216,17 @@ authorization route. The bounded handoff and session implementation was independ
 
 ## Ordered next slices
 
-1. **M5 planning** — define the first bounded screening/empathy/switching implementation slice against the
-   pinned specification, preserving the server-owned said/confirmed/permitted-store transition and
-   re-projection boundary before model interaction is opened. Obtain maintainer approval for that slice before
-   implementation.
+1. **M5.1 exact-SHA review** — adversarially verify the case/item binding, authorization-only custody,
+   single-transaction transition, replay behaviour, deterministic tag propagation and projection, historical
+   M4 replay compatibility, and the still-closed model-ingress boundary.
+2. **M5.2 planning after GO** — define the smallest authenticated cross-process projection and deterministic
+   screening slice. Keep mandate/card clearance resolution inside authorization, preserve the rule that a
+   screening signal can only flag or escalate, and leave governed model switching and output red-line checks
+   for separately approved slices.
 
 Substantive tranches are committed and reviewed at bounded integration points. A documentation-only status
 acknowledgement does not trigger a recursive review round; changes to ADRs, gates, invariants, ACLs,
 projections, provenance pins, or safety restrictions are substantive and remain reviewable. No tranche
 authorizes live probes, key generation or
 rotation, model-card signing, editing generated or append-only records outside a synthetic test harness,
-pushing, or starting M5.
+pushing, or starting an additional M5 slice.

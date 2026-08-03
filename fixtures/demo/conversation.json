@@ -1,0 +1,38 @@
+[
+  {
+    "id": "said_3",
+    "store": "said",
+    "turn": "turn_1",
+    "text": "The synthetic applicant states that the entity was recently registered.",
+    "provenance": {
+      "derived_from": [],
+      "hops": []
+    },
+    "tags": [
+      "conf:case",
+      "purpose:grant-assessment"
+    ],
+    "origin_actor": "applicant"
+  },
+  {
+    "id": "inf_7",
+    "store": "inferred",
+    "turn": "turn_2",
+    "text": "The synthetic applicant entity is no more than three years old.",
+    "provenance": {
+      "derived_from": [
+        "said_3"
+      ],
+      "hops": [
+        {
+          "requested": "swiss-ai/apertus-v1.5-70b",
+          "served": "swiss-ai/apertus-v1.5-70b"
+        }
+      ]
+    },
+    "tags": [
+      "conf:case",
+      "purpose:grant-assessment"
+    ]
+  }
+]

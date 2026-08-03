@@ -22,8 +22,9 @@ The exact upstream revision, digest, reviewed runtime baseline, and remaining mi
 - **Institutions are simulated — two roles are absent.** Rulemaker, operator, and record keeper are surfaces
   played by one person; independent reviewer and remedy decider do not exist here. M4 now has a native
   three-process HTTP boundary and an authorization-origin governance console, but same-machine process
-   isolation is separation of duties in miniature, not independence; model interaction, empathy triggers,
-   and governed switching are not active yet.
+  isolation is separation of duties in miniature, not independence. M5.1 adds a deterministic,
+  authorization-owned conversation transition and projection core, but provider ingress, empathy triggers,
+  and governed switching are not active yet.
 - **A deterministic gate proves declared rules were applied** — not that the rules are lawful, fair, or legitimate.
 - **Commit-token window (interpretive choice).** Commitment binds at `commit-verify`; a revocation landing in the
   token's short TTL is too late for that action by definition. On the stricter reading of "authority in flight",
@@ -91,8 +92,9 @@ shows the mandate's signed-card evidence, requires a local evidence check before
 and polls only the authorization-owned ruling-status projection. A safe link opens the routed dialogue on the
 authorization origin, where the responder's own role token reads the question/contract and posts the answer
 directly. Raw clients still face the same ACL, Origin guard, evidence resolution, and single-use state machine.
-The browser message route remains explicitly closed until the M5 model/screening/empathy loop is implemented;
-M4 acceptance is complete at reviewed runtime commit `e326562`; M5 is unblocked for planning but has not begun.
+The browser message route remains explicitly closed until the later M5 model/screening/empathy loop is
+implemented. M4 acceptance is complete at reviewed runtime commit `e326562`; the M5.1 conversation-state
+and pure projection core is an unreviewed implementation candidate and does not make a provider call.
 
 Offline and deterministic verification uses synthetic records and skips only the remote-presence step:
 

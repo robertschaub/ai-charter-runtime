@@ -122,6 +122,12 @@ export const humanInterventionEvent = z.object({
         .nullable(),
       /** The answer text is testimony; only its digest rides in the event. */
       answer_digest: hexDigest.nullable(),
+      /** Machine binding for every disposition that changes conversation state. */
+      scope: z
+        .object({ item_ref: id, applies_to: z.literal('this_case_only') })
+        .strict()
+        .nullable()
+        .optional(),
     }).strict(),
     z.object({
       kind: z.literal('dialogue_response_refused'),

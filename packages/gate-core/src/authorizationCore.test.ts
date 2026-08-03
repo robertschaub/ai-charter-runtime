@@ -22,7 +22,7 @@ import type { CaseSessionHandoffService } from './caseSessionHandoff.js';
 import { digestFor } from './hash.js';
 import { Keyring, verifyEmbeddedMac } from './keyring.js';
 import { loadPolicyFile, type LoadedPolicy } from './policyLoader.js';
-import type { EffectIntent, FrozenProposal, Mandate, ScreeningSignal } from './schemas/index.js';
+import { recordEntry, type EffectIntent, type FrozenProposal, type Mandate, type ScreeningSignal } from './schemas/index.js';
 import { applyWorldTransaction, cloneWorldState, counterValue } from './state.js';
 import { runSweeper } from './sweeper.js';
 import { verifyCommitTokenForIntent } from './tokenVerifier.js';
@@ -303,6 +303,33 @@ async function initialize(value: Harness, body = mandateBody()): Promise<Mandate
 }
 
 describe('M2 authorization transactions', () => {
+  it('keeps case-scoped conversation ingestion authorization-owned and idempotent', async () => {
+    const h = harness();
+    await initialize(h);
+    const item = {
+      id: 'said_case_scope',
+      store: 'said' as const,
+      turn: 'turn_case_scope',
+      text: 'Synthetic case-scoped testimony.',
+      provenance: { derived_from: [], hops: [] },
+      tags: ['conf:case', 'purpose:grant-assessment'],
+      origin_actor: 'applicant' as const,
+    };
+    await expect(
+      h.core.putConversationItems({ caseId: 'case_a', items: [item], actor: ORCHESTRATOR }),
+    ).rejects.toMatchObject({ code: 'unauthorized-actor' });
+    await h.core.putConversationItems({ caseId: 'case_a', items: [item], actor: AUTHZ });
+    await h.core.putConversationItems({ caseId: 'case_a', items: [item], actor: AUTHZ });
+    await expect(
+      h.core.putConversationItems({ caseId: 'case_b', items: [item], actor: AUTHZ }),
+    ).rejects.toMatchObject({ code: 'proposal-conflict' });
+    expect(h.store.snapshot().storeItems.get(item.id)).toEqual({
+      world_id: 'w-demo',
+      case_id: 'case_a',
+      item,
+    });
+  });
+
   it('rejects an unsafe world id before creating any path outside the records root', () => {
     const root = mkdtempSync(join(tmpdir(), 'gate-core-world-'));
     roots.push(root);
@@ -1930,8 +1957,32 @@ describe('M2 authorization transactions', () => {
       },
     });
     await initialize(h);
-    const original = proposal(60, { action_id: 'act_dialogue' });
-    const ruled = await h.core.ruleProposal(ruleInput(original, { context: { dialogue_trigger: true } }));
+    const inference = {
+      id: 'inf_7',
+      store: 'inferred' as const,
+      turn: 'turn_dialogue',
+      text: 'The synthetic applicant entity is no more than three years old.',
+      provenance: { derived_from: ['said_3'], hops: [] },
+      tags: ['conf:case', 'purpose:grant-assessment'],
+    };
+    const otherCaseInference = {
+      ...inference,
+      id: 'inf_other',
+      text: 'A synthetic inference belonging to another case.',
+    };
+    await h.core.putConversationItems({ caseId: 'case_dialogue', items: [inference], actor: AUTHZ });
+    await h.core.putConversationItems({ caseId: 'case_other', items: [otherCaseInference], actor: AUTHZ });
+    const original = proposal(60, {
+      action_id: 'act_dialogue',
+      derived_claims: [inference, otherCaseInference],
+    });
+    await expect(
+      h.core.ruleProposal(ruleInput(original, { context: { dialogue_trigger: true } })),
+    ).rejects.toMatchObject({ code: 'dialogue-case-scope' });
+    expect(h.store.snapshot().rulings.size).toBe(0);
+    const ruled = await h.core.ruleProposal(
+      ruleInput(original, { caseId: 'case_dialogue', context: { dialogue_trigger: true } }),
+    );
     const escalationId = ruled.escalationId;
     if (escalationId === null) throw new Error('expected dialogue escalation');
     expect(ruled.ruling).toMatchObject({ verdict: 'escalate', ux_class: 'stop', status: 'issued' });
@@ -1950,6 +2001,18 @@ describe('M2 authorization transactions', () => {
     ).resolves.toMatchObject({ accepted: false, defect: 'disposition-not-permitted' });
     expect(h.store.snapshot().escalations.get(escalationId)?.state).toBe('open');
 
+    const beforeCrossCase = h.store.snapshot().storeItems.size;
+    await expect(
+      h.core.respondDialogue({
+        escalationId,
+        disposition: 'correct',
+        actor: APPLICANT,
+        answerText: 'This correction must not cross a case boundary.',
+        scope: { item_ref: 'inf_other', applies_to: 'this_case_only' },
+      }),
+    ).resolves.toMatchObject({ accepted: false, defect: 'invalid-response' });
+    expect(h.store.snapshot().storeItems.size).toBe(beforeCrossCase);
+
     await expect(
       h.core.respondDialogue({
         escalationId,
@@ -1964,7 +2027,12 @@ describe('M2 authorization transactions', () => {
     ).resolves.toMatchObject({ accepted: false, defect: 'wrong-role' });
     expect(evidenceLookups).toHaveLength(0);
     await expect(
-      h.core.respondDialogue({ escalationId, disposition: 'confirm', actor: APPLICANT }),
+      h.core.respondDialogue({
+        escalationId,
+        disposition: 'confirm',
+        actor: APPLICANT,
+        scope: { item_ref: 'inf_7', applies_to: 'this_case_only' },
+      }),
     ).resolves.toMatchObject({ accepted: false, defect: 'evidence-required' });
     await expect(
       h.core.respondDialogue({ escalationId, disposition: 'allow-within-scope', actor: APPLICANT }),
@@ -1977,6 +2045,7 @@ describe('M2 authorization transactions', () => {
       disposition: 'confirm',
       actor: APPLICANT,
       answerText,
+      scope: { item_ref: 'inf_7', applies_to: 'this_case_only' },
       evidenceRef: {
         kind: 'registry_record',
         id: 'reg:CH-0042',
@@ -2002,9 +2071,23 @@ describe('M2 authorization transactions', () => {
         disposition: 'confirm',
         responder_role: 'applicant',
         evidence_ref: { id: 'reg:CH-0042', content_digest: 'd'.repeat(64) },
+        scope: { item_ref: 'inf_7', applies_to: 'this_case_only' },
       },
     });
     expect(JSON.stringify(recorded)).not.toContain(answerText);
+    const dialogueItems = [...after.storeItems.values()]
+      .filter((entry) => entry.case_id === 'case_dialogue')
+      .map((entry) => entry.item);
+    expect(dialogueItems.filter((item) => item.store === 'said')).toEqual([
+      expect.objectContaining({ text: answerText, origin_actor: 'applicant' }),
+    ]);
+    expect(dialogueItems.filter((item) => item.store === 'confirmed')).toEqual([
+      expect.objectContaining({
+        text: inference.text,
+        origin_actor: 'applicant',
+        tags: inference.tags,
+      }),
+    ]);
 
     await expect(
       h.core.respondDialogue({ escalationId, disposition: 'abstain', actor: APPLICANT }),
@@ -2025,6 +2108,138 @@ describe('M2 authorization transactions', () => {
     expect(continued).toMatchObject({ accepted: false, defect: 'wrong-state' });
   });
 
+  it.each([
+    { disposition: 'correct' as const, sourceStore: 'inferred' as const, removesSource: true },
+    { disposition: 'narrow' as const, sourceStore: 'inferred' as const, removesSource: true },
+    { disposition: 'permit' as const, sourceStore: 'said' as const, removesSource: false },
+  ])(
+    'commits the $disposition conversation transition once and rejects its replay',
+    async ({ disposition, sourceStore, removesSource }) => {
+      const h = harness('2026-08-01T09:00:00.000Z', { dialogue: true });
+      await initialize(h);
+      const source = {
+        id: `source_${disposition}`,
+        store: sourceStore,
+        turn: `turn_${disposition}`,
+        text: `Synthetic source for ${disposition}.`,
+        provenance: { derived_from: [], hops: [] },
+        tags: ['conf:case', 'purpose:grant-assessment'],
+        ...(sourceStore === 'inferred' ? {} : { origin_actor: 'applicant' as const }),
+      };
+      const caseId = `case_${disposition}`;
+      await h.core.putConversationItems({ caseId, items: [source], actor: AUTHZ });
+      const ruled = await h.core.ruleProposal(
+        ruleInput(
+          proposal(disposition === 'correct' ? 63 : disposition === 'narrow' ? 64 : 65, {
+            action_id: `act_${disposition}`,
+            ...(sourceStore === 'inferred'
+              ? { derived_claims: [source] }
+              : { material_inputs: [source] }),
+          }),
+          { caseId, context: { dialogue_trigger: true } },
+        ),
+      );
+      if (ruled.escalationId === null) throw new Error('expected dialogue escalation');
+      const response = {
+        escalationId: ruled.escalationId,
+        disposition,
+        actor: APPLICANT,
+        answerText: `Synthetic ${disposition} response.`,
+        scope: { item_ref: source.id, applies_to: 'this_case_only' as const },
+      };
+      await expect(h.core.respondDialogue(response)).resolves.toMatchObject({
+        accepted: true,
+        status: 'disposed',
+      });
+      const after = h.store.snapshot();
+      expect(after.storeItems.has(source.id)).toBe(!removesSource);
+      const transitioned = [...after.storeItems.values()]
+        .filter((entry) => entry.case_id === caseId && entry.item.id !== source.id)
+        .map((entry) => entry.item);
+      expect(transitioned.filter((item) => item.store === 'said')).toEqual([
+        expect.objectContaining({
+          text: response.answerText,
+          tags: source.tags,
+          origin_actor: 'applicant',
+        }),
+      ]);
+      expect(transitioned.filter((item) => item.store === 'permitted')).toHaveLength(
+        disposition === 'permit' ? 1 : 0,
+      );
+
+      const storeCount = after.storeItems.size;
+      await expect(h.core.respondDialogue(response)).resolves.toMatchObject({
+        accepted: false,
+        defect: 'late-response',
+        terminalState: 'disposed',
+      });
+      expect(h.store.snapshot().storeItems.size).toBe(storeCount);
+    },
+  );
+
+  it('reopens a historical scope-less dialogue record without changing its materialized projection', async () => {
+    const h = harness('2026-08-01T09:00:00.000Z', { dialogue: true });
+    await initialize(h);
+    const inference = {
+      id: 'inf_legacy',
+      store: 'inferred' as const,
+      turn: 'turn_legacy',
+      text: 'Synthetic historical inference.',
+      provenance: { derived_from: [], hops: [] },
+      tags: ['conf:case', 'purpose:grant-assessment'],
+    };
+    await h.core.putConversationItems({ caseId: 'case_legacy', items: [inference], actor: AUTHZ });
+    const ruled = await h.core.ruleProposal(
+      ruleInput(proposal(66, { action_id: 'act_legacy', derived_claims: [inference] }), {
+        caseId: 'case_legacy',
+        context: { dialogue_trigger: true },
+      }),
+    );
+    if (ruled.escalationId === null) throw new Error('expected dialogue escalation');
+    const basis = h.store.snapshot().actionRecords.find((entry) => entry.entry_id === ruled.recordEntryId);
+    if (basis === undefined) throw new Error('expected ruling record');
+    const legacy = recordEntry.parse({
+      ...basis,
+      entry_id: 'rec_legacy_scope_less',
+      authenticated_actor: APPLICANT.credential,
+      claimed_actor: { role: 'applicant' },
+      human_intervention_event: {
+        event: 'human_intervention_event',
+        escalation_id: ruled.escalationId,
+        payload: {
+          kind: 'dialogue_response_recorded',
+          disposition: 'confirm',
+          responder_role: 'applicant',
+          evidence_ref: null,
+          answer_digest: null,
+        },
+      },
+    });
+    await h.store.transact('legacy_dialogue_record', AUTHZ, [{ op: 'record.action.append', entry: legacy }]);
+
+    h.store.close();
+    openStores.splice(openStores.indexOf(h.store), 1);
+    const reopened = WalStore.open({
+      recordsRoot: h.root,
+      worldId: 'w-demo',
+      runId: 'run_2',
+      bootId: 'authz_boot_2',
+      policyVersion: h.policy.policy.policy_version,
+      policyContentDigest: h.policy.policyContentDigest,
+      evaluatorBuildDigest: h.policy.evaluatorBuildDigest,
+      now: () => '2026-08-01T09:01:00.000Z',
+    });
+    openStores.push(reopened);
+    const replayed = reopened.snapshot().actionRecords.find((entry) => entry.entry_id === legacy.entry_id);
+    if (
+      replayed?.human_intervention_event?.event !== 'human_intervention_event' ||
+      replayed.human_intervention_event.payload.kind !== 'dialogue_response_recorded'
+    ) {
+      throw new Error('expected replayed historical dialogue response');
+    }
+    expect(replayed.human_intervention_event.payload.scope).toBeUndefined();
+  });
+
   it('enforces dialogue response status codes and raw-client bypass resistance on a real listener', async () => {
     const h = harness('2026-08-01T09:00:00.000Z', {
       dialogue: true,
@@ -2040,8 +2255,20 @@ describe('M2 authorization transactions', () => {
           : null,
     });
     await initialize(h);
+    const inference = {
+      id: 'inf_7',
+      store: 'inferred' as const,
+      turn: 'turn_dialogue_http',
+      text: 'The synthetic applicant entity is no more than three years old.',
+      provenance: { derived_from: ['said_3'], hops: [] },
+      tags: ['conf:case', 'purpose:grant-assessment'],
+    };
+    await h.core.putConversationItems({ caseId: 'case_dialogue_http', items: [inference], actor: AUTHZ });
     const ruled = await h.core.ruleProposal(
-      ruleInput(proposal(61, { action_id: 'act_dialogue_http' }), { context: { dialogue_trigger: true } }),
+      ruleInput(proposal(61, { action_id: 'act_dialogue_http', derived_claims: [inference] }), {
+        caseId: 'case_dialogue_http',
+        context: { dialogue_trigger: true },
+      }),
     );
     const escalationId = ruled.escalationId;
     if (escalationId === null) throw new Error('expected dialogue escalation');
@@ -2075,6 +2302,7 @@ describe('M2 authorization transactions', () => {
         orchestrator_origin: 'http://127.0.0.1:7802',
       },
       consoleAssets: { shell: '', script: '', stylesheet: '' },
+      caseId: 'case_dialogue_http',
       host: '127.0.0.1',
       port: 0,
     });
@@ -2089,7 +2317,11 @@ describe('M2 authorization transactions', () => {
         },
         body: JSON.stringify(body),
       });
-    const baseBody = { escalation_id: escalationId, disposition: 'confirm' };
+    const baseBody = {
+      escalation_id: escalationId,
+      disposition: 'confirm',
+      scope: { item_ref: 'inf_7', applies_to: 'this_case_only' },
+    };
     try {
       const legacyDispositionBypass = await fetch(
         `${address.origin}/w/w-demo/escalations/${escalationId}/disposition`,

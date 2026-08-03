@@ -1,8 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 /** Authorization process: replay, sweep, and service reconciliation complete before listen. */
 import { randomUUID } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+
+import { z } from 'zod';
 
 import { AuthorizationCore } from './authorizationCore.js';
 import { AuthorizationHttpAdapter, type CredentialBinding } from './authorizationHttpAdapter.js';
@@ -23,7 +26,7 @@ import { digestFileSet } from './fileSetDigest.js';
 import { loadKeyring } from './keyring.js';
 import { loadPolicyFile } from './policyLoader.js';
 import { runRuntimeMaintenance } from './runtimeMaintenance.js';
-import { id, worldId } from './schemas/index.js';
+import { id, storeItem, worldId } from './schemas/index.js';
 import { ServicesProbeHttpClient } from './servicesProbeHttpClient.js';
 import { WalStore } from './walStore.js';
 
@@ -138,6 +141,9 @@ export async function startAuthorizationProcess(
   const policyRoot = resolve(env['RUNTIME_POLICY_ROOT'] ?? 'packages/gate-core/policy');
   const sourceRoot = resolve(env['RUNTIME_GATE_SOURCE_ROOT'] ?? 'packages/gate-core/src');
   const cardsRoot = resolve(env['RUNTIME_CARDS_ROOT'] ?? 'docs/cards');
+  const conversationFixture = resolve(
+    env['RUNTIME_CONVERSATION_FIXTURE'] ?? 'fixtures/demo/conversation.json',
+  );
   const consolesRoot = fileURLToPath(new URL('../../consoles/', import.meta.url));
   const consoleAssetsRoot = resolve(
     env['RUNTIME_CONSOLE_ASSETS_ROOT'] ?? join(consolesRoot, 'assets', 'governance-console'),
@@ -214,6 +220,12 @@ export async function startAuthorizationProcess(
       resolveRegistryEvidence: (citation) => servicesProbe.resolveRegistryEvidence(citation),
     });
     await authorization.activatePolicy();
+    const initialConversationItems = z.array(storeItem).parse(JSON.parse(readFileSync(conversationFixture, 'utf8')));
+    await authorization.putConversationItems({
+      caseId: demoCaseId,
+      items: initialConversationItems,
+      actor: { credential: 'proc:authz', claimed_role: null },
+    });
     const maintain = async () => {
       await runMaintenance({
         authorization,
@@ -249,6 +261,7 @@ export async function startAuthorizationProcess(
         orchestrator_origin: orchestratorOrigin,
       },
       consoleAssets,
+      caseId: demoCaseId,
       host,
       port,
     });

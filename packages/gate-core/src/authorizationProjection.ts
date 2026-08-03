@@ -6,6 +6,7 @@ import {
   accessChainEntry,
   approvedModelEntry,
   authorityHop,
+  cardSlug,
   classToken,
   disposition,
   hexDigest,
@@ -26,6 +27,7 @@ import {
   verdict,
   worldId,
   substitutionRules,
+  storeItem,
 } from './schemas/index.js';
 
 export const rulingProjection = z
@@ -105,6 +107,25 @@ export const approvedModelsProjection = z
     mandate_version: integer.min(1),
     mandate_state: mandateState,
     models: z.array(approvedModelProjection),
+  })
+  .strict();
+
+/** M5.1 fixed, provider-scoped projection of authorization-owned conversation state. */
+export const conversationProjection = z
+  .object({
+    world_id: worldId,
+    case_id: id,
+    provider: cardSlug,
+    role: modelRole,
+    items: z.array(storeItem),
+    summary: z
+      .object({
+        included: integer.min(0),
+        dropped: integer.min(0),
+        dropped_item_ids: z.array(id),
+        unmet_tags: restrictionTagSet,
+      })
+      .strict(),
   })
   .strict();
 
@@ -297,6 +318,7 @@ export const applicantExtractProjection = z
 
 export type MandateProjection = z.infer<typeof mandateProjection>;
 export type ApprovedModelsProjection = z.infer<typeof approvedModelsProjection>;
+export type ConversationProjection = z.infer<typeof conversationProjection>;
 export type EscalationDetailProjection = z.infer<typeof escalationDetailProjection>;
 export type EscalationStatusProjection = z.infer<typeof escalationStatusProjection>;
 export type RecordViewProjection = z.infer<typeof recordViewProjection>;

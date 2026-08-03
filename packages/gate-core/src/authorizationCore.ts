@@ -21,9 +21,11 @@ import {
   registryRecordRef,
   role,
   screeningSignal,
+  storeItem,
   timestamp,
   worldId,
   type CommitmentRecord,
+  type ConversationStoreEntry,
   type CredentialLabel,
   type CounterName,
   type EvidenceRef,
@@ -37,6 +39,7 @@ import {
   type PatternEvent,
   type RecordEntry,
   type ScreeningSignal,
+  type StoreItem,
   type WalOp,
 } from './schemas/index.js';
 import { applyWorldTransaction, counterValue, mandateVersionKey, type WorldState } from './state.js';
@@ -54,6 +57,7 @@ export class AuthorizationError extends Error {
       | 'proposal-already-committed'
       | 'policy-not-active'
       | 'invalid-counter-delta'
+      | 'dialogue-case-scope'
       | 'unauthorized-actor'
       | 'unsupported-ordering-rule',
     message: string,
@@ -64,7 +68,7 @@ export class AuthorizationError extends Error {
 }
 
 export interface IdFactory {
-  next(prefix: 'rul' | 'nce' | 'rsv' | 'esc' | 'pat' | 'rec' | 'acc' | 'rev' | 'cmt' | 'eff' | 'sel'): string;
+  next(prefix: 'rul' | 'nce' | 'rsv' | 'esc' | 'pat' | 'rec' | 'acc' | 'rev' | 'cmt' | 'eff' | 'sel' | 'itm'): string;
 }
 
 const defaultIds: IdFactory = {
@@ -115,6 +119,8 @@ export interface RuleProposalInput {
   readonly service: string;
   readonly actionClass: string;
   readonly actor: TransactionActor;
+  /** Protocol scope for dialogue escalations; never derived from model output. */
+  readonly caseId?: string;
   /** Authorization-service classifications only; endpoint code must not pass model-authored labels through. */
   readonly context?: Readonly<Record<string, unknown>>;
 }
@@ -162,7 +168,13 @@ export interface RespondDialogueInput {
   readonly actor: TransactionActor;
   readonly answerText?: string;
   readonly evidenceRef?: RegistryEvidenceCitation;
-  readonly scope?: Readonly<{ readonly item_ref: string; readonly applies_to: string }>;
+  readonly scope?: Readonly<{ readonly item_ref: string; readonly applies_to: 'this_case_only' }>;
+}
+
+export interface PutConversationItemsInput {
+  readonly caseId: string;
+  readonly items: readonly StoreItem[];
+  readonly actor: TransactionActor;
 }
 
 export type RespondDialogueResult =
@@ -915,6 +927,37 @@ export class AuthorizationCore {
     await this.#store.transact('mandate_grant', actor, [{ op: 'mandate.grant', mandate: parsed }]);
   }
 
+  /**
+   * M5.1 startup/ingestion seam. Only the authorization process may attach classified
+   * items to a case; no HTTP route exposes this method to the orchestrator or browser.
+   */
+  async putConversationItems(input: PutConversationItemsInput): Promise<void> {
+    if (input.actor.credential !== 'proc:authz') {
+      throw new AuthorizationError('unauthorized-actor', 'only authorization may persist conversation items');
+    }
+    const caseId = id.parse(input.caseId);
+    const entries: ConversationStoreEntry[] = input.items.map((item) => ({
+      world_id: this.#store.snapshot().worldId,
+      case_id: caseId,
+      item: storeItem.parse(item),
+    }));
+    if (entries.length === 0) return;
+    await this.#store.transactWithState('conversation_items_put', input.actor, (state) => {
+      const ops: WalOp[] = [];
+      for (const entry of entries) {
+        const current = state.storeItems.get(entry.item.id);
+        if (current === undefined) ops.push({ op: 'store.put', entry });
+        else if (canonicalize(current) !== canonicalize(entry)) {
+          throw new AuthorizationError(
+            'proposal-conflict',
+            `conversation item ${entry.item.id} is already bound to different content or scope`,
+          );
+        }
+      }
+      return { ops, result: undefined };
+    });
+  }
+
   async recordModelSelection(input: RecordModelSelectionInput): Promise<RecordModelSelectionResult> {
     if (input.actor.credential !== 'proc:orchestrator') {
       return { accepted: false, defect: 'unauthorized-reporter' };
@@ -1222,12 +1265,22 @@ export class AuthorizationCore {
       if (escalationId !== null) {
         contract = evaluation.interventionContract;
         if (contract === null) throw new Error('an escalate verdict must carry an intervention contract');
+        const dialogueContract = contract.permitted_dispositions.every((value) =>
+          (DIALOGUE_DISPOSITIONS as readonly string[]).includes(value),
+        );
+        if (dialogueContract && input.caseId === undefined) {
+          throw new AuthorizationError(
+            'dialogue-case-scope',
+            'a dialogue escalation must be bound to a server-validated case id',
+          );
+        }
         const escalationExpires = addMilliseconds(at, contract.response_bound_and_default.response_bound_ms);
         ops.push({
           op: 'escalation.open',
           escalation: {
             world_id: proposal.world_id,
             escalation_id: escalationId,
+            case_id: dialogueContract ? (input.caseId ?? null) : null,
             ruling_id: rulingId,
             source_commitment_id: null,
             frozen_proposal_hash: proposal.proposal_hash,
@@ -1625,6 +1678,7 @@ export class AuthorizationCore {
             service: ruling.binding.service,
             actionClass: ruling.binding.action_class,
             actor: { credential: 'proc:authz', claimed_role: null },
+            ...(escalation.case_id === null ? {} : { caseId: escalation.case_id }),
             context: { intervention_disposition: disposition, intervention_escalation_id: escalationId },
             signals: allowScreening.signals,
             screeningPerformed: allowScreening.performed,
@@ -1662,9 +1716,10 @@ export class AuthorizationCore {
     const escalationId = id.parse(input.escalationId);
     const disposition = input.disposition;
     const answerText = input.answerText?.trim();
+    const changesConversation = ['confirm', 'correct', 'narrow', 'permit'].includes(disposition);
     const responseShapeValid =
       ((disposition !== 'correct' && disposition !== 'narrow') || (answerText !== undefined && answerText.length > 0)) &&
-      ((disposition !== 'permit' && disposition !== 'narrow') || input.scope !== undefined);
+      (!changesConversation || input.scope?.applies_to === 'this_case_only');
     let resolvedEvidence: RegistryEvidence | null = null;
     const initialEscalation = this.#store.snapshot().escalations.get(escalationId);
     const initialResponderRole = input.actor.credential.startsWith('role:')
@@ -1813,6 +1868,30 @@ export class AuthorizationCore {
           return refuse('evidence-required');
         }
 
+        const sourceProposalId = state.proposalByHash.get(escalation.frozen_proposal_hash);
+        const sourceProposal = sourceProposalId === undefined ? undefined : state.proposals.get(sourceProposalId);
+        let sourceEntry: ConversationStoreEntry | undefined;
+        if (changesConversation) {
+          const itemRef = input.scope?.item_ref;
+          if (escalation.case_id === null || itemRef === undefined || sourceProposal === undefined) {
+            return refuse('invalid-response');
+          }
+          sourceEntry = state.storeItems.get(itemRef);
+          const proposalItem = [...sourceProposal.material_inputs, ...sourceProposal.derived_claims].find(
+            (item) => item.id === itemRef,
+          );
+          if (
+            sourceEntry === undefined ||
+            sourceEntry.case_id !== escalation.case_id ||
+            proposalItem === undefined ||
+            canonicalize(sourceEntry.item) !== canonicalize(proposalItem) ||
+            (disposition === 'confirm' && sourceEntry.item.store !== 'inferred') ||
+            (disposition === 'permit' && sourceEntry.item.store === 'inferred')
+          ) {
+            return refuse('invalid-response');
+          }
+        }
+
         const recordEntryId = this.#ids.next('rec');
         const ops: WalOp[] = [{ op: 'escalation.dispose', escalation_id: escalationId, disposition }];
         if (ruling.status === 'issued') {
@@ -1834,9 +1913,64 @@ export class AuthorizationCore {
               responder_role: responderRole,
               evidence_ref: resolvedEvidence,
               answer_digest: answerText === undefined || answerText.length === 0 ? null : sha256Hex(answerText),
+              scope: input.scope ?? null,
             },
           }),
         });
+        if (sourceEntry !== undefined && escalation.case_id !== null) {
+          const responderOrigin =
+            responderRole === 'applicant' ? 'applicant' : responderRole === 'case_officer' ? 'officer' : null;
+          if (responderOrigin === null) return refuse('invalid-response');
+          const turn = `dialogue_${escalationId}`;
+          let answerItemId: string | null = null;
+          if (answerText !== undefined && answerText.length > 0) {
+            answerItemId = this.#ids.next('itm');
+            ops.push({
+              op: 'store.put',
+              entry: {
+                world_id: state.worldId,
+                case_id: escalation.case_id,
+                item: storeItem.parse({
+                  id: answerItemId,
+                  store: 'said',
+                  turn,
+                  text: answerText,
+                  provenance: { derived_from: [sourceEntry.item.id], hops: [] },
+                  tags: sourceEntry.item.tags,
+                  origin_actor: responderOrigin,
+                }),
+              },
+            });
+          }
+          if (disposition === 'confirm' || disposition === 'permit') {
+            const derivedFrom =
+              answerItemId === null ? [sourceEntry.item.id] : [sourceEntry.item.id, answerItemId];
+            ops.push({
+              op: 'store.put',
+              entry: {
+                world_id: state.worldId,
+                case_id: escalation.case_id,
+                item: storeItem.parse({
+                  id: this.#ids.next('itm'),
+                  store: disposition === 'confirm' ? 'confirmed' : 'permitted',
+                  turn,
+                  text: sourceEntry.item.text,
+                  provenance: { derived_from: derivedFrom, hops: [] },
+                  tags: sourceEntry.item.tags,
+                  origin_actor: responderOrigin,
+                }),
+              },
+            });
+          }
+          if (disposition === 'correct' || disposition === 'narrow') {
+            ops.push({
+              op: 'store.remove',
+              case_id: escalation.case_id,
+              item_id: sourceEntry.item.id,
+              reason: `dialogue-${disposition}`,
+            });
+          }
+        }
         let reviewObligationId: string | null = null;
         if (disposition === 'route') {
           const proposalId = state.proposalByHash.get(escalation.frozen_proposal_hash);
@@ -2063,6 +2197,7 @@ export class AuthorizationCore {
               service: sourceRuling.binding.service,
               actionClass: sourceRuling.binding.action_class,
               actor: input.actor,
+              ...(escalation.case_id === null ? {} : { caseId: escalation.case_id }),
               context: {
                 ...(input.context ?? {}),
                 intervention_disposition: 'narrow-or-modify',
@@ -2602,6 +2737,7 @@ export class AuthorizationCore {
             escalation: {
               world_id: state.worldId,
               escalation_id: escalationId,
+              case_id: null,
               ruling_id: commitment.ruling_id,
               source_commitment_id: commitmentId,
               frozen_proposal_hash: commitment.frozen_proposal_hash,

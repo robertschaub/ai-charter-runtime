@@ -434,13 +434,44 @@ describe('M4 native three-process boundary', () => {
       });
       const { proposal_hash: ignoredDialogueBaseHash, ...dialogueBase } = proposal;
       void ignoredDialogueBaseHash;
+      const dialogueInference = {
+        id: 'inf_7',
+        store: 'inferred' as const,
+        turn: 'turn_2',
+        text: 'The synthetic applicant entity is no more than three years old.',
+        provenance: {
+          derived_from: ['said_3'],
+          hops: [
+            {
+              requested: 'swiss-ai/apertus-v1.5-70b',
+              served: 'swiss-ai/apertus-v1.5-70b',
+            },
+          ],
+        },
+        tags: ['conf:case', 'purpose:grant-assessment'],
+      };
       const dialogueProposal = freezeProposal({
         ...dialogueBase,
         proposal_id: 'prp_process_dialogue',
         action_id: 'act_process_dialogue',
         exact_parameters: { amount_minor_units: 0, reference: 'case-process-dialogue' },
+        derived_claims: [dialogueInference],
         cost_obligation: { amount_minor_units: 0, description: 'No synthetic cost.' },
       });
+      const callerSelectedCase = await postJson(
+        authorizationOrigin,
+        '/w/w-demo/proposals',
+        tokens.orchestratorAtAuthz,
+        {
+          gate: 'commit',
+          case_id: 'case_other',
+          proposal: dialogueProposal,
+          service: 'filing',
+          action_class: 'grant-filing',
+          context: { dialogue_trigger: true },
+        },
+      );
+      expect(callerSelectedCase.status).toBe(422);
       const dialogueSubmission = await postJson(
         authorizationOrigin,
         '/w/w-demo/proposals',
@@ -515,6 +546,7 @@ describe('M4 native three-process boundary', () => {
       const bareConfirm = await postJson(authorizationOrigin, dialoguePath, tokens.applicant, {
         escalation_id: dialogueEscalationId,
         disposition: 'confirm',
+        scope: { item_ref: 'inf_7', applies_to: 'this_case_only' },
       });
       expect(bareConfirm.status).toBe(422);
       await expect(bareConfirm.json()).resolves.toMatchObject({ accepted: false, defect: 'evidence-required' });
@@ -540,6 +572,7 @@ describe('M4 native three-process boundary', () => {
           id: 'reg:CH-0042',
           retrieved_at: '2026-08-01T09:14:02.000Z',
         },
+        scope: { item_ref: 'inf_7', applies_to: 'this_case_only' },
       });
       expect(acceptedDialogue.status).toBe(200);
       await expect(acceptedDialogue.json()).resolves.toMatchObject({ accepted: true, status: 'disposed' });

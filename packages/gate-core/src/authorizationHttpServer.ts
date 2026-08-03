@@ -274,6 +274,8 @@ export interface AuthorizationHttpServerOptions {
     readonly orchestrator_origin: string;
   };
   readonly consoleAssets: GovernanceConsoleAssets;
+  /** Authorization-owned case binding for the bounded POC domain. */
+  readonly caseId: string;
   readonly host: string;
   readonly port: number;
   readonly maxBodyBytes?: number;
@@ -306,6 +308,7 @@ export class AuthorizationHttpServer {
     }
     this.#host = options.host;
     this.#port = options.port;
+    const configuredCaseId = id.parse(options.caseId);
     const configuredRuntimeOrigins = runtimeConsoleConfig.parse(options.runtimeConfig);
 
     const body = (request: IncomingMessage) => readJson(request, maxBodyBytes);
@@ -340,6 +343,7 @@ export class AuthorizationHttpServer {
         const result: RuleProposalResult = await options.authorization.ruleProposal({
           gate: parsed.gate,
           proposal: parsed.proposal,
+          caseId: configuredCaseId,
           service: parsed.service,
           actionClass: parsed.action_class,
           actor: requireActor(context),
