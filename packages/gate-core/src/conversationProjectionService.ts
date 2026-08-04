@@ -1,9 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-/** M5.2 projections plus M5.3 authorization-owned model-output admission. */
+/** M5.2 projections, M5.3 output admission, and M5.5 durable model-call lifecycle. */
+import { randomUUID } from 'node:crypto';
+
 import { canonicalize } from './canonicalize.js';
+import { modelCallStart, type ModelCallStart } from './authorizationProjection.js';
 import { CardRegistry, type CardInspection } from './cardRegistry.js';
 import { projectConversation, type ProjectConversationInput } from './conversationProjection.js';
 import { evaluateModelOutput, ModelOutputAdmissionError } from './modelOutputAdmission.js';
+import { digestFor, verifyDigest } from './hash.js';
 import { verifyEmbeddedMac, type Keyring } from './keyring.js';
 import type { ScreeningResolution } from './authorizationCore.js';
 import {
@@ -11,17 +15,28 @@ import {
   id,
   integer,
   modelId,
+  modelCallAdmission,
+  modelCallAdmissionRequest,
+  modelCallBeginRequest,
+  modelCallFailedRecord,
+  modelCallFailureRequest,
+  modelCallOpenRecord,
   timestamp,
   type EvidenceRef,
   type FrozenProposal,
   type Mandate,
   type ModelRole,
-  modelOutputAdmissionRequest,
   type ModelOutputAdmission,
   type ModelOutputAdmissionRequest,
+  type ModelCallAdmission,
+  type ModelCallAdmissionRequest,
+  type ModelCallBeginRequest,
+  type ModelCallFailedRecord,
+  type ModelCallFailureRequest,
+  type ModelCallOpenRecord,
 } from './schemas/index.js';
 import { screeningFixtureSet, type ScreeningFixture } from './screeningFixture.js';
-import { mandateVersionKey } from './state.js';
+import { mandateVersionKey, type WorldState } from './state.js';
 import type { TransactionActor, WalStore } from './walStore.js';
 
 export class ConversationProjectionServiceError extends Error {
@@ -49,17 +64,19 @@ export interface ScreeningProjectionInput {
   readonly caseId?: string;
 }
 
-export type OutputAdmissionInput = ModelOutputAdmissionRequest & {
-  readonly actor: TransactionActor;
-};
+export type ModelCallBeginInput = ModelCallBeginRequest & { readonly actor: TransactionActor };
+export type ModelCallCompletionInput = ModelCallAdmissionRequest & { readonly actor: TransactionActor };
+export type ModelCallFailureInput = ModelCallFailureRequest & { readonly actor: TransactionActor };
 
 export interface ConversationProjectionServiceOptions {
   readonly store: WalStore;
   readonly cards: CardRegistry;
   readonly keyring: Keyring;
   readonly caseId: string;
+  readonly authorizationBootId: string;
   readonly screeningFixtures: readonly ScreeningFixture[];
   readonly now?: () => string;
+  readonly modelCallTtlMs?: number;
 }
 
 interface ResolvedProjectionInput {
@@ -113,36 +130,95 @@ export class ConversationProjectionService {
   readonly #cards: CardRegistry;
   readonly #keyring: Keyring;
   readonly #caseId: string;
+  readonly #authorizationBootId: string;
   readonly #fixtures: readonly ScreeningFixture[];
   readonly #now: () => string;
+  readonly #modelCallTtlMs: number;
 
   constructor(options: ConversationProjectionServiceOptions) {
     this.#store = options.store;
     this.#cards = options.cards;
     this.#keyring = options.keyring;
     this.#caseId = id.parse(options.caseId);
+    this.#authorizationBootId = id.parse(options.authorizationBootId);
     this.#fixtures = screeningFixtureSet.parse(options.screeningFixtures);
     this.#now = options.now ?? (() => new Date().toISOString());
+    this.#modelCallTtlMs = integer.min(1).max(300_000).parse(options.modelCallTtlMs ?? 60_000);
   }
 
-  acting(input: ActingProjectionInput): ReturnType<typeof projectConversation> {
-    return this.#resolveActing(input).projection;
-  }
-
-  admitOutput(input: OutputAdmissionInput): ModelOutputAdmission {
-    const { actor, ...request } = input;
-    const parsed = modelOutputAdmissionRequest.parse(request);
-    const resolved = this.#resolveActing({
-      mandateId: parsed.mandate_id,
-      mandateVersion: parsed.mandate_version,
-      cardId: parsed.card_id,
-      cardVersion: parsed.card_version,
-      requestedId: parsed.requested_id,
-      actor,
+  async beginCall(input: ModelCallBeginInput): Promise<ModelCallStart> {
+    const { actor, ...requestInput } = input;
+    const request = modelCallBeginRequest.parse(requestInput);
+    const callId = id.parse(`mcl_${randomUUID()}`);
+    const completed = await this.#store.transactWithState<ModelCallStart>('model_call_begin', actor, (state, at) => {
+      const resolved = this.#resolveActing(
+        {
+          mandateId: request.mandate_id,
+          mandateVersion: request.mandate_version,
+          cardId: request.card_id,
+          cardVersion: request.card_version,
+          requestedId: request.requested_id,
+          actor,
+        },
+        state,
+        at,
+      );
+      if ([...state.modelCalls.values()].some((call) => call.case_id === this.#caseId && call.turn_id === request.turn_id)) {
+        throw new ConversationProjectionServiceError('invalid-scope', 'model turn already has a durable call attempt');
+      }
+      const call = modelCallOpenRecord.parse({
+        kind: 'model_call_lifecycle',
+        world_id: state.worldId,
+        call_id: callId,
+        authorization_boot_id: this.#authorizationBootId,
+        case_id: this.#caseId,
+        turn_id: request.turn_id,
+        mandate_id: request.mandate_id,
+        mandate_version: request.mandate_version,
+        card_id: request.card_id,
+        card_version: request.card_version,
+        requested_id: request.requested_id,
+        projection_digest: digestFor('conversation-projection', resolved.projection),
+        projection_item_count: resolved.projection.items.length,
+        opened_at: at,
+        expires_at: timestamp.parse(new Date(Date.parse(at) + this.#modelCallTtlMs).toISOString()),
+        state: 'open',
+        outcome: 'indeterminate',
+        provider_disclosure: 'possible',
+        completed_at: null,
+        served_id: null,
+        output_digest: null,
+        failure_reason: null,
+      });
+      return {
+        ops: [{ op: 'model_call.open', call }],
+        result: modelCallStart.parse({ call, projection: resolved.projection }),
+      };
     });
+    return completed.result;
+  }
+
+  #evaluateOutput(
+    request: ModelOutputAdmissionRequest,
+    actor: TransactionActor,
+    state?: WorldState,
+    nowInput?: string,
+  ): ModelOutputAdmission {
+    const resolved = this.#resolveActing(
+      {
+        mandateId: request.mandate_id,
+        mandateVersion: request.mandate_version,
+        cardId: request.card_id,
+        cardVersion: request.card_version,
+        requestedId: request.requested_id,
+        actor,
+      },
+      state,
+      nowInput,
+    );
     try {
       return evaluateModelOutput({
-        request: parsed,
+        request,
         caseId: this.#caseId,
         projection: resolved.projection,
         resolutionPolicy: resolved.inspection.card.model.resolution.policy,
@@ -156,7 +232,116 @@ export class ConversationProjectionService {
     }
   }
 
-  #resolveActing(input: ActingProjectionInput): {
+  #openCall(state: WorldState, callIdInput: string, at: string): ModelCallOpenRecord {
+    const callId = id.parse(callIdInput);
+    const call = state.modelCalls.get(callId);
+    if (
+      call === undefined ||
+      call.state !== 'open' ||
+      call.authorization_boot_id !== this.#authorizationBootId ||
+      at > call.expires_at
+    ) {
+      throw new ConversationProjectionServiceError('invalid-scope', 'model call attempt is unavailable');
+    }
+    return call;
+  }
+
+  #callMatchesOutput(call: ModelCallOpenRecord, output: ModelOutputAdmissionRequest): boolean {
+    return (
+      call.case_id === this.#caseId &&
+      call.turn_id === output.turn_id &&
+      call.mandate_id === output.mandate_id &&
+      call.mandate_version === output.mandate_version &&
+      call.card_id === output.card_id &&
+      call.card_version === output.card_version &&
+      call.requested_id === output.requested_id &&
+      verifyDigest(call.projection_digest, output.projection_digest)
+    );
+  }
+
+  #callMatchesFailure(call: ModelCallOpenRecord, failure: ModelCallFailureRequest): boolean {
+    return (
+      call.case_id === this.#caseId &&
+      call.turn_id === failure.turn_id &&
+      call.mandate_id === failure.mandate_id &&
+      call.mandate_version === failure.mandate_version &&
+      call.card_id === failure.card_id &&
+      call.card_version === failure.card_version &&
+      call.requested_id === failure.requested_id &&
+      verifyDigest(call.projection_digest, failure.projection_digest)
+    );
+  }
+
+  async completeCall(input: ModelCallCompletionInput): Promise<ModelCallAdmission> {
+    const { actor, ...requestInput } = input;
+    const request = modelCallAdmissionRequest.parse(requestInput);
+    const completed = await this.#store.transactWithState<ModelCallAdmission>(
+      'model_call_complete',
+      actor,
+      (state, at) => {
+        const call = this.#openCall(state, request.call_id, at);
+        if (!this.#callMatchesOutput(call, request.output)) {
+          throw new ConversationProjectionServiceError('invalid-scope', 'model output does not match its call attempt');
+        }
+        const decision = this.#evaluateOutput(request.output, actor, state, at);
+        const admission = modelCallAdmission.parse({ kind: 'model_call_admission', call_id: call.call_id, decision });
+        return {
+          ops: [
+            {
+              op: 'model_call.complete',
+              call_id: call.call_id,
+              outcome: decision.disposition,
+              served_id: decision.served_id,
+              output_digest: decision.output_digest,
+              completed_at: at,
+            },
+          ],
+          result: admission,
+        };
+      },
+    );
+    return completed.result;
+  }
+
+  async failCall(input: ModelCallFailureInput): Promise<ModelCallFailedRecord> {
+    const { actor, ...requestInput } = input;
+    if (actor.credential !== 'proc:orchestrator') {
+      throw new ConversationProjectionServiceError('forbidden', 'only the orchestrator process may report model-call failure');
+    }
+    const request = modelCallFailureRequest.parse(requestInput);
+    const completed = await this.#store.transactWithState<ModelCallFailedRecord>('model_call_fail', actor, (state, at) => {
+      const call = this.#openCall(state, request.call_id, at);
+      if (!this.#callMatchesFailure(call, request)) {
+        throw new ConversationProjectionServiceError('invalid-scope', 'model failure does not match its call attempt');
+      }
+      const failed = modelCallFailedRecord.parse({
+        ...call,
+        state: 'terminal',
+        outcome: 'failed',
+        provider_disclosure: request.provider_disclosure,
+        completed_at: at,
+        served_id: request.served_id,
+        output_digest: null,
+        failure_reason: request.failure_reason,
+      });
+      return {
+        ops: [
+          {
+            op: 'model_call.fail',
+            call_id: call.call_id,
+            provider_disclosure: request.provider_disclosure,
+            served_id: request.served_id,
+            failure_reason: request.failure_reason,
+            completed_at: at,
+          },
+        ],
+        result: failed,
+      };
+    });
+    return completed.result;
+  }
+
+  #resolveActing(input: ActingProjectionInput, state?: WorldState, nowInput?: string): {
     readonly projection: ReturnType<typeof projectConversation>;
     readonly inspection: CardInspection;
   } {
@@ -165,22 +350,28 @@ export class ConversationProjectionService {
     }
     const mandateId = id.parse(input.mandateId);
     const mandateVersion = integer.min(1).parse(input.mandateVersion);
-    const governingMandate = this.#singleActiveMandate();
+    const currentState = state ?? this.#store.snapshot();
+    const currentTime = timestamp.parse(nowInput ?? this.#now());
+    const governingMandate = this.#singleActiveMandate(currentState, currentTime);
     if (governingMandate.mandate_id !== mandateId || governingMandate.version !== mandateVersion) {
       throw new ConversationProjectionServiceError(
         'invalid-scope',
         'acting projection mandate does not match the sole active mandate',
       );
     }
-    return this.#resolveProjection({
-      mandateId,
-      mandateVersion,
-      cardId: cardSlug.parse(input.cardId),
-      cardVersion: integer.min(1).parse(input.cardVersion),
-      requestedId: modelId.parse(input.requestedId),
-      role: 'acting',
-      caseId: this.#caseId,
-    });
+    return this.#resolveProjection(
+      {
+        mandateId,
+        mandateVersion,
+        cardId: cardSlug.parse(input.cardId),
+        cardVersion: integer.min(1).parse(input.cardVersion),
+        requestedId: modelId.parse(input.requestedId),
+        role: 'acting',
+        caseId: this.#caseId,
+      },
+      currentState,
+      currentTime,
+    );
   }
 
   screening(input: ScreeningProjectionInput): ScreeningResolution {
@@ -269,13 +460,18 @@ export class ConversationProjectionService {
       canonicalize(resolution);
   }
 
-  #currentMandate(mandateIdInput: string, versionInput?: number): Mandate {
+  #currentMandate(
+    mandateIdInput: string,
+    versionInput?: number,
+    stateInput?: WorldState,
+    nowInput?: string,
+  ): Mandate {
     const mandateId = id.parse(mandateIdInput);
-    const state = this.#store.snapshot();
+    const state = stateInput ?? this.#store.snapshot();
     const status = state.mandateStatus.get(mandateId);
     const version = versionInput ?? status?.version;
     const mandateValue = version === undefined ? undefined : state.mandates.get(mandateVersionKey(mandateId, version));
-    const now = timestamp.parse(this.#now());
+    const now = timestamp.parse(nowInput ?? this.#now());
     if (
       status === undefined ||
       mandateValue === undefined ||
@@ -298,8 +494,9 @@ export class ConversationProjectionService {
     return mandateValue;
   }
 
-  #singleActiveMandate(): Mandate {
-    const active = [...this.#store.snapshot().mandateStatus.entries()].filter(
+  #singleActiveMandate(stateInput?: WorldState, nowInput?: string): Mandate {
+    const state = stateInput ?? this.#store.snapshot();
+    const active = [...state.mandateStatus.entries()].filter(
       ([, status]) => status.state === 'active',
     );
     if (active.length !== 1) {
@@ -309,7 +506,7 @@ export class ConversationProjectionService {
       );
     }
     const [mandateId, status] = active[0] as (typeof active)[number];
-    return this.#currentMandate(mandateId, status.version);
+    return this.#currentMandate(mandateId, status.version, state, nowInput);
   }
 
   #approvedVersion(mandateId: string, cardId: string, role: ModelRole): number {
@@ -332,14 +529,15 @@ export class ConversationProjectionService {
     return approval.requested_id;
   }
 
-  #resolveProjection(input: ResolvedProjectionInput): {
+  #resolveProjection(input: ResolvedProjectionInput, stateInput?: WorldState, nowInput?: string): {
     readonly projection: ReturnType<typeof projectConversation>;
     readonly inspection: CardInspection;
   } {
     if (input.caseId !== this.#caseId) {
       throw new ConversationProjectionServiceError('invalid-scope', 'projection case does not match authorization configuration');
     }
-    const mandateValue = this.#currentMandate(input.mandateId, input.mandateVersion);
+    const state = stateInput ?? this.#store.snapshot();
+    const mandateValue = this.#currentMandate(input.mandateId, input.mandateVersion, state, nowInput);
     const approval = mandateValue.approved_models.find(
       (candidate) =>
         candidate.card_id === input.cardId &&
@@ -373,7 +571,7 @@ export class ConversationProjectionService {
         role: input.role,
         mandateClearances,
         cardClearances,
-        entries: input.entries ?? [...this.#store.snapshot().storeItems.values()],
+        entries: input.entries ?? [...state.storeItems.values()],
       }),
       inspection,
     };

@@ -16,6 +16,7 @@ import {
   mandateLimits,
   mandateState,
   modelCard,
+  modelCallOpenRecord,
   modelRole,
   recordEntry,
   restrictionTagSet,
@@ -126,6 +127,14 @@ export const conversationProjection = z
         unmet_tags: restrictionTagSet,
       })
       .strict(),
+  })
+  .strict();
+
+/** M5.5 durable attempt reference paired with the exact projection authorized for that call. */
+export const modelCallStart = z
+  .object({
+    call: modelCallOpenRecord,
+    projection: conversationProjection,
   })
   .strict();
 
@@ -319,6 +328,7 @@ export const applicantExtractProjection = z
 export type MandateProjection = z.infer<typeof mandateProjection>;
 export type ApprovedModelsProjection = z.infer<typeof approvedModelsProjection>;
 export type ConversationProjection = z.infer<typeof conversationProjection>;
+export type ModelCallStart = z.infer<typeof modelCallStart>;
 export type EscalationDetailProjection = z.infer<typeof escalationDetailProjection>;
 export type EscalationStatusProjection = z.infer<typeof escalationStatusProjection>;
 export type RecordViewProjection = z.infer<typeof recordViewProjection>;

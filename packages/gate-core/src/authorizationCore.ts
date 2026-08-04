@@ -37,7 +37,7 @@ import {
   type GateRuling,
   type InterventionContract,
   type Mandate,
-  type ModelOutputAdmission,
+  type ModelCallAccessEvidence,
   type PatternEvent,
   type RecordEntry,
   type ScreeningSignal,
@@ -272,7 +272,7 @@ export interface RecordAccessInput {
   readonly httpStatus: number;
   readonly recorder: TransactionActor;
   readonly readLengths?: Readonly<Record<string, number>>;
-  readonly operationEvidence?: ModelOutputAdmission;
+  readonly operationEvidence?: ModelCallAccessEvidence;
   readonly suppressedCount?: number;
   readonly suppressionWindowMs?: number;
   readonly suppressionFinal?: boolean;

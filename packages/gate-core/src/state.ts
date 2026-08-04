@@ -12,6 +12,7 @@ import type {
   FrozenProposal,
   GateRuling,
   Mandate,
+  ModelCallRecord,
   ModelSelectionRecord,
   NonceRecord,
   PatternEvent,
@@ -22,6 +23,7 @@ import type {
   WalOp,
 } from './schemas/index.js';
 import type { accessChainEntry } from './schemas/record.js';
+import { modelCallRecord } from './schemas/modelCall.js';
 
 type AccessChainValue = z.infer<typeof accessChainEntry>;
 
@@ -59,6 +61,7 @@ export interface WorldState {
   readonly storeItems: Map<string, ConversationStoreEntry>;
   readonly patternEvents: PatternEvent[];
   readonly modelSelections: ModelSelectionRecord[];
+  readonly modelCalls: Map<string, ModelCallRecord>;
   readonly reviews: Map<string, ReviewObligation>;
   readonly actionRecords: RecordEntry[];
   readonly accessRecords: AccessChainValue[];
@@ -88,6 +91,7 @@ export function createWorldState(worldId: string): WorldState {
     storeItems: new Map(),
     patternEvents: [],
     modelSelections: [],
+    modelCalls: new Map(),
     reviews: new Map(),
     actionRecords: [],
     accessRecords: [],
@@ -114,6 +118,7 @@ export function cloneWorldState(state: WorldState): WorldState {
     storeItems: new Map(state.storeItems),
     patternEvents: [...state.patternEvents],
     modelSelections: [...state.modelSelections],
+    modelCalls: new Map(state.modelCalls),
     reviews: new Map(state.reviews),
     actionRecords: [...state.actionRecords],
     accessRecords: [...state.accessRecords],
@@ -631,6 +636,57 @@ export function applyWorldOp(state: WorldState, op: WalOp, transactionTimestamp:
       }
       state.modelSelections.push(op.selection);
       break;
+    case 'model_call.open':
+      requireWorld(state, op.call, 'model call');
+      if (op.call.state !== 'open' || op.call.outcome !== 'indeterminate') {
+        fail('illegal-initial-state', 'a new model call must be open and indeterminate');
+      }
+      requireUnique(state.modelCalls, op.call.call_id, `model call ${op.call.call_id}`);
+      if ([...state.modelCalls.values()].some((call) => call.case_id === op.call.case_id && call.turn_id === op.call.turn_id)) {
+        fail('duplicate-state', `model turn ${op.call.turn_id} already has a call`);
+      }
+      state.modelCalls.set(op.call.call_id, op.call);
+      break;
+    case 'model_call.complete': {
+      const current = requireValue(state.modelCalls, op.call_id, `model call ${op.call_id}`);
+      if (current.state !== 'open') fail('illegal-transition', `model call ${op.call_id} is ${current.state}`);
+      if (op.completed_at < current.opened_at) fail('clock-regression', 'model call completed before it opened');
+      if (op.completed_at > current.expires_at) fail('expired-state', `model call ${op.call_id} is expired`);
+      state.modelCalls.set(
+        op.call_id,
+        modelCallRecord.parse({
+          ...current,
+          state: 'terminal',
+          outcome: op.outcome,
+          provider_disclosure: 'confirmed',
+          completed_at: op.completed_at,
+          served_id: op.served_id,
+          output_digest: op.output_digest,
+          failure_reason: null,
+        }),
+      );
+      break;
+    }
+    case 'model_call.fail': {
+      const current = requireValue(state.modelCalls, op.call_id, `model call ${op.call_id}`);
+      if (current.state !== 'open') fail('illegal-transition', `model call ${op.call_id} is ${current.state}`);
+      if (op.completed_at < current.opened_at) fail('clock-regression', 'model call failed before it opened');
+      if (op.completed_at > current.expires_at) fail('expired-state', `model call ${op.call_id} is expired`);
+      state.modelCalls.set(
+        op.call_id,
+        modelCallRecord.parse({
+          ...current,
+          state: 'terminal',
+          outcome: 'failed',
+          provider_disclosure: op.provider_disclosure,
+          completed_at: op.completed_at,
+          served_id: op.served_id,
+          output_digest: null,
+          failure_reason: op.failure_reason,
+        }),
+      );
+      break;
+    }
     case 'review.open':
       requireWorld(state, op.obligation, 'review obligation');
       if (op.obligation.state !== 'open') fail('illegal-initial-state', 'a new review obligation must be open');

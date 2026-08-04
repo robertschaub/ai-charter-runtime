@@ -8,6 +8,13 @@ approved signed card, applies this ADR's resolution policy to the provider-repor
 mismatch before output may enter conversation state, a proposal, or a browser path. A benign unrecorded alias
 snapshot remains admitted with `model_resolution_unrecorded`; the decision carries no action authority.
 
+**Amendment (M5.5 durable call evidence, 2026-08-04):** authorization records the exact approved card/version,
+requested model, mandate, turn, case, and projection digest before provider disclosure. The resulting call
+reference is boot-bound, expires, and is consumed once by admission or a fixed failure report. Failure evidence
+may state only timeout, unavailable, malformed response, tool-call refusal, or authorization invalidation plus
+bounded disclosure/served-model metadata. An interrupted call remains indeterminate after recovery; it is neither
+retried nor represented as successful.
+
 ## Context
 Cards are the v0 evidence registry: signed JSON in git, bound to the pinned deployed version, every field marked self-declared or probe-tested — never independently attested. The trust root is a public verification key in this repo; the private key stays local. The mandate governs disclosure; a card can narrow but never widen it.
 
@@ -88,12 +95,19 @@ comparison metadata enter the access record. This is the first native quarantine
 M5.4 adds the containment-only caller of that seam. The configured adapter's lane and requested id must match
 the selected card binding before projection disclosure. A valid but substituted served id reaches M5.3 and is
 durably recorded as withheld; the coordinator adds no quarantine entry and halts the lane. Timeout, malformed
-provider evidence, null content, or tool calls also halt without fallback, but this bounded slice adds no separate
-durable provider-failure event. That remaining record integration, process wiring, and any release policy stay deferred.
+provider evidence, null content, or tool calls also halt without fallback.
 The quarantine exposes no sealing operation to importers: a module-private coordinator capability creates entries
 only after admission and local binding verification. That is in-process structural confinement rather than
 cryptographic proof of decision provenance, and a future release consumer must not treat quarantine presence as
 safety clearance.
+
+M5.5 supplies the previously deferred durable attempt/failure evidence without adding a provider entry point.
+Authorization writes the open attempt before returning the projection and admits only through its exact single-use
+reference. Terminal success records only admission metadata and digests; terminal failure uses the fixed classes
+above. A provider timeout or network outage may leave disclosure as `possible`; response-derived failures require
+`confirmed`, and tool-call refusal also binds the served id. An unfinished attempt remains explicitly
+`indeterminate` across recovery and blocks a second attempt for that case/turn. Native runtime wiring, browser
+ingress, conversation persistence, model switching, and output release remain deferred.
 
 ### 4. How mandates reference cards
 Each approved-model entry is role-scoped and pins `card_version` **and** `card_digest`. The digest is taken over **exactly the signed bytes** — the canonical card minus its `signature` block, `model-card` domain — so digest equality means signed-content equality, and re-signing a card under a rotated key leaves the digest untouched:

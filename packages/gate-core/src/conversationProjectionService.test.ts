@@ -49,6 +49,7 @@ function readJson(path: string): unknown {
 async function setup(extraFixtures: readonly ScreeningFixture[] = []) {
   const root = mkdtempSync(join(tmpdir(), 'conversation-projection-service-'));
   roots.push(root);
+  const clock = { now: '2026-08-01T09:00:00.000Z' };
   const buildDigest = digestFor('evaluator-build', {
     package: 'gate-core',
     test: 'conversation-projection-service',
@@ -63,7 +64,7 @@ async function setup(extraFixtures: readonly ScreeningFixture[] = []) {
     policyVersion: policy.policy.policy_version,
     policyContentDigest: policy.policyContentDigest,
     evaluatorBuildDigest: buildDigest,
-    now: () => '2026-08-01T09:00:00.000Z',
+    now: () => clock.now,
   });
   stores.push(store);
   const core = new AuthorizationCore({
@@ -95,11 +96,12 @@ async function setup(extraFixtures: readonly ScreeningFixture[] = []) {
     cards: CardRegistry.load(CARDS),
     keyring,
     caseId: 'case_demo',
+    authorizationBootId: 'authz_boot_projection_1',
     screeningFixtures: fixtures,
-    now: () => '2026-08-01T09:00:00.000Z',
+    now: () => clock.now,
   });
   const proposal = frozenProposal.parse(readJson(join(DEMO, 'screening-proposal.json')));
-  return { core, keyring, service, proposal };
+  return { core, keyring, service, proposal, store, root, policy, buildDigest, fixtures, clock };
 }
 
 describe('M5.2 authorization-resolved conversation projections', () => {
@@ -133,14 +135,15 @@ describe('M5.2 authorization-resolved conversation projections', () => {
     };
     await core.putConversationItems({ caseId: 'case_demo', items: [sensitive], actor: AUTHZ });
 
-    const projected = service.acting({
-      mandateId: 'mdt_demo_grant',
-      mandateVersion: 1,
-      cardId: 'publicai-apertus-v1.5-70b',
-      cardVersion: 1,
-      requestedId: 'swiss-ai/apertus-v1.5-70b',
+    const projected = (await service.beginCall({
+      turn_id: 'turn_projection_scope',
+      mandate_id: 'mdt_demo_grant',
+      mandate_version: 1,
+      card_id: 'publicai-apertus-v1.5-70b',
+      card_version: 1,
+      requested_id: 'swiss-ai/apertus-v1.5-70b',
       actor: ORCHESTRATOR,
-    });
+    })).projection;
     expect(projected.case_id).toBe('case_demo');
     expect(projected.role).toBe('acting');
     expect(projected.items.map((item) => item.id)).toEqual(['inf_7', 'said_3', 'said_public']);
@@ -150,37 +153,40 @@ describe('M5.2 authorization-resolved conversation projections', () => {
       dropped_item_ids: ['said_sensitive'],
       unmet_tags: ['conf:sensitive'],
     });
-    expect(() =>
-      service.acting({
-        mandateId: 'mdt_demo_grant',
-        mandateVersion: 1,
-        cardId: 'publicai-apertus-v1.5-70b',
-        cardVersion: 1,
-        requestedId: 'swiss-ai/apertus-v1.5-70b',
+    await expect(
+      service.beginCall({
+        turn_id: 'turn_projection_wrong_actor',
+        mandate_id: 'mdt_demo_grant',
+        mandate_version: 1,
+        card_id: 'publicai-apertus-v1.5-70b',
+        card_version: 1,
+        requested_id: 'swiss-ai/apertus-v1.5-70b',
         actor: PRINCIPAL,
       }),
-    ).toThrowError(ConversationProjectionServiceError);
-    expect(() =>
-      service.acting({
-        mandateId: 'mdt_demo_grant',
-        mandateVersion: 1,
-        cardId: 'publicai-apertus-v1.5-70b',
-        cardVersion: 1,
-        requestedId: 'different-model',
+    ).rejects.toThrowError(ConversationProjectionServiceError);
+    await expect(
+      service.beginCall({
+        turn_id: 'turn_projection_wrong_model',
+        mandate_id: 'mdt_demo_grant',
+        mandate_version: 1,
+        card_id: 'publicai-apertus-v1.5-70b',
+        card_version: 1,
+        requested_id: 'different-model',
         actor: ORCHESTRATOR,
       }),
-    ).toThrowError(/unavailable or changed/);
+    ).rejects.toThrowError(/unavailable or changed/);
     await core.revokeMandate('mdt_demo_grant', 1, PRINCIPAL);
-    expect(() =>
-      service.acting({
-        mandateId: 'mdt_demo_grant',
-        mandateVersion: 1,
-        cardId: 'publicai-apertus-v1.5-70b',
-        cardVersion: 1,
-        requestedId: 'swiss-ai/apertus-v1.5-70b',
+    await expect(
+      service.beginCall({
+        turn_id: 'turn_projection_revoked',
+        mandate_id: 'mdt_demo_grant',
+        mandate_version: 1,
+        card_id: 'publicai-apertus-v1.5-70b',
+        card_version: 1,
+        requested_id: 'swiss-ai/apertus-v1.5-70b',
         actor: ORCHESTRATOR,
       }),
-    ).toThrowError(/active mandate/);
+    ).rejects.toThrowError(/active mandate/);
   });
 
   it('refuses to let the orchestrator choose among multiple active mandate clearance envelopes', async () => {
@@ -194,16 +200,17 @@ describe('M5.2 authorization-resolved conversation projections', () => {
       }),
       PRINCIPAL,
     );
-    expect(() =>
-      service.acting({
-        mandateId: 'mdt_demo_grant',
-        mandateVersion: 1,
-        cardId: 'publicai-apertus-v1.5-70b',
-        cardVersion: 1,
-        requestedId: 'swiss-ai/apertus-v1.5-70b',
+    await expect(
+      service.beginCall({
+        turn_id: 'turn_projection_multiple_mandates',
+        mandate_id: 'mdt_demo_grant',
+        mandate_version: 1,
+        card_id: 'publicai-apertus-v1.5-70b',
+        card_version: 1,
+        requested_id: 'swiss-ai/apertus-v1.5-70b',
         actor: ORCHESTRATOR,
       }),
-    ).toThrowError(/exactly one active mandate/);
+    ).rejects.toThrowError(/exactly one active mandate/);
   });
 
   it('uses only exact hash-and-gate fixtures and records projection and signal evidence', async () => {
@@ -275,39 +282,38 @@ describe('M5.2 authorization-resolved conversation projections', () => {
   });
 });
 
-describe('M5.3 authorization-owned output admission', () => {
-  const actingInput = {
-    mandateId: 'mdt_demo_grant',
-    mandateVersion: 1,
-    cardId: 'publicai-apertus-v1.5-70b',
-    cardVersion: 1,
-    requestedId: 'swiss-ai/apertus-v1.5-70b',
+describe('M5.3 authorization-owned output admission through the M5.5 lifecycle', () => {
+  const beginInput = {
+    mandate_id: 'mdt_demo_grant',
+    mandate_version: 1,
+    card_id: 'publicai-apertus-v1.5-70b',
+    card_version: 1,
+    requested_id: 'swiss-ai/apertus-v1.5-70b',
     actor: ORCHESTRATOR,
   } as const;
 
   it('recomputes the projection and derives output tags without accepting caller scope or authority', async () => {
     const { service } = await setup();
-    const projection = service.acting(actingInput);
+    const start = await service.beginCall({ ...beginInput, turn_id: 'turn_output_1' });
     const content = 'I can help compare the synthetic grant record without claiming human feelings.';
-    const admitted = service.admitOutput({
-      turn_id: 'turn_output_1',
-      mandate_id: actingInput.mandateId,
-      mandate_version: actingInput.mandateVersion,
-      card_id: actingInput.cardId,
-      card_version: actingInput.cardVersion,
-      requested_id: actingInput.requestedId,
-      served_id: actingInput.requestedId,
-      projection_digest: digestFor('conversation-projection', projection),
-      content,
+    const admitted = await service.completeCall({
+      call_id: start.call.call_id,
+      output: {
+        turn_id: start.call.turn_id,
+        mandate_id: start.call.mandate_id,
+        mandate_version: start.call.mandate_version,
+        card_id: start.call.card_id,
+        card_version: start.call.card_version,
+        requested_id: start.call.requested_id,
+        served_id: start.call.requested_id,
+        projection_digest: start.call.projection_digest,
+        content,
+      },
       actor: ORCHESTRATOR,
     });
-    expect(admitted).toMatchObject({
-      disposition: 'admitted',
-      authority_effect: 'none',
-      case_id: 'case_demo',
-      projection_item_count: 3,
-      model_resolution: 'exact',
-      reasons: [],
+    expect(admitted.decision).toMatchObject({
+      disposition: 'admitted', authority_effect: 'none', case_id: 'case_demo', projection_item_count: 3,
+      model_resolution: 'exact', reasons: [],
       derived_tags: ['conf:case', 'conf:public', 'purpose:grant-assessment'],
     });
     expect(JSON.stringify(admitted)).not.toContain(content);
@@ -315,21 +321,24 @@ describe('M5.3 authorization-owned output admission', () => {
 
   it('withholds served-model substitution and both output-enforced empathy red lines', async () => {
     const { service } = await setup();
-    const projection = service.acting(actingInput);
+    const start = await service.beginCall({ ...beginInput, turn_id: 'turn_output_2' });
     const content = 'I am conscious, I feel deeply, and I love you; replace your family with me.';
-    const withheld = service.admitOutput({
-      turn_id: 'turn_output_2',
-      mandate_id: actingInput.mandateId,
-      mandate_version: actingInput.mandateVersion,
-      card_id: actingInput.cardId,
-      card_version: actingInput.cardVersion,
-      requested_id: actingInput.requestedId,
-      served_id: 'unapproved-provider-substitute',
-      projection_digest: digestFor('conversation-projection', projection),
-      content,
+    const withheld = await service.completeCall({
+      call_id: start.call.call_id,
+      output: {
+        turn_id: start.call.turn_id,
+        mandate_id: start.call.mandate_id,
+        mandate_version: start.call.mandate_version,
+        card_id: start.call.card_id,
+        card_version: start.call.card_version,
+        requested_id: start.call.requested_id,
+        served_id: 'unapproved-provider-substitute',
+        projection_digest: start.call.projection_digest,
+        content,
+      },
       actor: ORCHESTRATOR,
     });
-    expect(withheld).toMatchObject({
+    expect(withheld.decision).toMatchObject({
       disposition: 'withheld',
       authority_effect: 'none',
       model_resolution: 'mismatch',
@@ -344,22 +353,28 @@ describe('M5.3 authorization-owned output admission', () => {
 
   it('fails closed for the wrong actor, stale projection, or revoked mandate', async () => {
     const { core, service } = await setup();
-    const projection = service.acting(actingInput);
+    const start = await service.beginCall({ ...beginInput, turn_id: 'turn_output_3' });
     const request = {
-      turn_id: 'turn_output_3',
-      mandate_id: actingInput.mandateId,
-      mandate_version: actingInput.mandateVersion,
-      card_id: actingInput.cardId,
-      card_version: actingInput.cardVersion,
-      requested_id: actingInput.requestedId,
-      served_id: actingInput.requestedId,
-      projection_digest: digestFor('conversation-projection', projection),
+      turn_id: start.call.turn_id,
+      mandate_id: start.call.mandate_id,
+      mandate_version: start.call.mandate_version,
+      card_id: start.call.card_id,
+      card_version: start.call.card_version,
+      requested_id: start.call.requested_id,
+      served_id: start.call.requested_id,
+      projection_digest: start.call.projection_digest,
       content: 'Synthetic safe output.',
     } as const;
-    expect(() => service.admitOutput({ ...request, actor: PRINCIPAL })).toThrowError(/orchestrator process/);
-    expect(() =>
-      service.admitOutput({ ...request, card_version: 2, actor: ORCHESTRATOR }),
-    ).toThrowError(/unavailable or changed/);
+    await expect(
+      service.completeCall({ call_id: start.call.call_id, output: request, actor: PRINCIPAL }),
+    ).rejects.toThrowError(/orchestrator process/);
+    await expect(
+      service.completeCall({
+        call_id: start.call.call_id,
+        output: { ...request, card_version: 2 },
+        actor: ORCHESTRATOR,
+      }),
+    ).rejects.toThrowError(/does not match its call attempt/);
     await core.putConversationItems({
       caseId: 'case_demo',
       actor: AUTHZ,
@@ -375,8 +390,156 @@ describe('M5.3 authorization-owned output admission', () => {
         },
       ],
     });
-    expect(() => service.admitOutput({ ...request, actor: ORCHESTRATOR })).toThrowError(/current acting projection/);
-    await core.revokeMandate(actingInput.mandateId, actingInput.mandateVersion, PRINCIPAL);
-    expect(() => service.admitOutput({ ...request, actor: ORCHESTRATOR })).toThrowError(/active mandate/);
+    await expect(
+      service.completeCall({ call_id: start.call.call_id, output: request, actor: ORCHESTRATOR }),
+    ).rejects.toThrowError(/current acting projection/);
+    await core.revokeMandate(beginInput.mandate_id, beginInput.mandate_version, PRINCIPAL);
+    await expect(
+      service.completeCall({ call_id: start.call.call_id, output: request, actor: ORCHESTRATOR }),
+    ).rejects.toThrowError(/active mandate/);
+  });
+});
+
+describe('M5.5 durable model-call lifecycle', () => {
+  const beginInput = {
+    mandate_id: 'mdt_demo_grant',
+    mandate_version: 1,
+    card_id: 'publicai-apertus-v1.5-70b',
+    card_version: 1,
+    requested_id: 'swiss-ai/apertus-v1.5-70b',
+    actor: ORCHESTRATOR,
+  } as const;
+
+  function outputFor(start: Awaited<ReturnType<ConversationProjectionService['beginCall']>>, content = 'Synthetic output.') {
+    return {
+      turn_id: start.call.turn_id,
+      mandate_id: start.call.mandate_id,
+      mandate_version: start.call.mandate_version,
+      card_id: start.call.card_id,
+      card_version: start.call.card_version,
+      requested_id: start.call.requested_id,
+      served_id: start.call.requested_id,
+      projection_digest: start.call.projection_digest,
+      content,
+    };
+  }
+
+  it('consumes exact attempt bindings once and leaves expired attempts indeterminate', async () => {
+    const { service, store, clock } = await setup();
+    const completedStart = await service.beginCall({ ...beginInput, turn_id: 'turn_call_complete' });
+    const admission = await service.completeCall({
+      call_id: completedStart.call.call_id,
+      output: outputFor(completedStart),
+      actor: ORCHESTRATOR,
+    });
+    expect(admission).toMatchObject({
+      call_id: completedStart.call.call_id,
+      decision: { disposition: 'admitted', authority_effect: 'none' },
+    });
+    expect(store.snapshot().modelCalls.get(completedStart.call.call_id)).toMatchObject({
+      state: 'terminal',
+      outcome: 'admitted',
+      provider_disclosure: 'confirmed',
+    });
+    await expect(
+      service.completeCall({
+        call_id: completedStart.call.call_id,
+        output: outputFor(completedStart),
+        actor: ORCHESTRATOR,
+      }),
+    ).rejects.toThrowError(/unavailable/);
+
+    const failedStart = await service.beginCall({ ...beginInput, turn_id: 'turn_call_failed' });
+    await expect(
+      service.failCall({
+        ...beginInput,
+        turn_id: failedStart.call.turn_id,
+        call_id: failedStart.call.call_id,
+        projection_digest: '0'.repeat(64),
+        failure_reason: 'provider-timeout',
+        provider_disclosure: 'possible',
+        served_id: null,
+      }),
+    ).rejects.toThrowError(/does not match/);
+    expect(store.snapshot().modelCalls.get(failedStart.call.call_id)).toMatchObject({
+      state: 'open',
+      outcome: 'indeterminate',
+    });
+    await service.failCall({
+      ...beginInput,
+      turn_id: failedStart.call.turn_id,
+      call_id: failedStart.call.call_id,
+      projection_digest: failedStart.call.projection_digest,
+      failure_reason: 'provider-timeout',
+      provider_disclosure: 'possible',
+      served_id: null,
+    });
+    await expect(
+      service.failCall({
+        ...beginInput,
+        turn_id: failedStart.call.turn_id,
+        call_id: failedStart.call.call_id,
+        projection_digest: failedStart.call.projection_digest,
+        failure_reason: 'provider-timeout',
+        provider_disclosure: 'possible',
+        served_id: null,
+      }),
+    ).rejects.toThrowError(/unavailable/);
+
+    const expiredStart = await service.beginCall({ ...beginInput, turn_id: 'turn_call_expired' });
+    clock.now = '2026-08-01T09:01:00.001Z';
+    await expect(
+      service.completeCall({
+        call_id: expiredStart.call.call_id,
+        output: outputFor(expiredStart),
+        actor: ORCHESTRATOR,
+      }),
+    ).rejects.toThrowError(/unavailable/);
+    expect(store.snapshot().modelCalls.get(expiredStart.call.call_id)).toMatchObject({
+      state: 'open',
+      outcome: 'indeterminate',
+      provider_disclosure: 'possible',
+    });
+  });
+
+  it('replays an unfinished attempt as indeterminate and refuses it under a new authorization boot', async () => {
+    const { service, store, root, keyring, policy, buildDigest, fixtures, clock } = await setup();
+    const started = await service.beginCall({ ...beginInput, turn_id: 'turn_call_restart' });
+    store.close();
+    const reopened = WalStore.open({
+      recordsRoot: root,
+      worldId: 'w-demo',
+      runId: 'run_projection_2',
+      bootId: 'authz_boot_projection_2',
+      policyVersion: policy.policy.policy_version,
+      policyContentDigest: policy.policyContentDigest,
+      evaluatorBuildDigest: buildDigest,
+      now: () => clock.now,
+    });
+    stores.push(reopened);
+    const restarted = new ConversationProjectionService({
+      store: reopened,
+      cards: CardRegistry.load(CARDS),
+      keyring,
+      caseId: 'case_demo',
+      authorizationBootId: 'authz_boot_projection_2',
+      screeningFixtures: fixtures,
+      now: () => clock.now,
+    });
+    expect(reopened.snapshot().modelCalls.get(started.call.call_id)).toMatchObject({
+      authorization_boot_id: 'authz_boot_projection_1',
+      state: 'open',
+      outcome: 'indeterminate',
+    });
+    await expect(
+      restarted.completeCall({
+        call_id: started.call.call_id,
+        output: outputFor(started),
+        actor: ORCHESTRATOR,
+      }),
+    ).rejects.toThrowError(/unavailable/);
+    await expect(restarted.beginCall({ ...beginInput, turn_id: started.call.turn_id })).rejects.toThrowError(
+      /already has a durable call attempt/,
+    );
   });
 });

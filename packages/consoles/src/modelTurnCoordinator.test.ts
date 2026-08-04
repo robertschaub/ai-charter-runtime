@@ -22,7 +22,7 @@ import {
   type Mandate,
   type StoreItem,
 } from 'gate-core';
-import { OpenAiCompatibleAdapter } from 'model-adapters';
+import { ModelAdapterError, OpenAiCompatibleAdapter } from 'model-adapters';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import {
@@ -182,6 +182,7 @@ async function authorizationHarness() {
     cards: CardRegistry.load(CARDS),
     keyring,
     caseId: 'case_demo',
+    authorizationBootId: 'authz_boot_model_turn_1',
     screeningFixtures: [],
     now: () => '2026-08-01T09:00:00.000Z',
   });
@@ -256,7 +257,7 @@ const turn = {
   maxOutputTokens: 256,
 } as const;
 
-describe('M5.4 containment-only model-turn coordinator', () => {
+describe('M5.4 containment with M5.5 durable model-call evidence', () => {
   it('seals admitted bytes behind metadata-only quarantine after both real HTTP boundaries', async () => {
     const h = await authorizationHarness();
     const provider = await loopbackProvider();
@@ -291,11 +292,23 @@ describe('M5.4 containment-only model-turn coordinator', () => {
 
     const pending = coordinator.run(turn);
     await providerEntered;
+    expect([...h.store.snapshot().modelCalls.values()].find((call) => call.turn_id === turn.turnId)).toMatchObject({
+      state: 'open',
+      outcome: 'indeterminate',
+      provider_disclosure: 'possible',
+    });
+    expect(h.store.snapshot().accessRecords).toContainEqual(
+      expect.objectContaining({
+        route: 'POST /w/{world_id}/model-calls/begin',
+        operation_evidence: expect.objectContaining({ turn_id: turn.turnId, state: 'open' }),
+      }),
+    );
     await expect(coordinator.run({ ...turn, turnId: 'turn_model_concurrent' })).rejects.toEqual(
       expect.objectContaining({ code: 'lane-busy' }),
     );
     releaseProvider();
     const outcome = await pending;
+    if (outcome.disposition !== 'quarantined') throw new Error('expected quarantined output');
     expect(outcome).toMatchObject({
       disposition: 'quarantined',
       admission: { disposition: 'admitted', authority_effect: 'none' },
@@ -308,6 +321,12 @@ describe('M5.4 containment-only model-turn coordinator', () => {
     expect(JSON.stringify(outcome)).not.toContain(content);
     expect(JSON.stringify(quarantine)).not.toContain(content);
     expect(JSON.stringify(h.store.snapshot().accessRecords)).not.toContain(content);
+    expect(h.store.snapshot().modelCalls.get(outcome.quarantine.call_id)).toMatchObject({
+      state: 'terminal',
+      outcome: 'admitted',
+      provider_disclosure: 'confirmed',
+      output_digest: outcome.admission.output_digest,
+    });
     expect(provider.requests).toHaveLength(1);
     expect(JSON.stringify(provider.requests[0])).toContain('The synthetic grant criterion is published for public review.');
     expect(JSON.stringify(provider.requests[0])).not.toContain('Synthetic detail that this provider is not cleared to receive.');
@@ -344,11 +363,20 @@ describe('M5.4 containment-only model-turn coordinator', () => {
     expect(h.store.snapshot().accessRecords).toContainEqual(
       expect.objectContaining({
         operation_evidence: expect.objectContaining({
-          disposition: 'withheld',
-          reasons: ['served-model-mismatch'],
+          kind: 'model_call_admission',
+          decision: expect.objectContaining({
+            disposition: 'withheld',
+            reasons: ['served-model-mismatch'],
+          }),
         }),
       }),
     );
+    expect([...h.store.snapshot().modelCalls.values()].find((call) => call.turn_id === 'turn_model_mismatch')).toMatchObject({
+      state: 'terminal',
+      outcome: 'withheld',
+      served_id: 'substitute-model',
+      provider_disclosure: 'confirmed',
+    });
   });
 
   it('withholds a configured red-line match without treating it as releasable output', async () => {
@@ -425,6 +453,57 @@ describe('M5.4 containment-only model-turn coordinator', () => {
     );
     expect(provider.requests).toHaveLength(1);
     expect(revoked.quarantine.size).toBe(0);
+    expect([...h.store.snapshot().modelCalls.values()].find((call) => call.turn_id === 'turn_model_revoked')).toMatchObject({
+      state: 'terminal',
+      outcome: 'failed',
+      failure_reason: 'authorization-invalidated',
+      provider_disclosure: 'confirmed',
+    });
+  });
+
+  it('durably records timeout and outage metadata without provider error detail', async () => {
+    const h = await authorizationHarness();
+    const provider = await loopbackProvider();
+    for (const failure of [
+      { turnId: 'turn_model_timeout', error: new ModelAdapterError('timeout', 'synthetic secret timeout detail') },
+      { turnId: 'turn_model_outage', error: new ModelAdapterError('provider-http', 'synthetic secret outage detail') },
+    ]) {
+      const coordinator = new ModelTurnCoordinator({
+        worldId: 'w-demo',
+        caseId: 'case_demo',
+        authorization: h.authorization,
+        lanes: [
+          {
+            ...lane(provider),
+            adapter: {
+              lane: 'publicai',
+              requestedId: turn.requestedId,
+              act: async () => {
+                throw failure.error;
+              },
+            },
+          },
+        ],
+      });
+      await expect(coordinator.run({ ...turn, turnId: failure.turnId })).rejects.toEqual(
+        expect.objectContaining({ code: 'provider-failure' }),
+      );
+    }
+    const calls = [...h.store.snapshot().modelCalls.values()];
+    expect(calls.find((call) => call.turn_id === 'turn_model_timeout')).toMatchObject({
+      outcome: 'failed',
+      failure_reason: 'provider-timeout',
+      provider_disclosure: 'possible',
+    });
+    expect(calls.find((call) => call.turn_id === 'turn_model_outage')).toMatchObject({
+      outcome: 'failed',
+      failure_reason: 'provider-unavailable',
+      provider_disclosure: 'possible',
+    });
+    const evidence = JSON.stringify(h.store.snapshot().accessRecords);
+    expect(evidence).not.toContain('synthetic secret timeout detail');
+    expect(evidence).not.toContain('synthetic secret outage detail');
+    expect(provider.requests).toHaveLength(0);
   });
 
   it('halts on tool calls, malformed provider evidence, or a changed admission binding', async () => {
@@ -478,11 +557,12 @@ describe('M5.4 containment-only model-turn coordinator', () => {
       worldId: 'w-demo',
       caseId: 'case_demo',
       authorization: {
-        actingProjection: (input) => h.authorization.actingProjection(input),
-        admitModelOutput: async (world, input) => ({
-          ...(await h.authorization.admitModelOutput(world, input)),
-          output_digest: '0'.repeat(64),
-        }),
+        beginModelCall: (input) => h.authorization.beginModelCall(input),
+        admitModelOutput: async (world, callId, input) => {
+          const admission = await h.authorization.admitModelOutput(world, callId, input);
+          return { ...admission, decision: { ...admission.decision, output_digest: '0'.repeat(64) } };
+        },
+        failModelCall: (world, input) => h.authorization.failModelCall(world, input),
       },
       lanes: [lane(provider)],
     });
@@ -492,5 +572,27 @@ describe('M5.4 containment-only model-turn coordinator', () => {
     expect(changedBindingCoordinator.quarantine.size).toBe(0);
     expect(provider.requests).toHaveLength(4);
     expect(String(new ModelTurnError('admission-binding-invalid'))).not.toContain(bindingContent);
+    const calls = [...h.store.snapshot().modelCalls.values()];
+    expect(calls.find((call) => call.turn_id === 'turn_model_tool_call')).toMatchObject({
+      outcome: 'failed',
+      failure_reason: 'tool-calls-refused',
+      provider_disclosure: 'confirmed',
+    });
+    expect(calls.find((call) => call.turn_id === 'turn_model_malformed')).toMatchObject({
+      outcome: 'failed',
+      failure_reason: 'malformed-response',
+      provider_disclosure: 'confirmed',
+      served_id: null,
+    });
+    expect(calls.find((call) => call.turn_id === 'turn_model_malformed_unicode')).toMatchObject({
+      outcome: 'failed',
+      failure_reason: 'malformed-response',
+      served_id: turn.requestedId,
+    });
+    expect(calls.find((call) => call.turn_id === 'turn_model_binding_changed')).toMatchObject({
+      outcome: 'admitted',
+    });
+    expect(JSON.stringify(h.store.snapshot().accessRecords)).not.toContain(toolContent);
+    expect(JSON.stringify(h.store.snapshot().accessRecords)).not.toContain(bindingContent);
   });
 });

@@ -17,6 +17,14 @@ overlapping at `SWEEP_INTERVAL_MS`. The supervisor installs shutdown handlers be
 child closes on IPC disconnect; a hard process-tree death may still leave the deliberately crash-visible
 writer lease, which is cleared only after confirming its owner is gone.
 
+**Amendment (M5.5 durable model-call evidence, 2026-08-04):** authorization appends `model_call.open`
+under the world lock before returning any acting projection. That record binds one call reference to the
+authorization boot, world, case, turn, mandate/version, card/version, requested model, projection digest,
+item count, and bounded expiry. Exactly one `model_call.complete` or `model_call.fail` may consume it. A
+missing, expired, mismatched, replayed, or previous-boot reference fails closed. Replay preserves an unfinished
+attempt as `open / indeterminate / provider_disclosure: possible`; recovery never invents a terminal outcome,
+and the same case/turn cannot start a replacement attempt.
+
 ## Context
 
 The authorization service is the single serialization point. Commitment is two-phase: `commit-verify`

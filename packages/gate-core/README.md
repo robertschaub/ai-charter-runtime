@@ -45,10 +45,15 @@ reloads and verifies the signed card, intersects mandate and card clearances, an
 orchestrator-only acting projection for the configured case. Screening projects only fixture-named suspect
 proposal items under the screening role. Fixtures are keyed by exact proposal hash and gate; absent,
 mismatched, unavailable, or restricted evidence records a skipped check and required screening escalates.
-M5.3, implementation-reviewed at `1cc7fb2`, adds a strict, Origin-guarded orchestrator process route that
-recomputes the current acting projection before admitting model output. Served-model mismatch or a configured
+M5.3, implementation-reviewed at `1cc7fb2`, adds strict authorization-owned output admission. M5.5 makes the
+durable call lifecycle the only process/service path to that admission: an Origin-guarded orchestrator route
+atomically records a single-use call binding before returning the current acting projection, and completion
+recomputes that projection before admitting model output. Served-model mismatch or a configured
 lexical match for either output-enforced empathy red line withholds the output; obvious paraphrases can remain
 undetected, so a clean admission is not semantic red-line clearance. Every result has `authority_effect: none`.
 The access chain receives bindings, counts, tags, reasons, and domain-separated digests, never raw model text.
-The native process makes no model-provider call and the browser message route remains closed.
+Timeout, outage, malformed response, tool-call refusal, and authorization invalidation use fixed metadata-only
+failure classes. Missing, expired, replayed, mismatched, or previous-boot references fail closed; an interrupted
+attempt replays as open and indeterminate and cannot be resumed or replaced for that turn. The native process
+makes no model-provider call and the browser message route remains closed.
 Run `npm test` and `npm run typecheck` from the repository root.

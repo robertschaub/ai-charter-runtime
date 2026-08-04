@@ -222,6 +222,7 @@ export async function startAuthorizationProcess(
       cards,
       keyring,
       caseId: demoCaseId,
+      authorizationBootId: bootId,
       screeningFixtures,
     });
     const authorization = new AuthorizationCore({

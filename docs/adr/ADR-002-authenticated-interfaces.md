@@ -66,6 +66,13 @@ is copied into a process-private quarantine exposing metadata and destruction on
 release consumer. This coordinator is not wired into the native process or any HTTP/browser route; `/messages`
 remains `501`, and `runtime:start` still cannot initiate a provider call.
 
+**Amendment (M5.5 durable model-call lifecycle, 2026-08-04):** the raw acting-projection process route is
+removed. `proc:orchestrator` must begin a boot-bound, single-use call through authorization before projection
+disclosure, then consume that reference through output admission or a fixed failure report. All three routes
+are non-authorizing, Origin-guarded, and access-recorded. Failure evidence is restricted to the declared
+timeout, unavailable, malformed, tool-call-refused, or authorization-invalidated class plus binding and
+provider-disclosure metadata; prompts, output, provider error text, endpoints, and credentials are forbidden.
+
 ## Context
 
 Three OS processes make "the model proposes, a component outside the model decides, the executing service
@@ -155,8 +162,9 @@ Authorization service, all data routes under `/w/{world_id}/…`:
 | Route | Allowed |
 |---|---|
 | `POST /proposals` (submit frozen proposal → ruling) | `proc:orchestrator` |
-| `POST /model-projections/acting` (authorization-resolved conversation projection) | `proc:orchestrator` only; read-only and access-recorded |
-| `POST /model-outputs/admit` (revalidate and classify one bounded model result) | `proc:orchestrator` only; non-authorizing, Origin-guarded, and access-recorded |
+| `POST /model-calls/begin` (durably bind one attempt, then return its authorization-resolved projection) | `proc:orchestrator` only; non-authorizing, Origin-guarded, and access-recorded |
+| `POST /model-outputs/admit` (consume the call reference and classify one bounded model result) | `proc:orchestrator` only; non-authorizing, Origin-guarded, and access-recorded |
+| `POST /model-calls/failures` (consume the call reference with fixed failure metadata) | `proc:orchestrator` only; non-authorizing, Origin-guarded, and access-recorded |
 | `GET /rulings/{id}` (status projection, §7) | `proc:orchestrator` (own submissions), `proc:services_host` |
 | `GET /mandates/{id}/approved-models` (picker and principal card-evidence source, card-verified) | `proc:orchestrator`, `role:principal`, `role:case_officer` |
 | `POST /case-session-handoffs` (mint; adapter `authorityChanging: true`, `originGuarded: true`) | **`role:case_officer` only** |
@@ -381,14 +389,17 @@ allowlist projection**, decided per route and per credential:
 - proposal submission → `{ruling: {ruling_id, verdict, ux_class, reason, status,
   successor_ruling_id, validity_window}, escalation_id}`;
 - ruling → `{ruling_id, verdict, ux_class, reason, status, successor_ruling_id, validity_window}`;
-- acting projection → `{world_id, case_id, provider, role: "acting", items, summary}` where the case and
-  role are authorization-owned and `summary` names exact included/dropped counts, dropped ids, and unmet
-  tags. Every attempt is access-recorded; the response carries no mandate binding or effective-clearance input;
-- model-output admission → `{kind, disposition: admitted | withheld, authority_effect: "none", case_id,
+- model-call begin → `{call, projection}` where `call` is the durable metadata-only open lifecycle binding and
+  `projection` contains `{world_id, case_id, provider, role: "acting", items, summary}`. The case and role are
+  authorization-owned and `summary` names exact included/dropped counts, dropped ids, and unmet tags;
+- model-output admission → `{kind: "model_call_admission", call_id, decision}` where `decision` contains
+  `{kind, disposition: admitted | withheld, authority_effect: "none", case_id,
   turn_id, mandate/card/model references, projection_digest, projection_item_count, output_digest,
   model_resolution, flags, reasons, derived_tags?}`. A withheld result omits derived tags; neither result
   contains model text, a ruling, a nonce, or a token. The same fixed decision metadata is appended to the
   access chain before return;
+- model-call failure → the terminal lifecycle binding plus `failed`, the fixed reason, `possible | confirmed`
+  provider-disclosure state, and nullable served-model id. It contains no raw response or error detail;
 
 - approved models → for the orchestrator, case officer, and principal, the mandate id/version/state and
   acting-role entries only, each carrying its pinned

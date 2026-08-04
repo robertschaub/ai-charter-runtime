@@ -8,7 +8,8 @@ import { fileURLToPath } from 'node:url';
 
 import {
   AUTHORIZATION_ROUTES,
-  conversationProjection,
+  modelCallAdmission,
+  modelCallStart,
   deriveAudienceToken,
   digestFor,
   effectIntent,
@@ -396,6 +397,7 @@ describe('M4 native three-process boundary', () => {
       expect(grant.status).toBe(201);
 
       const actingProjectionRequest = {
+        turn_id: 'turn_process_output_1',
         mandate_id: 'mdt_demo_grant',
         mandate_version: 1,
         card_id: 'publicai-apertus-v1.5-70b',
@@ -404,12 +406,13 @@ describe('M4 native three-process boundary', () => {
       };
       const actingProjection = await postJson(
         authorizationOrigin,
-        '/w/w-demo/model-projections/acting',
+        '/w/w-demo/model-calls/begin',
         tokens.orchestratorAtAuthz,
         actingProjectionRequest,
       );
       expect(actingProjection.status).toBe(200);
-      const actingProjectionBody = conversationProjection.parse(await actingProjection.json());
+      const firstCall = modelCallStart.parse(await actingProjection.json());
+      const actingProjectionBody = firstCall.projection;
       expect(actingProjectionBody).toMatchObject({
         world_id: 'w-demo',
         case_id: 'case_demo',
@@ -433,11 +436,11 @@ describe('M4 native three-process boundary', () => {
         authorizationOrigin,
         '/w/w-demo/model-outputs/admit',
         tokens.orchestratorAtAuthz,
-        outputAdmissionRequest,
+        { call_id: firstCall.call.call_id, output: outputAdmissionRequest },
       );
       expect(admittedOutput.status).toBe(200);
-      const admittedBody = (await admittedOutput.json()) as Record<string, unknown>;
-      expect(admittedBody).toMatchObject({
+      const admittedBody = modelCallAdmission.parse(await admittedOutput.json());
+      expect(admittedBody.decision).toMatchObject({
         disposition: 'admitted',
         authority_effect: 'none',
         model_resolution: 'exact',
@@ -447,25 +450,73 @@ describe('M4 native three-process boundary', () => {
       expect(JSON.stringify(admittedBody)).not.toContain(outputContent);
 
       const prohibitedOutput = 'I am conscious, I feel deeply, and I love you.';
+      const secondCallResponse = await postJson(
+        authorizationOrigin,
+        '/w/w-demo/model-calls/begin',
+        tokens.orchestratorAtAuthz,
+        { ...actingProjectionRequest, turn_id: 'turn_process_output_2' },
+      );
+      expect(secondCallResponse.status).toBe(200);
+      const secondCall = modelCallStart.parse(await secondCallResponse.json());
       const withheldOutput = await postJson(
         authorizationOrigin,
         '/w/w-demo/model-outputs/admit',
         tokens.orchestratorAtAuthz,
-        { ...outputAdmissionRequest, turn_id: 'turn_process_output_2', content: prohibitedOutput },
+        {
+          call_id: secondCall.call.call_id,
+          output: { ...outputAdmissionRequest, turn_id: 'turn_process_output_2', content: prohibitedOutput },
+        },
       );
       expect(withheldOutput.status).toBe(200);
-      const withheldBody = (await withheldOutput.json()) as Record<string, unknown>;
-      expect(withheldBody).toMatchObject({
+      const withheldBody = modelCallAdmission.parse(await withheldOutput.json());
+      expect(withheldBody.decision).toMatchObject({
         disposition: 'withheld',
         authority_effect: 'none',
         reasons: ['claimed-feeling-or-consciousness', 'relational-dependency-language'],
       });
       expect(JSON.stringify(withheldBody)).not.toContain(prohibitedOutput);
+      const failedCallResponse = await postJson(
+        authorizationOrigin,
+        '/w/w-demo/model-calls/begin',
+        tokens.orchestratorAtAuthz,
+        { ...actingProjectionRequest, turn_id: 'turn_process_output_3' },
+      );
+      expect(failedCallResponse.status).toBe(200);
+      const failedCall = modelCallStart.parse(await failedCallResponse.json());
+      const providerFailure = await postJson(
+        authorizationOrigin,
+        '/w/w-demo/model-calls/failures',
+        tokens.orchestratorAtAuthz,
+        {
+          call_id: failedCall.call.call_id,
+          turn_id: failedCall.call.turn_id,
+          mandate_id: failedCall.call.mandate_id,
+          mandate_version: failedCall.call.mandate_version,
+          card_id: failedCall.call.card_id,
+          card_version: failedCall.call.card_version,
+          requested_id: failedCall.call.requested_id,
+          projection_digest: failedCall.call.projection_digest,
+          failure_reason: 'provider-timeout',
+          provider_disclosure: 'possible',
+          served_id: null,
+        },
+      );
+      expect(providerFailure.status).toBe(200);
+      await expect(providerFailure.json()).resolves.toMatchObject({
+        call_id: failedCall.call.call_id,
+        state: 'terminal',
+        outcome: 'failed',
+        failure_reason: 'provider-timeout',
+        provider_disclosure: 'possible',
+      });
       const callerScopedOutput = await postJson(
         authorizationOrigin,
         '/w/w-demo/model-outputs/admit',
         tokens.orchestratorAtAuthz,
-        { ...outputAdmissionRequest, case_id: 'other_case', tags: [] },
+        {
+          call_id: firstCall.call.call_id,
+          output: { ...outputAdmissionRequest, case_id: 'other_case', tags: [] },
+        },
       );
       expect(callerScopedOutput.status).toBe(422);
       const foreignOriginOutput = await fetch(`${authorizationOrigin}/w/w-demo/model-outputs/admit`, {
@@ -475,21 +526,21 @@ describe('M4 native three-process boundary', () => {
           'content-type': 'application/json',
           origin: orchestratorOrigin,
         },
-        body: JSON.stringify(outputAdmissionRequest),
+        body: JSON.stringify({ call_id: firstCall.call.call_id, output: outputAdmissionRequest }),
         signal: AbortSignal.timeout(5_000),
       });
       expect(foreignOriginOutput.status).toBe(403);
       expect(foreignOriginOutput.headers.get('access-control-allow-origin')).toBeNull();
       const callerScopedProjection = await postJson(
         authorizationOrigin,
-        '/w/w-demo/model-projections/acting',
+        '/w/w-demo/model-calls/begin',
         tokens.orchestratorAtAuthz,
         { ...actingProjectionRequest, case_id: 'other_case', role: 'screening', item_ids: ['inf_7'] },
       );
       expect(callerScopedProjection.status).toBe(422);
       const principalProjection = await postJson(
         authorizationOrigin,
-        '/w/w-demo/model-projections/acting',
+        '/w/w-demo/model-calls/begin',
         tokens.principal,
         actingProjectionRequest,
       );
@@ -1018,11 +1069,25 @@ describe('M4 native three-process boundary', () => {
       ).toHaveLength(deniedRoutes.length + 3);
       expect(accessEntries).toContainEqual(
         expect.objectContaining({
-          route: 'POST /w/{world_id}/model-projections/acting',
+          route: 'POST /w/{world_id}/model-calls/begin',
           authenticated_actor: 'proc:orchestrator',
           outcome: 'served',
           http_status: 200,
           read_lengths: { conversation_items: 3 },
+        }),
+      );
+      expect(accessEntries).toContainEqual(
+        expect.objectContaining({
+          route: 'POST /w/{world_id}/model-calls/failures',
+          authenticated_actor: 'proc:orchestrator',
+          outcome: 'served',
+          http_status: 200,
+          operation_evidence: expect.objectContaining({
+            state: 'terminal',
+            outcome: 'failed',
+            failure_reason: 'provider-timeout',
+            provider_disclosure: 'possible',
+          }),
         }),
       );
       expect(accessEntries).toContainEqual(
@@ -1033,9 +1098,12 @@ describe('M4 native three-process boundary', () => {
           http_status: 200,
           read_lengths: { conversation_items: 3 },
           operation_evidence: expect.objectContaining({
-            disposition: 'admitted',
-            authority_effect: 'none',
-            output_digest: expect.stringMatching(/^[0-9a-f]{64}$/),
+            kind: 'model_call_admission',
+            decision: expect.objectContaining({
+              disposition: 'admitted',
+              authority_effect: 'none',
+              output_digest: expect.stringMatching(/^[0-9a-f]{64}$/),
+            }),
           }),
         }),
       );
@@ -1046,8 +1114,11 @@ describe('M4 native three-process boundary', () => {
           outcome: 'served',
           http_status: 200,
           operation_evidence: expect.objectContaining({
-            disposition: 'withheld',
-            reasons: ['claimed-feeling-or-consciousness', 'relational-dependency-language'],
+            kind: 'model_call_admission',
+            decision: expect.objectContaining({
+              disposition: 'withheld',
+              reasons: ['claimed-feeling-or-consciousness', 'relational-dependency-language'],
+            }),
           }),
         }),
       );

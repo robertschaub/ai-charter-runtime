@@ -35,7 +35,6 @@ import {
 import type { Keyring } from './keyring.js';
 import {
   classToken,
-  cardSlug,
   browserOrigin,
   disposition,
   effectIntent,
@@ -45,8 +44,9 @@ import {
   hexDigest,
   id,
   integer,
-  modelId,
-  modelOutputAdmissionRequest,
+  modelCallAdmissionRequest,
+  modelCallBeginRequest,
+  modelCallFailureRequest,
   timestamp,
   worldId,
   type Mandate,
@@ -60,15 +60,6 @@ const proposalRequest = z
     service: id,
     action_class: classToken,
     context: jsonObject.optional(),
-  })
-  .strict();
-const actingProjectionRequest = z
-  .object({
-    mandate_id: id,
-    mandate_version: integer.min(1),
-    card_id: cardSlug,
-    card_version: integer.min(1),
-    requested_id: modelId,
   })
   .strict();
 const commitVerifyRequest = z
@@ -382,34 +373,30 @@ export class AuthorizationHttpServer {
           }),
         };
       },
-      'conversation.project-acting': async (request, context) => {
-        const parsed = actingProjectionRequest.parse(await body(request));
-        const projection = options.conversationProjections.acting({
-          mandateId: parsed.mandate_id,
-          mandateVersion: parsed.mandate_version,
-          cardId: parsed.card_id,
-          cardVersion: parsed.card_version,
-          requestedId: parsed.requested_id,
-          actor: requireActor(context),
-        });
+      'model-call.begin': async (request, context) => {
+        const parsed = modelCallBeginRequest.parse(await body(request));
+        const started = await options.conversationProjections.beginCall({ ...parsed, actor: requireActor(context) });
         return {
           status: 200,
-          body: projection,
-          readLengths: { conversation_items: projection.items.length },
+          body: started,
+          readLengths: { conversation_items: started.projection.items.length },
+          accessEvidence: started.call,
         };
       },
       'conversation.admit-output': async (request, context) => {
-        const parsed = modelOutputAdmissionRequest.parse(await body(request));
-        const decision = options.conversationProjections.admitOutput({
-          ...parsed,
-          actor: requireActor(context),
-        });
+        const parsed = modelCallAdmissionRequest.parse(await body(request));
+        const admission = await options.conversationProjections.completeCall({ ...parsed, actor: requireActor(context) });
         return {
           status: 200,
-          body: decision,
-          readLengths: { conversation_items: decision.projection_item_count },
-          accessEvidence: decision,
+          body: admission,
+          readLengths: { conversation_items: admission.decision.projection_item_count },
+          accessEvidence: admission,
         };
+      },
+      'model-call.fail': async (request, context) => {
+        const parsed = modelCallFailureRequest.parse(await body(request));
+        const failed = await options.conversationProjections.failCall({ ...parsed, actor: requireActor(context) });
+        return { status: 200, body: failed, accessEvidence: failed };
       },
       'ruling.read': async (_request, context) => {
         const rulingId = context.params['id'];

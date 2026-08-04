@@ -1,25 +1,38 @@
 // SPDX-License-Identifier: MIT
-/** M5.4 orchestrator-owned, containment-only model-turn coordinator. */
+/** M5.4 containment plus M5.5 durable model-call lifecycle coordinator. */
 import {
   MAX_MODEL_OUTPUT_CHARS,
   canonicalize,
   cardSlug,
-  conversationProjection,
   digestFor,
   digestModelOutput,
   id,
   integer,
   modelId,
+  modelCallAdmission,
+  modelCallFailureRequest,
+  modelCallStart,
   modelOutputAdmission,
   modelOutputAdmissionRequest,
   sortedRestrictionTags,
   verifyDigest,
   worldId,
   type ConversationProjection,
+  type ModelCallAdmission,
+  type ModelCallFailedRecord,
+  type ModelCallFailureReason,
+  type ModelCallFailureRequest,
+  type ModelCallStart,
   type ModelOutputAdmission,
   type ModelOutputAdmissionRequest,
 } from 'gate-core';
-import type { ActingRequest, ActingResponse, ModelLane, OpenAiCompatibleAdapter } from 'model-adapters';
+import {
+  ModelAdapterError,
+  type ActingRequest,
+  type ActingResponse,
+  type ModelLane,
+  type OpenAiCompatibleAdapter,
+} from 'model-adapters';
 import { z } from 'zod';
 
 const modelTurnInput = z
@@ -38,6 +51,7 @@ const quarantinedModelOutputRef = z
   .object({
     kind: z.literal('quarantined_model_output'),
     release_state: z.literal('sealed-no-release-path'),
+    call_id: id,
     case_id: id,
     turn_id: id,
     card_id: cardSlug,
@@ -111,15 +125,21 @@ export interface ModelTurnLaneConfig {
 }
 
 export interface ModelTurnAuthorizationClient {
-  actingProjection(input: {
+  beginModelCall(input: {
     readonly worldId: string;
+    readonly turnId: string;
     readonly mandateId: string;
     readonly mandateVersion: number;
     readonly cardId: string;
     readonly cardVersion: number;
     readonly requestedId: string;
-  }): Promise<ConversationProjection>;
-  admitModelOutput(worldIdInput: string, input: ModelOutputAdmissionRequest): Promise<ModelOutputAdmission>;
+  }): Promise<ModelCallStart>;
+  admitModelOutput(
+    worldIdInput: string,
+    callIdInput: string,
+    input: ModelOutputAdmissionRequest,
+  ): Promise<ModelCallAdmission>;
+  failModelCall(worldIdInput: string, input: ModelCallFailureRequest): Promise<ModelCallFailedRecord>;
 }
 
 export interface ModelTurnCoordinatorOptions {
@@ -144,6 +164,7 @@ interface HeldOutput {
 }
 
 type QuarantineSealer = (
+  callId: string,
   request: ModelOutputAdmissionRequest,
   decision: AdmittedOutput,
   caseId: string,
@@ -175,6 +196,37 @@ function bindingMatches(
   );
 }
 
+function providerFailureEvidence(error: unknown): {
+  readonly failureReason: ModelCallFailureReason;
+  readonly providerDisclosure: 'possible' | 'confirmed';
+} {
+  if (error instanceof ModelAdapterError) {
+    if (error.code === 'timeout') return { failureReason: 'provider-timeout', providerDisclosure: 'possible' };
+    if (error.code === 'malformed-response') {
+      return { failureReason: 'malformed-response', providerDisclosure: 'confirmed' };
+    }
+    return {
+      failureReason: 'provider-unavailable',
+      providerDisclosure: error.httpStatus === undefined ? 'possible' : 'confirmed',
+    };
+  }
+  return { failureReason: 'provider-unavailable', providerDisclosure: 'possible' };
+}
+
+function protocolFailureEvidence(response: ActingResponse): {
+  readonly failureReason: ModelCallFailureReason;
+  readonly servedId: string | null;
+} {
+  const served = modelId.safeParse(response.servedId);
+  return {
+    failureReason:
+      served.success && Array.isArray(response.toolCalls) && response.toolCalls.length > 0
+        ? 'tool-calls-refused'
+        : 'malformed-response',
+    servedId: served.success ? served.data : null,
+  };
+}
+
 /**
  * Process-private holding area. M5.4 deliberately exposes metadata and destruction only:
  * no exported method can seal, read, or release the held bytes. Sealing is a module-private
@@ -192,16 +244,18 @@ export class ModelOutputQuarantine {
   constructor(options: { readonly maxEntries?: number; readonly maxHeldBytes?: number } = {}) {
     this.#maxEntries = integer.min(1).parse(options.maxEntries ?? 8);
     this.#maxHeldBytes = integer.min(1).parse(options.maxHeldBytes ?? 1_048_576);
-    quarantineSealers.set(this, (request, decision, caseId) => this.#seal(request, decision, caseId));
+    quarantineSealers.set(this, (callId, request, decision, caseId) => this.#seal(callId, request, decision, caseId));
   }
 
   #seal(
+    callIdInput: string,
     requestInput: ModelOutputAdmissionRequest,
     decisionInput: AdmittedOutput,
     caseIdInput: string,
   ): QuarantinedModelOutputRef {
     const request = modelOutputAdmissionRequest.parse(requestInput);
     const decision = modelOutputAdmission.parse(decisionInput);
+    const callId = id.parse(callIdInput);
     const caseId = id.parse(caseIdInput);
     if (decision.disposition !== 'admitted' || !bindingMatches(decision, request, caseId)) {
       throw new ModelTurnError('admission-binding-invalid');
@@ -210,6 +264,7 @@ export class ModelOutputQuarantine {
     const ref = quarantinedModelOutputRef.parse({
       kind: 'quarantined_model_output',
       release_state: 'sealed-no-release-path',
+      call_id: callId,
       case_id: caseId,
       turn_id: request.turn_id,
       card_id: request.card_id,
@@ -263,13 +318,14 @@ export class ModelOutputQuarantine {
 
 function sealQuarantinedOutput(
   quarantine: ModelOutputQuarantine,
+  callId: string,
   request: ModelOutputAdmissionRequest,
   decision: AdmittedOutput,
   caseId: string,
 ): QuarantinedModelOutputRef {
   const seal = quarantineSealers.get(quarantine);
   if (seal === undefined) throw new ModelTurnError('invalid-configuration');
-  return seal(request, decision, caseId);
+  return seal(callId, request, decision, caseId);
 }
 
 function projectionPrompt(projection: ConversationProjection): ActingRequest['messages'] {
@@ -348,11 +404,12 @@ export class ModelTurnCoordinator {
         throw new ModelTurnError(code);
       };
 
-      let projection: ConversationProjection;
+      let started: ModelCallStart;
       try {
-        projection = conversationProjection.parse(
-          await this.#authorization.actingProjection({
+        started = modelCallStart.parse(
+          await this.#authorization.beginModelCall({
             worldId: this.#worldId,
+            turnId: input.turnId,
             mandateId: input.mandateId,
             mandateVersion: input.mandateVersion,
             cardId: lane.cardId,
@@ -363,7 +420,18 @@ export class ModelTurnCoordinator {
       } catch {
         return halt('authorization-refused');
       }
+      const { call, projection } = started;
       if (
+        call.world_id !== this.#worldId ||
+        call.case_id !== this.#caseId ||
+        call.turn_id !== input.turnId ||
+        call.mandate_id !== input.mandateId ||
+        call.mandate_version !== input.mandateVersion ||
+        call.card_id !== lane.cardId ||
+        call.card_version !== lane.cardVersion ||
+        call.requested_id !== lane.requestedId ||
+        call.projection_item_count !== projection.items.length ||
+        !verifyDigest(call.projection_digest, digestFor('conversation-projection', projection)) ||
         projection.world_id !== this.#worldId ||
         projection.case_id !== this.#caseId ||
         projection.provider !== lane.cardId ||
@@ -372,20 +440,55 @@ export class ModelTurnCoordinator {
         return halt('authorization-refused');
       }
 
+      const haltStarted = async (
+        code: ModelTurnErrorCode,
+        failureReason: ModelCallFailureReason,
+        providerDisclosure: 'possible' | 'confirmed',
+        servedId: string | null,
+      ): Promise<never> => {
+        this.#quarantine.destroy(input.turnId);
+        this.#haltedLanes.add(key);
+        try {
+          await this.#authorization.failModelCall(
+            this.#worldId,
+            modelCallFailureRequest.parse({
+              call_id: call.call_id,
+              turn_id: call.turn_id,
+              mandate_id: call.mandate_id,
+              mandate_version: call.mandate_version,
+              card_id: call.card_id,
+              card_version: call.card_version,
+              requested_id: call.requested_id,
+              projection_digest: call.projection_digest,
+              failure_reason: failureReason,
+              provider_disclosure: providerDisclosure,
+              served_id: servedId,
+            }),
+          );
+        } catch {
+          // The durable open attempt remains explicitly indeterminate; never synthesize a terminal outcome.
+        }
+        throw new ModelTurnError(code);
+      };
+
       let rawResponse: ActingResponse;
       try {
         rawResponse = await lane.adapter.act({
           messages: projectionPrompt(projection),
           maxOutputTokens: input.maxOutputTokens,
         });
-      } catch {
-        return halt('provider-failure');
+      } catch (error) {
+        const failure = providerFailureEvidence(error);
+        return await haltStarted('provider-failure', failure.failureReason, failure.providerDisclosure, null);
       }
       const parsedResponse = actingResponse.safeParse(rawResponse);
-      if (!parsedResponse.success) return halt('provider-protocol');
+      if (!parsedResponse.success) {
+        const failure = protocolFailureEvidence(rawResponse);
+        return await haltStarted('provider-protocol', failure.failureReason, 'confirmed', failure.servedId);
+      }
       const response = parsedResponse.data;
       if (response.lane !== lane.lane || response.requestedId !== lane.requestedId) {
-        return halt('provider-protocol');
+        return await haltStarted('provider-protocol', 'malformed-response', 'confirmed', response.servedId);
       }
 
       const parsedRequest = modelOutputAdmissionRequest.safeParse({
@@ -399,16 +502,25 @@ export class ModelTurnCoordinator {
         projection_digest: digestFor('conversation-projection', projection),
         content: response.content,
       });
-      if (!parsedRequest.success) return halt('provider-protocol');
+      if (!parsedRequest.success) {
+        return await haltStarted('provider-protocol', 'malformed-response', 'confirmed', response.servedId);
+      }
       const request = parsedRequest.data;
-      let admission: ModelOutputAdmission;
+      let admissionEnvelope: ModelCallAdmission;
       try {
-        admission = modelOutputAdmission.parse(
-          await this.#authorization.admitModelOutput(this.#worldId, request),
+        admissionEnvelope = modelCallAdmission.parse(
+          await this.#authorization.admitModelOutput(this.#worldId, call.call_id, request),
         );
       } catch {
-        return halt('authorization-refused');
+        return await haltStarted(
+          'authorization-refused',
+          'authorization-invalidated',
+          'confirmed',
+          response.servedId,
+        );
       }
+      if (admissionEnvelope.call_id !== call.call_id) return halt('admission-binding-invalid');
+      const admission = admissionEnvelope.decision;
       if (!bindingMatches(admission, request, this.#caseId)) return halt('admission-binding-invalid');
       if (admission.disposition === 'withheld') {
         this.#quarantine.destroy(input.turnId);
@@ -419,7 +531,7 @@ export class ModelTurnCoordinator {
         return {
           disposition: 'quarantined',
           admission,
-          quarantine: sealQuarantinedOutput(this.#quarantine, request, admission, this.#caseId),
+          quarantine: sealQuarantinedOutput(this.#quarantine, call.call_id, request, admission, this.#caseId),
         };
       } catch (error) {
         return halt(error instanceof ModelTurnError ? error.code : 'admission-binding-invalid');

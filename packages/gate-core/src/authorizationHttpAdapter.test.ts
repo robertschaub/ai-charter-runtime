@@ -16,7 +16,7 @@ import { AuthorizationCore, type IdFactory } from './authorizationCore.js';
 import { digestFor } from './hash.js';
 import { Keyring } from './keyring.js';
 import { loadPolicyFile } from './policyLoader.js';
-import { modelOutputAdmission } from './schemas/index.js';
+import { modelCallAdmission, modelCallFailedRecord, modelOutputAdmission } from './schemas/index.js';
 import { WalStore } from './walStore.js';
 
 const POLICY_FILE = fileURLToPath(new URL('../policy/v1.yaml', import.meta.url));
@@ -279,14 +279,14 @@ describe('ADR-002 authorization HTTP adapter', () => {
     expect(store.snapshot().accessRecords).toHaveLength(0);
   });
 
-  it('serves the acting projection only to the orchestrator and records every disclosure attempt', async () => {
+  it('begins a model call only for the orchestrator and records every attempt', async () => {
     const { adapter, store } = setup();
     const operation = vi.fn(async (context) => ({ status: 200, body: { actor: context.actor?.credential } }));
     await expect(
       adapter.dispatch(
         {
           method: 'POST',
-          pathname: '/w/w-demo/model-projections/acting',
+          pathname: '/w/w-demo/model-calls/begin',
           authorization: `Bearer ${'4'.repeat(64)}`,
         },
         operation,
@@ -296,7 +296,7 @@ describe('ADR-002 authorization HTTP adapter', () => {
       adapter.dispatch(
         {
           method: 'POST',
-          pathname: '/w/w-demo/model-projections/acting',
+          pathname: '/w/w-demo/model-calls/begin',
           authorization: `Bearer ${'1'.repeat(64)}`,
         },
         operation,
@@ -305,13 +305,13 @@ describe('ADR-002 authorization HTTP adapter', () => {
     expect(operation).toHaveBeenCalledOnce();
     expect(store.snapshot().accessRecords).toEqual([
       expect.objectContaining({
-        route: 'POST /w/{world_id}/model-projections/acting',
+        route: 'POST /w/{world_id}/model-calls/begin',
         authenticated_actor: 'proc:orchestrator',
         outcome: 'served',
         http_status: 200,
       }),
       expect.objectContaining({
-        route: 'POST /w/{world_id}/model-projections/acting',
+        route: 'POST /w/{world_id}/model-calls/begin',
         authenticated_actor: 'role:principal',
         outcome: 'forbidden',
         http_status: 403,
@@ -341,11 +341,16 @@ describe('ADR-002 authorization HTTP adapter', () => {
       reasons: [],
       derived_tags: ['conf:case', 'conf:public', 'purpose:grant-assessment'],
     });
+    const admission = modelCallAdmission.parse({
+      kind: 'model_call_admission',
+      call_id: 'mcl_output',
+      decision,
+    });
     const operation = vi.fn(async () => ({
       status: 200,
-      body: decision,
+      body: admission,
       readLengths: { conversation_items: 3 },
-      accessEvidence: decision,
+      accessEvidence: admission,
     }));
     await expect(
       adapter.dispatch(
@@ -356,7 +361,10 @@ describe('ADR-002 authorization HTTP adapter', () => {
         },
         operation,
       ),
-    ).resolves.toMatchObject({ status: 200, body: { disposition: 'admitted', authority_effect: 'none' } });
+    ).resolves.toMatchObject({
+      status: 200,
+      body: { call_id: 'mcl_output', decision: { disposition: 'admitted', authority_effect: 'none' } },
+    });
     for (const request of [
       {
         method: 'POST',
@@ -381,9 +389,78 @@ describe('ADR-002 authorization HTTP adapter', () => {
         route: 'POST /w/{world_id}/model-outputs/admit',
         authenticated_actor: 'proc:orchestrator',
         outcome: 'served',
-        operation_evidence: decision,
+        operation_evidence: admission,
       }),
       expect.objectContaining({ authenticated_actor: 'role:principal', outcome: 'forbidden' }),
+      expect.objectContaining({ authenticated_actor: 'proc:orchestrator', outcome: 'forbidden' }),
+    ]);
+  });
+
+  it('origin-guards fixed model-call failure reports and rejects every non-orchestrator', async () => {
+    const { adapter, store } = setup();
+    const failure = modelCallFailedRecord.parse({
+      kind: 'model_call_lifecycle',
+      world_id: 'w-demo',
+      call_id: 'mcl_failed',
+      authorization_boot_id: 'authz_boot_http_1',
+      case_id: 'case_demo',
+      turn_id: 'turn_failed',
+      mandate_id: 'mdt_demo_grant',
+      mandate_version: 1,
+      card_id: 'publicai-apertus-v1.5-70b',
+      card_version: 1,
+      requested_id: 'swiss-ai/apertus-v1.5-70b',
+      projection_digest: 'a'.repeat(64),
+      projection_item_count: 3,
+      opened_at: '2026-08-02T08:59:59.000Z',
+      expires_at: '2026-08-02T09:00:59.000Z',
+      state: 'terminal',
+      outcome: 'failed',
+      provider_disclosure: 'possible',
+      completed_at: '2026-08-02T09:00:00.000Z',
+      served_id: null,
+      output_digest: null,
+      failure_reason: 'provider-timeout',
+    });
+    const operation = vi.fn(async () => ({ status: 200, body: failure, accessEvidence: failure }));
+    await expect(
+      adapter.dispatch(
+        {
+          method: 'POST',
+          pathname: '/w/w-demo/model-calls/failures',
+          authorization: `Bearer ${'4'.repeat(64)}`,
+        },
+        operation,
+      ),
+    ).resolves.toMatchObject({ status: 200, body: { outcome: 'failed', failure_reason: 'provider-timeout' } });
+    for (const request of [
+      {
+        method: 'POST',
+        pathname: '/w/w-demo/model-calls/failures',
+        authorization: `Bearer ${'5'.repeat(64)}`,
+      },
+      {
+        method: 'POST',
+        pathname: '/w/w-demo/model-calls/failures',
+        authorization: `Bearer ${'4'.repeat(64)}`,
+        origin: 'http://127.0.0.1:7802',
+      },
+    ]) {
+      await expect(adapter.dispatch(request, operation)).resolves.toMatchObject({
+        status: 403,
+        body: { error: 'forbidden' },
+      });
+    }
+    expect(operation).toHaveBeenCalledOnce();
+    expect(JSON.stringify(store.snapshot().accessRecords)).not.toContain('error detail');
+    expect(store.snapshot().accessRecords).toEqual([
+      expect.objectContaining({
+        route: 'POST /w/{world_id}/model-calls/failures',
+        authenticated_actor: 'proc:orchestrator',
+        outcome: 'served',
+        operation_evidence: failure,
+      }),
+      expect.objectContaining({ authenticated_actor: 'proc:services_host', outcome: 'forbidden' }),
       expect.objectContaining({ authenticated_actor: 'proc:orchestrator', outcome: 'forbidden' }),
     ]);
   });

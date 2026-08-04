@@ -30,12 +30,11 @@ commit, path, and digest above. A later upstream change does not silently move t
 ## Reviewed implementation baseline
 
 The latest cross-model adversarially reviewed implementation is
-`1cc7fb2cb191287137586ca7a1203205a595709b` (`1cc7fb2`). Its M5.3 review found the boundary correctly
-implemented and reproduced `npm run typecheck`, 4 Git-safety hook tests, 295 Vitest tests across 34 files,
-`git diff --check`, and verification of both unchanged signed cards. One Low source-comment finding remained:
-the lexical check disclosed false positives but not its material false-negative limitation. This documentation-only
-follow-up closes that wording defect without changing executable behavior. The latest published reviewed baseline
-remains M5.2 at `1973515`; `1cc7fb2` and this follow-up are local until the maintainer decides to push.
+`b247d5b0be9bb000bfdfa08598dee772f09db309` (`b247d5b`). It closes the M5.4 review finding by making the
+quarantine seal capability module-private; focused re-review returned **GO — finding closed, no new findings**.
+The reviewed M5.4 tranche reproduced `npm run typecheck`, 4 Git-safety hook tests, 300 Vitest tests across
+35 files, `git diff --check`, and verification of both unchanged signed cards. The published baseline remains
+M5.2 at `1973515`; later reviewed commits remain local until the maintainer decides to push.
 
 The final M4 acceptance review at `e326562f6c29fe2fc625a18127517163d5665dcd` returned **GO — M4
 acceptance complete; no findings**. Review of `d25f366` had found one Medium asymmetric
@@ -57,7 +56,7 @@ distinguish an uncommitted latest checkpoint from confirmed remote rollback or m
 | M2 — transactional core | Implemented and fault-tested | Authorization remains the single durable serialization point; authority defects fail closed. |
 | M3 — vertical slice | Implemented | Deterministic authorize → propose → rule → commit-verify → effect → receipt path, adapters, service ledger, and signed cards are present. |
 | M4 — escalation + governance console | **Complete** | Final exact-SHA review of `e326562` returned GO with no findings; the offline acceptance ledger preserves the remaining partial and not-assessed boundaries. |
-| M5 — screening + empathy + switching | **In progress** | M5.1 is reviewed at `c1b5eb0`; M5.2 at `1973515`; M5.3 implementation at `1cc7fb2`, with its Low wording finding closed at `2b7b45a`; M5.4 is a containment-only coordinator candidate. Runtime/browser ingress remains closed. |
+| M5 — screening + empathy + switching | **In progress** | M5.1 is reviewed at `c1b5eb0`; M5.2 at `1973515`; M5.3 at `1cc7fb2`, with its Low wording finding closed at `2b7b45a`; M5.4 is reviewed at `b247d5b`; M5.5 durable call evidence is an implementation candidate. Runtime/browser/provider ingress remains closed. |
 | M6–M7 | Not started | Full capture/publication work follows the implementation milestones. |
 
 These labels describe repository implementation status, not assurance, certification, or independent
@@ -265,7 +264,7 @@ documentation-only follow-up states that limitation at the implementation and st
 the reviewed gate, ADR, provenance pin, ACL, schema, projection, or safety restriction and does not require a
 recursive review round.
 
-### M5.4 implementation candidate — headless model-turn quarantine
+### M5.4 implemented and reviewed at `b247d5b` — headless model-turn quarantine
 
 - `ModelTurnCoordinator` is an orchestrator-owned library seam with no HTTP or browser route. It is not
   constructed by `orchestratorProcess`, so normal runtime startup cannot call a provider.
@@ -295,10 +294,43 @@ recursive review round.
   record is created. Provider-failure event recording, native process wiring, model switching, dialogue triggers,
   and any output consumer/release policy remain deferred. M5 and demo beats 19–21 are not complete.
 
-Candidate validation is `npm run typecheck` clean plus 4 Git-safety hook tests and 300 Vitest tests across
+Reviewed validation is `npm run typecheck` clean plus 4 Git-safety hook tests and 300 Vitest tests across
 35 files, `git diff --check` clean, and both unchanged signed cards verified. The upstream specification pin is
 unchanged: M5.4 implements the existing per-provider projection and provider-substitution containment path and
 adds no new governance semantics.
+
+### M5.5 implementation candidate — durable model-call lifecycle evidence
+
+- The authorization process removes its raw acting-projection route. `POST /w/{world_id}/model-calls/begin`
+  atomically resolves the current mandate/card projection and appends a metadata-only `model_call.open` record
+  before returning projected items. One case/turn has at most one durable attempt.
+- The open record binds the authorization boot, world, configured case, turn, mandate/version, card/version,
+  requested model, domain-separated projection digest, item count, open time, and bounded expiry. It contains no
+  prompt, endpoint, credential, provider response, or caller-selected case/role/scope.
+- `POST /w/{world_id}/model-outputs/admit` now requires that exact call id and output binding. Under the same world
+  lock, authorization rejects expired, replayed, mismatched, or previous-boot references, re-resolves current
+  authority, applies M5.3, and appends exactly one admitted or withheld terminal transition.
+- `POST /w/{world_id}/model-calls/failures` consumes an open reference with one fixed class:
+  `provider-timeout`, `provider-unavailable`, `malformed-response`, `tool-calls-refused`, or
+  `authorization-invalidated`. Disclosure is only `possible` or `confirmed`; response-derived failures require
+  confirmed disclosure, and tool-call refusal binds the served id. Raw output and provider error detail are
+  structurally excluded from access and lifecycle records.
+- Begin, admission, and failure are non-authorizing, Origin-guarded, access-recorded orchestrator-only routes.
+  The public service surface exposes no direct acting-projection or admission method outside this lifecycle.
+- The M5.4 coordinator begins the durable attempt before invoking its configured synthetic adapter. Provider and
+  protocol failures attempt the fixed report, then halt the lane. If reporting is interrupted, replay retains the
+  open attempt as `indeterminate / provider_disclosure: possible`; a new authorization boot cannot complete it,
+  and the same turn cannot start a replacement. Recovery never fabricates success or a terminal failure.
+- Focused schema, WAL/replay, ACL/Origin, real-listener, service, and coordinator tests cover exact single use,
+  mismatch, expiry, restart, fixed timeout/outage metadata, raw-error absence, and non-orchestrator denial.
+- This slice adds no native provider/runtime/browser entry point, model switching, dialogue trigger, conversation
+  persistence, action authority, quarantine reader, or release consumer. It uses synthetic loopback providers and
+  temporary record roots only. M5 and beats 19–21 remain incomplete.
+
+Candidate validation is `npm run typecheck` clean plus 4 Git-safety hook tests and 304 Vitest tests across
+35 files, `git diff --check` clean, and both unchanged signed cards verified. The upstream specification pin is
+unchanged: this slice adds runtime provenance for the already specified model-call/disclosure boundary and does
+not change the Charter specification or its governance semantics.
 
 ## Resolved browser credential-handoff protocol
 
@@ -317,10 +349,11 @@ authorization route. The bounded handoff and session implementation was independ
 
 ## Ordered next slices
 
-1. **Exact-SHA adversarial review of M5.4** — verify configuration binding before disclosure, mandatory fresh
-   projection and output admission, local digest re-check, destroy-only quarantine, lane halt, raw-output absence,
-   and the absence of runtime/browser/process wiring or release.
-2. **Stop after review.** Do not add provider-failure records, native process wiring, browser messages,
+1. **Exact-SHA adversarial review of M5.5** — verify durable open-before-disclosure ordering, world-lock
+   serialization, exact single-use binding, fixed metadata-only failure classes, old-boot/expiry/replay rejection,
+   indeterminate recovery, mandatory lifecycle use by the coordinator, raw-output/error absence, and the absence
+   of runtime/browser/provider wiring or release.
+2. **Stop after review.** Do not add native process wiring, browser messages,
    conversation-item persistence, empathy/model switching, or any output consumer without a separately approved
    bounded slice. Any future release proposal must treat lexical admission as necessary but not sufficient.
 

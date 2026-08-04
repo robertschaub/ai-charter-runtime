@@ -2,12 +2,13 @@
 /** Replay-complete write-ahead-log contracts — ADR-001 §§2, 9. */
 import { z } from 'zod';
 
-import { credentialLabel, hexDigest, id, integer, role, timestamp, worldId } from './common.js';
+import { credentialLabel, hexDigest, id, integer, modelId, role, timestamp, worldId } from './common.js';
 import { disposition } from './intervention.js';
 import { mandate } from './mandate.js';
 import { frozenProposal } from './proposal.js';
 import { accessChainEntry, recordEntry } from './record.js';
 import { gateRuling } from './ruling.js';
+import { modelCallFailureReason, modelCallOpenRecord } from './modelCall.js';
 import {
   caseSessionHandoffRecord,
   commitmentRecord,
@@ -108,6 +109,27 @@ export const walOp = z.discriminatedUnion('op', [
   z.object({ op: z.literal('store.remove'), case_id: id, item_id: id, reason: transitionReason }).strict(),
   z.object({ op: z.literal('pattern.record'), event: patternEvent }).strict(),
   z.object({ op: z.literal('model.select'), selection: modelSelectionRecord }).strict(),
+  z.object({ op: z.literal('model_call.open'), call: modelCallOpenRecord }).strict(),
+  z
+    .object({
+      op: z.literal('model_call.complete'),
+      call_id: id,
+      outcome: z.enum(['admitted', 'withheld']),
+      served_id: modelId,
+      output_digest: hexDigest,
+      completed_at: timestamp,
+    })
+    .strict(),
+  z
+    .object({
+      op: z.literal('model_call.fail'),
+      call_id: id,
+      provider_disclosure: z.enum(['possible', 'confirmed']),
+      served_id: modelId.nullable(),
+      failure_reason: modelCallFailureReason,
+      completed_at: timestamp,
+    })
+    .strict(),
   z.object({ op: z.literal('review.open'), obligation: reviewObligation }).strict(),
   z
     .object({

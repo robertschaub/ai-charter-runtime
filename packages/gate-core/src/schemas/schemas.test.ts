@@ -543,6 +543,11 @@ describe('schemas — accept the shapes the ADRs specify', () => {
       reasons: [],
       derived_tags: ['conf:case', 'conf:public', 'purpose:grant-assessment'],
     };
+    const callAdmissionEvidence = {
+      kind: 'model_call_admission',
+      call_id: 'mcl_output_1',
+      decision: outputEvidence,
+    };
     expect(
       accessEntry.safeParse({
         world_id: 'w-demo',
@@ -553,7 +558,7 @@ describe('schemas — accept the shapes the ADRs specify', () => {
         claimed_actor: null,
         outcome: 'served',
         http_status: 200,
-        operation_evidence: outputEvidence,
+        operation_evidence: callAdmissionEvidence,
       }).success,
     ).toBe(true);
     expect(
@@ -566,7 +571,94 @@ describe('schemas — accept the shapes the ADRs specify', () => {
         claimed_actor: null,
         outcome: 'served',
         http_status: 200,
-        operation_evidence: outputEvidence,
+        operation_evidence: callAdmissionEvidence,
+      }).success,
+    ).toBe(false);
+    const openCallEvidence = {
+      kind: 'model_call_lifecycle',
+      world_id: 'w-demo',
+      call_id: 'mcl_open_1',
+      authorization_boot_id: 'authz_boot_1',
+      case_id: 'case_demo',
+      turn_id: 'turn_output',
+      mandate_id: 'mdt_demo_grant',
+      mandate_version: 1,
+      card_id: 'publicai-apertus-v1.5-70b',
+      card_version: 1,
+      requested_id: 'swiss-ai/apertus-v1.5-70b',
+      projection_digest: DIGEST,
+      projection_item_count: 3,
+      opened_at: '2026-08-01T09:19:00.000Z',
+      expires_at: '2026-08-01T09:20:00.000Z',
+      state: 'open',
+      outcome: 'indeterminate',
+      provider_disclosure: 'possible',
+      completed_at: null,
+      served_id: null,
+      output_digest: null,
+      failure_reason: null,
+    };
+    const failedCallEvidence = {
+      ...openCallEvidence,
+      state: 'terminal',
+      outcome: 'failed',
+      completed_at: '2026-08-01T09:19:01.000Z',
+      failure_reason: 'provider-timeout',
+    };
+    expect(
+      accessEntry.safeParse({
+        world_id: 'w-demo',
+        entry_id: 'acc_call_open',
+        at: '2026-08-01T09:19:00.000Z',
+        route: 'POST /w/{world_id}/model-calls/begin',
+        authenticated_actor: 'proc:orchestrator',
+        claimed_actor: null,
+        outcome: 'served',
+        http_status: 200,
+        operation_evidence: openCallEvidence,
+      }).success,
+    ).toBe(true);
+    expect(
+      accessEntry.safeParse({
+        world_id: 'w-demo',
+        entry_id: 'acc_call_inconsistent_failure',
+        at: '2026-08-01T09:19:01.000Z',
+        route: 'POST /w/{world_id}/model-calls/failures',
+        authenticated_actor: 'proc:orchestrator',
+        claimed_actor: null,
+        outcome: 'served',
+        http_status: 200,
+        operation_evidence: {
+          ...failedCallEvidence,
+          failure_reason: 'authorization-invalidated',
+          provider_disclosure: 'possible',
+        },
+      }).success,
+    ).toBe(false);
+    expect(
+      accessEntry.safeParse({
+        world_id: 'w-demo',
+        entry_id: 'acc_call_failed',
+        at: '2026-08-01T09:19:01.000Z',
+        route: 'POST /w/{world_id}/model-calls/failures',
+        authenticated_actor: 'proc:orchestrator',
+        claimed_actor: null,
+        outcome: 'served',
+        http_status: 200,
+        operation_evidence: failedCallEvidence,
+      }).success,
+    ).toBe(true);
+    expect(
+      accessEntry.safeParse({
+        world_id: 'w-demo',
+        entry_id: 'acc_call_raw_error',
+        at: '2026-08-01T09:19:01.000Z',
+        route: 'POST /w/{world_id}/model-calls/failures',
+        authenticated_actor: 'proc:orchestrator',
+        claimed_actor: null,
+        outcome: 'served',
+        http_status: 200,
+        operation_evidence: { ...failedCallEvidence, error: 'must not enter the access chain' },
       }).success,
     ).toBe(false);
     expect(
@@ -579,7 +671,10 @@ describe('schemas — accept the shapes the ADRs specify', () => {
         claimed_actor: null,
         outcome: 'served',
         http_status: 200,
-        operation_evidence: { ...outputEvidence, content: 'must not enter the access chain' },
+        operation_evidence: {
+          ...callAdmissionEvidence,
+          decision: { ...outputEvidence, content: 'must not enter the access chain' },
+        },
       }).success,
     ).toBe(false);
     expect(

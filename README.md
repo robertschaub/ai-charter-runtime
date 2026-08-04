@@ -25,8 +25,10 @@ The exact upstream revision, digest, reviewed runtime baseline, and remaining mi
   isolation is separation of duties in miniature, not independence. M5.2 is reviewed at `1973515` with
   authorization-resolved acting projections and deterministic fixture-pinned screening. The M5.3 boundary was
   reviewed at `1cc7fb2`; it adds non-authorizing, access-recorded lexical output admission, but an admitted result
-  is not semantic red-line clearance. The M5.4 candidate adds a containment-only coordinator exercised against
-  a synthetic loopback provider; it is not wired into `runtime:start` or a browser/process route. Live provider
+  is not semantic red-line clearance. M5.4 is reviewed at `b247d5b`; it adds a containment-only coordinator
+  exercised against a synthetic loopback provider. The M5.5 candidate adds authorization-owned, durable,
+  metadata-only evidence for each such attempt before disclosure and for its terminal admission or fixed failure.
+  Neither slice is wired into `runtime:start` or a browser/provider route. Live provider
   ingress, browser messages, empathy triggers, and governed switching are not active yet.
 - **A deterministic gate proves declared rules were applied** — not that the rules are lawful, fair, or legitimate.
 - **Commit-token window (interpretive choice).** Commitment binds at `commit-verify`; a revocation landing in the
@@ -103,10 +105,15 @@ proposal hash and gate. M5.3 was implementation-reviewed at `1cc7fb2`; it recomp
 accepting a synthetic model-output claim, checks current mandate/card and requested-versus-served model identity,
 derives turn-level restriction tags inside authorization, and records only decision metadata and digests. Its
 narrow lexical checker can miss paraphrases, so admission is not a semantic safety clearance. It returns no ruling
-or token, makes no provider call, leaves the browser route at `501`, and does not complete M5. The M5.4 candidate
+  or token, makes no provider call, leaves the browser route at `501`, and does not complete M5. M5.4
 connects an authorization projection to a synthetic loopback adapter and returns the response to authorization;
 an admitted result is held behind a process-private metadata/destroy-only quarantine with no release path. This
-coordinator is not constructed by the runtime process, so `runtime:start` still makes no provider call.
+coordinator is not constructed by the runtime process, so `runtime:start` still makes no provider call. The M5.5
+candidate replaces the raw projection route with a single-use call lifecycle: authorization durably records the
+turn/mandate/card/model/projection binding before returning the projection, then records admitted, withheld, or a
+fixed failure class without raw output, prompts, provider errors, endpoints, or credentials. Expired, replayed,
+mismatched, and previous-boot references fail closed; an unfinished attempt remains explicitly indeterminate after
+recovery. This evidence does not release output, call a live provider, or complete M5.
 
 Offline and deterministic verification uses synthetic records and skips only the remote-presence step:
 

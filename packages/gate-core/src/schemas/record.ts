@@ -22,7 +22,7 @@ import {
   worldId,
 } from './common.js';
 import { disposition, interventionContract, standingClass } from './intervention.js';
-import { modelOutputAdmission } from './output.js';
+import { modelCallAccessEvidence } from './modelCall.js';
 
 export const EFFECT_OUTCOMES = ['success', 'failed', 'no-effect', 'unknown-reconciliation-required'] as const;
 export const effectOutcomeValue = z.enum(EFFECT_OUTCOMES);
@@ -266,8 +266,8 @@ export const accessEntry = z
     suppression_final: z.boolean().optional(),
     /** ADR-003 step 6: verification records the lengths it read. */
     read_lengths: z.record(z.string(), integer.min(0)).optional(),
-    /** M5.3: decision metadata only; raw model output never enters the access chain. */
-    operation_evidence: modelOutputAdmission.optional(),
+    /** M5.3–M5.5: lifecycle/decision metadata only; raw provider material never enters the access chain. */
+    operation_evidence: modelCallAccessEvidence.optional(),
   })
   .strict()
   .superRefine((entry, ctx) => {
@@ -295,8 +295,15 @@ export const accessEntry = z
       });
     }
     if (entry.operation_evidence !== undefined) {
+      const evidence = entry.operation_evidence;
+      const expectedRoute =
+        evidence.kind === 'model_call_admission'
+          ? 'POST /w/{world_id}/model-outputs/admit'
+          : evidence.outcome === 'indeterminate'
+            ? 'POST /w/{world_id}/model-calls/begin'
+            : 'POST /w/{world_id}/model-calls/failures';
       if (
-        entry.route !== 'POST /w/{world_id}/model-outputs/admit' ||
+        entry.route !== expectedRoute ||
         entry.authenticated_actor !== 'proc:orchestrator' ||
         entry.outcome !== 'served' ||
         entry.http_status !== 200
@@ -304,7 +311,7 @@ export const accessEntry = z
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
           path: ['operation_evidence'],
-          message: 'model-output evidence is valid only on a served orchestrator admission request',
+          message: 'model-call evidence is valid only on its served orchestrator lifecycle route',
         });
       }
     }

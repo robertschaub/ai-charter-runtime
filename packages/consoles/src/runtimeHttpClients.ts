@@ -3,14 +3,17 @@
 import {
   classToken,
   cardSlug,
-  conversationProjection,
   effectIntent,
   frozenProposal,
   id,
   integer,
   modelId,
-  modelOutputAdmission,
-  modelOutputAdmissionRequest,
+  modelCallAdmission,
+  modelCallAdmissionRequest,
+  modelCallBeginRequest,
+  modelCallFailedRecord,
+  modelCallFailureRequest,
+  modelCallStart,
   approvedModelsProjection,
   proposalRulingProjection,
   rulingProjection,
@@ -20,10 +23,12 @@ import {
   type EffectIntent,
   type FrozenProposal,
   type ApprovedModelsProjection,
-  type ConversationProjection,
   type ProposalRulingProjection,
   type RulingProjection,
-  type ModelOutputAdmission,
+  type ModelCallAdmission,
+  type ModelCallFailedRecord,
+  type ModelCallFailureRequest,
+  type ModelCallStart,
   type ModelOutputAdmissionRequest,
 } from 'gate-core';
 import type { ServicesHostExecution } from 'services-mock';
@@ -131,36 +136,41 @@ abstract class JsonHttpClient {
 }
 
 export class OrchestratorAuthorizationHttpClient extends JsonHttpClient {
-  async actingProjection(input: {
+  async beginModelCall(input: {
     readonly worldId: string;
+    readonly turnId: string;
     readonly mandateId: string;
     readonly mandateVersion: number;
     readonly cardId: string;
     readonly cardVersion: number;
     readonly requestedId: string;
-  }): Promise<ConversationProjection> {
+  }): Promise<ModelCallStart> {
     const world = worldId.parse(input.worldId);
-    const request = {
+    const request = modelCallBeginRequest.parse({
+      turn_id: input.turnId,
       mandate_id: id.parse(input.mandateId),
       mandate_version: integer.min(1).parse(input.mandateVersion),
       card_id: cardSlug.parse(input.cardId),
       card_version: integer.min(1).parse(input.cardVersion),
       requested_id: modelId.parse(input.requestedId),
-    };
-    return conversationProjection.parse(
-      await this.post(`/w/${world}/model-projections/acting`, request),
-    );
+    });
+    return modelCallStart.parse(await this.post(`/w/${world}/model-calls/begin`, request));
   }
 
   async admitModelOutput(
     worldIdInput: string,
+    callIdInput: string,
     input: ModelOutputAdmissionRequest,
-  ): Promise<ModelOutputAdmission> {
+  ): Promise<ModelCallAdmission> {
     const world = worldId.parse(worldIdInput);
-    const request = modelOutputAdmissionRequest.parse(input);
-    return modelOutputAdmission.parse(
-      await this.post(`/w/${world}/model-outputs/admit`, request),
-    );
+    const request = modelCallAdmissionRequest.parse({ call_id: id.parse(callIdInput), output: input });
+    return modelCallAdmission.parse(await this.post(`/w/${world}/model-outputs/admit`, request));
+  }
+
+  async failModelCall(worldIdInput: string, input: ModelCallFailureRequest): Promise<ModelCallFailedRecord> {
+    const world = worldId.parse(worldIdInput);
+    const request = modelCallFailureRequest.parse(input);
+    return modelCallFailedRecord.parse(await this.post(`/w/${world}/model-calls/failures`, request));
   }
 
   async ruleCommit(input: {
