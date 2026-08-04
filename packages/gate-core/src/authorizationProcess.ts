@@ -267,6 +267,7 @@ export async function startAuthorizationProcess(
         store,
         keyring,
         policy,
+        systemUse,
         probe: (idempotencyKey) => servicesProbe.probe(idempotencyKey),
       });
       await caseHandoffs.expireIssued();

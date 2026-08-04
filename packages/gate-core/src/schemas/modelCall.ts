@@ -122,6 +122,17 @@ export const modelCallFailedRecord = modelCallBinding
         message: 'tool-call refusal requires served-model evidence',
       });
     }
+    if (
+      record.failure_reason === 'system-use-invalidated' &&
+      record.provider_disclosure === 'confirmed' &&
+      record.served_id === null
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['served_id'],
+        message: 'confirmed system-use invalidation requires served-response evidence',
+      });
+    }
   });
 
 export const modelCallRecord = z.union([
@@ -183,6 +194,17 @@ export const modelCallFailureRequest = modelCallBeginRequest
         code: z.ZodIssueCode.custom,
         path: ['served_id'],
         message: 'tool-call refusal requires served-model evidence',
+      });
+    }
+    if (
+      request.failure_reason === 'system-use-invalidated' &&
+      request.provider_disclosure === 'confirmed' &&
+      request.served_id === null
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['served_id'],
+        message: 'confirmed system-use invalidation requires served-response evidence',
       });
     }
   });

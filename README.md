@@ -30,8 +30,9 @@ The exact upstream revision, digest, reviewed runtime baseline, and remaining mi
   metadata-only evidence for each such attempt before disclosure and for its terminal admission or fixed failure.
   The post-M5.5 M5.6 candidate adds an authorization-owned, replayable system-use decision prerequisite and a
   principal-only read view; approval is necessary for the synthetic use but never sufficient for an action.
-  Neither slice is wired into `runtime:start` or a browser/provider route. Live provider
-  ingress, browser messages, empathy triggers, and governed switching are not active yet.
+  The authorization gate and principal read view are wired into `runtime:start`; model-turn provider ingress,
+  browser mutation/message ingress, and an output-release consumer are not. Empathy triggers and governed
+  switching are also inactive.
 - **A deterministic gate proves declared rules were applied** — not that the rules are lawful, fair, or legitimate.
 - **Commit-token window (interpretive choice).** Commitment binds at `commit-verify`; a revocation landing in the
   token's short TTL is too late for that action by definition. On the stricter reading of "authority in flight",

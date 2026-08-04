@@ -495,6 +495,7 @@ describe('M5.4 containment with M5.5 durable model-call evidence', () => {
       outcome: 'failed',
       failure_reason: 'system-use-invalidated',
       provider_disclosure: 'confirmed',
+      served_id: turn.requestedId,
     });
   });
 

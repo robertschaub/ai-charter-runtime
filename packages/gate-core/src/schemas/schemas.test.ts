@@ -17,6 +17,8 @@ import {
   interventionContract,
   mandate,
   modelCard,
+  modelCallFailedRecord,
+  modelCallFailureRequest,
   policySet,
   recordEntry,
   recordEvent,
@@ -38,6 +40,18 @@ const SYSTEM_USE_REFERENCE = {
 };
 
 const macBlock = { alg: 'hmac-sha256', key_id: 'hmac-2026-08-01', value: MAC_VALUE };
+
+const SYSTEM_USE_FAILURE_REQUEST = {
+  call_id: 'mcl_system_use_failure',
+  turn_id: 'turn_system_use_failure',
+  mandate_id: 'mdt_demo_grant',
+  mandate_version: 1,
+  card_id: 'publicai-apertus-v1.5-70b',
+  card_version: 1,
+  requested_id: 'swiss-ai/apertus-v1.5-70b',
+  projection_digest: DIGEST,
+  failure_reason: 'system-use-invalidated' as const,
+};
 
 function saidItem(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
@@ -1004,5 +1018,59 @@ describe('schemas — reject what fails closed', () => {
         String(value),
       ).toBe(false);
     }
+  });
+
+  it('confirmed system-use invalidation without served-response evidence', () => {
+    expect(
+      modelCallFailureRequest.safeParse({
+        ...SYSTEM_USE_FAILURE_REQUEST,
+        provider_disclosure: 'confirmed',
+        served_id: null,
+      }).success,
+    ).toBe(false);
+    expect(
+      modelCallFailureRequest.safeParse({
+        ...SYSTEM_USE_FAILURE_REQUEST,
+        provider_disclosure: 'possible',
+        served_id: null,
+      }).success,
+    ).toBe(true);
+    expect(
+      modelCallFailureRequest.safeParse({
+        ...SYSTEM_USE_FAILURE_REQUEST,
+        provider_disclosure: 'confirmed',
+        served_id: SYSTEM_USE_FAILURE_REQUEST.requested_id,
+      }).success,
+    ).toBe(true);
+
+    const durableFailure = {
+      kind: 'model_call_lifecycle',
+      world_id: 'w-demo',
+      ...SYSTEM_USE_FAILURE_REQUEST,
+      authorization_boot_id: 'authz_boot_system_use',
+      case_id: 'case_demo',
+      projection_item_count: 3,
+      system_use_decision: SYSTEM_USE_REFERENCE,
+      opened_at: '2026-08-01T09:00:00.000Z',
+      expires_at: '2026-08-01T09:01:00.000Z',
+      state: 'terminal',
+      outcome: 'failed',
+      completed_at: '2026-08-01T09:00:01.000Z',
+      output_digest: null,
+    };
+    expect(
+      modelCallFailedRecord.safeParse({
+        ...durableFailure,
+        provider_disclosure: 'confirmed',
+        served_id: null,
+      }).success,
+    ).toBe(false);
+    expect(
+      modelCallFailedRecord.safeParse({
+        ...durableFailure,
+        provider_disclosure: 'confirmed',
+        served_id: SYSTEM_USE_FAILURE_REQUEST.requested_id,
+      }).success,
+    ).toBe(true);
   });
 });

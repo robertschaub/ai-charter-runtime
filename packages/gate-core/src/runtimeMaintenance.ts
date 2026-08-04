@@ -4,6 +4,7 @@ import type { AuthorizationCore, CommitmentProbe, ReconcileCommitmentResult } fr
 import type { Keyring } from './keyring.js';
 import type { LoadedPolicy } from './policyLoader.js';
 import { runSweeper, type SweepResult } from './sweeper.js';
+import type { SystemUseDecisionService } from './systemUseDecision.js';
 import type { WalStore } from './walStore.js';
 
 export interface RuntimeMaintenanceOptions {
@@ -11,6 +12,7 @@ export interface RuntimeMaintenanceOptions {
   readonly store: WalStore;
   readonly keyring: Keyring;
   readonly policy: LoadedPolicy;
+  readonly systemUse: SystemUseDecisionService;
   readonly probe: (idempotencyKey: string) => Promise<CommitmentProbe>;
 }
 
@@ -25,7 +27,7 @@ export interface RuntimeMaintenanceResult {
 export async function runRuntimeMaintenance(
   options: RuntimeMaintenanceOptions,
 ): Promise<RuntimeMaintenanceResult> {
-  const sweep = await runSweeper(options.store, options.keyring, options.policy);
+  const sweep = await runSweeper(options.store, options.keyring, options.policy, options.systemUse);
   const pending = [...options.store.snapshot().commitments.values()]
     .filter((commitment) => commitment.state === 'bound' || commitment.state === 'unknown')
     .map((commitment) => commitment.commitment_id)

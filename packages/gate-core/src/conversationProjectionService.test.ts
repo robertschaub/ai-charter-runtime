@@ -550,7 +550,16 @@ describe('M5.5 durable model-call lifecycle', () => {
 });
 
 describe('M5.6 system-use failure evidence', () => {
-  it('rejects a false invalidation claim and preserves possible disclosure when no provider evidence exists', async () => {
+  const beginInput = {
+    mandate_id: 'mdt_demo_grant',
+    mandate_version: 1,
+    card_id: 'publicai-apertus-v1.5-70b',
+    card_version: 1,
+    requested_id: 'swiss-ai/apertus-v1.5-70b',
+    actor: ORCHESTRATOR,
+  } as const;
+
+  it('rejects false or caller-confirmed invalidation and accepts possible disclosure without response evidence', async () => {
     const { service, store, systemUse } = await setup();
     const start = await service.beginCall({
       turn_id: 'turn_system_use_possible',
@@ -561,6 +570,8 @@ describe('M5.6 system-use failure evidence', () => {
       requested_id: 'swiss-ai/apertus-v1.5-70b',
       actor: ORCHESTRATOR,
     });
+    const forgedNull = await service.beginCall({ ...beginInput, turn_id: 'turn_system_use_forged_null' });
+    const forgedServed = await service.beginCall({ ...beginInput, turn_id: 'turn_system_use_forged_served' });
     const failure = {
       call_id: start.call.call_id,
       turn_id: start.call.turn_id,
@@ -579,6 +590,27 @@ describe('M5.6 system-use failure evidence', () => {
     expect(store.snapshot().modelCalls.get(start.call.call_id)?.state).toBe('open');
 
     await systemUse.transition('sud_test_fixture', 1, 'suspended', AUTHZ);
+    await expect(
+      service.failCall({
+        ...failure,
+        call_id: forgedNull.call.call_id,
+        turn_id: forgedNull.call.turn_id,
+        projection_digest: forgedNull.call.projection_digest,
+        provider_disclosure: 'confirmed',
+      }),
+    ).rejects.toThrowError(/served-response evidence/);
+    await expect(
+      service.failCall({
+        ...failure,
+        call_id: forgedServed.call.call_id,
+        turn_id: forgedServed.call.turn_id,
+        projection_digest: forgedServed.call.projection_digest,
+        provider_disclosure: 'confirmed',
+        served_id: forgedServed.call.requested_id,
+      }),
+    ).rejects.toThrowError(/derived only from an output-admission request/);
+    expect(store.snapshot().modelCalls.get(forgedNull.call.call_id)?.state).toBe('open');
+    expect(store.snapshot().modelCalls.get(forgedServed.call.call_id)?.state).toBe('open');
     await expect(service.failCall(failure)).resolves.toMatchObject({
       state: 'terminal',
       outcome: 'failed',
@@ -586,5 +618,40 @@ describe('M5.6 system-use failure evidence', () => {
       provider_disclosure: 'possible',
       served_id: null,
     });
+  });
+
+  it('derives confirmed invalidation from a served output request and persists the matching evidence', async () => {
+    const { service, store, systemUse } = await setup();
+    const start = await service.beginCall({ ...beginInput, turn_id: 'turn_system_use_confirmed' });
+    await systemUse.transition('sud_test_fixture', 1, 'suspended', AUTHZ);
+    const content = 'Synthetic response that must not be admitted after system-use suspension.';
+    await expect(
+      service.completeCall({
+        call_id: start.call.call_id,
+        output: {
+          turn_id: start.call.turn_id,
+          mandate_id: start.call.mandate_id,
+          mandate_version: start.call.mandate_version,
+          card_id: start.call.card_id,
+          card_version: start.call.card_version,
+          requested_id: start.call.requested_id,
+          served_id: start.call.requested_id,
+          projection_digest: start.call.projection_digest,
+          content,
+        },
+        actor: ORCHESTRATOR,
+      }),
+    ).rejects.toThrowError(/durably refused/);
+    expect(store.snapshot().modelCalls.get(start.call.call_id)).toEqual({
+      ...start.call,
+      state: 'terminal',
+      outcome: 'failed',
+      provider_disclosure: 'confirmed',
+      completed_at: '2026-08-01T09:00:00.000Z',
+      served_id: start.call.requested_id,
+      output_digest: null,
+      failure_reason: 'system-use-invalidated',
+    });
+    expect(JSON.stringify(store.snapshot())).not.toContain(content);
   });
 });

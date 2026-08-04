@@ -452,6 +452,104 @@ describe('M2 authorization transactions', () => {
     });
   });
 
+  it('uses restarted condition configuration for current-at-record evidence without minting fresh authority', async () => {
+    const h = harness();
+    await initialize(h);
+    const prior = [...h.store.snapshot().systemUseDecisions.values()][0];
+    if (prior === undefined) throw new Error('expected system-use fixture');
+    const unsignedSuccessor = systemUseDecisionRecord.parse({
+      ...prior,
+      version: 2,
+      decision: {
+        ...prior.decision,
+        status: 'approved_with_conditions',
+        conditions: [{ id: 'synthetic-data-only', kind: 'hard_precondition' }],
+      },
+      trace: {
+        ...prior.trace,
+        record_digest: '0'.repeat(64),
+        supersedes: { decision_id: prior.decision_id, version: prior.version },
+      },
+    });
+    await h.systemUse.replace(
+      systemUseDecisionRecord.parse({
+        ...unsignedSuccessor,
+        trace: {
+          ...unsignedSuccessor.trace,
+          record_digest: systemUseDecisionDigest(unsignedSuccessor),
+        },
+      }),
+      AUTHZ,
+    );
+    const frozen = proposal(66, { action_id: 'act_system_use_condition_drift' });
+    const ruled = await h.core.ruleProposal(ruleInput(frozen));
+    const committed = await h.core.commitVerify({
+      rulingId: ruled.ruling.ruling_id,
+      intent: intentFor(frozen, ruled.ruling.ruling_id),
+      servicesHostBootId: 'services_boot_system_use_condition',
+      servicesLedgerId: SERVICES_LEDGER_ID,
+      actor: SERVICES_HOST,
+    });
+    if (!committed.ok) throw new Error('expected commitment');
+
+    const restartedSystemUse = new SystemUseDecisionService(h.store, {
+      systemId: 'ai-charter-runtime-poc',
+      useCaseId: 'public-grant-decision',
+      jurisdictions: ['synthetic-demo'],
+      hardConditions: { 'no-external-effect': true, 'synthetic-data-only': false },
+    });
+    const restartedCore = new AuthorizationCore({
+      store: h.store,
+      keyring: h.keyring,
+      policy: h.policy,
+      systemUse: restartedSystemUse,
+      ids: h.ids,
+      resolveAuthorizedAgent: (actor) => (actor.credential === 'proc:orchestrator' ? 'agent_demo' : undefined),
+      resolveScreening: () => ({ performed: true, signals: [], evidenceRefs: [] }),
+      validateScreeningResolution: () => true,
+      resolveModelEvidence: () => ({
+        servedModelAccepted: true,
+        cardStatus: 'current',
+        cardKeyId: 'card-test',
+        cardDigest: CARD_DIGEST,
+      }),
+    });
+    const before = h.store.snapshot();
+    await expect(restartedCore.ruleProposal(ruleInput(proposal(67)))).rejects.toMatchObject({
+      code: 'system-use-unavailable',
+    });
+    expect(h.store.snapshot().rulings.size).toBe(before.rulings.size);
+    expect(h.store.snapshot().commitments.size).toBe(before.commitments.size);
+
+    await expect(
+      restartedCore.reportEffectOutcome({
+        worldId: 'w-demo',
+        commitmentId: committed.commitmentId,
+        effectId: committed.token.effect_id,
+        idempotencyKey: committed.token.idempotency_key,
+        effectRequestDigest: committed.token.effect_request_digest,
+        servicesHostBootId: 'services_boot_system_use_condition',
+        servicesLedgerId: SERVICES_LEDGER_ID,
+        outcome: 'success',
+        recordedAt: '2026-08-01T09:00:00.500Z',
+        delivery: 'executed',
+        actor: SERVICES_HOST,
+      }),
+    ).resolves.toMatchObject({ accepted: true, status: 'recorded' });
+    expect(h.store.snapshot().effects.get(committed.token.effect_id)).toMatchObject({
+      system_use_decision: ruled.ruling.binding.system_use_decision,
+      system_use_current_at_record: false,
+    });
+    expect(
+      h.store.snapshot().actionRecords.find(
+        (entry) => entry.commitment_and_effect?.event === 'effect_outcome' && entry.commitment_and_effect.effect_id === committed.token.effect_id,
+      ),
+    ).toMatchObject({
+      system_use_current_at_record: false,
+      commitment_and_effect: { system_use_current_at_record: false },
+    });
+  });
+
   it('keeps case-scoped conversation ingestion authorization-owned and idempotent', async () => {
     const h = harness();
     await initialize(h);
@@ -2095,7 +2193,7 @@ describe('M2 authorization transactions', () => {
     );
     expect(ruled.ruling.verdict).toBe('escalate');
     h.setNow('2026-08-01T09:16:00.000Z');
-    const swept = await runSweeper(h.store, h.keyring, h.policy, h.ids);
+    const swept = await runSweeper(h.store, h.keyring, h.policy, h.systemUse, h.ids);
     expect(swept).toMatchObject({ changed: true, expiredRulings: 1, timedOutEscalations: 1 });
     expect(h.store.snapshot().escalations.get(ruled.escalationId ?? '')?.state).toBe('timed_out');
 

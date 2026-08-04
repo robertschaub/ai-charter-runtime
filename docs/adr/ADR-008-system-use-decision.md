@@ -117,12 +117,13 @@ to the M5.5 contract. `provider_disclosure` remains evidence-derived:
 
 - `possible` when authorization knows a call was opened but has no evidence that model input reached a
   provider;
-- `confirmed` only when the coordinator has evidence that provider invocation began or a response arrived.
+- `confirmed` for system-use invalidation only when authorization receives a non-null served-model id with
+  the output-admission request.
 
-An output-admission recheck occurs after provider invocation, so its coordinator report is `confirmed`.
-Authorization never upgrades `possible` to `confirmed` from decision state alone. If failure reporting is
-interrupted, the durable open attempt remains `indeterminate / provider_disclosure: possible`; recovery does
-not fabricate terminal evidence.
+Authorization durably derives that post-response failure during the admission recheck; the caller-facing
+failure route cannot assert it. A pre-response invalidation remains `possible` with a null served id, and
+decision state alone never upgrades it to `confirmed`. If failure reporting is interrupted, the durable open
+attempt remains `indeterminate / provider_disclosure: possible`; recovery does not fabricate terminal evidence.
 
 ### 7. Projections and governance console
 

@@ -51,7 +51,6 @@ import { WalStore, type TransactionActor, type TransactionBuild } from './walSto
 import {
   SystemUseDecisionError,
   SystemUseDecisionService,
-  systemUseReferenceCurrent,
 } from './systemUseDecision.js';
 
 const ZERO_DIGEST = '0'.repeat(64);
@@ -629,6 +628,8 @@ function authorityChainIds(mandateValue: Mandate | undefined): string[] {
 }
 
 function rulingRecord(
+  state: WorldState,
+  systemUse: SystemUseDecisionService,
   input: RuleProposalInput,
   ruling: GateRuling,
   mandateValue: Mandate | undefined,
@@ -650,7 +651,7 @@ function rulingRecord(
     authenticated_actor: recordActor.credential,
     claimed_actor: { role: recordActor.claimed_role },
     system_use_decision: ruling.binding.system_use_decision,
-    system_use_current_at_record: ruling.binding.system_use_decision !== null,
+    system_use_current_at_record: systemUse.isReferenceCurrent(state, ruling.binding.system_use_decision, at),
     proposed_action: input.proposal.proposed_action,
     basis: [
       ...input.proposal.material_inputs.map((item) => item.id),
@@ -688,6 +689,7 @@ function rulingRecord(
 
 function escalationEventRecord(
   state: WorldState,
+  systemUse: SystemUseDecisionService,
   ruling: GateRuling,
   actor: TransactionActor,
   entryId: string,
@@ -708,7 +710,7 @@ function escalationEventRecord(
     authenticated_actor: actor.credential,
     claimed_actor: { role: actor.claimed_role },
     system_use_decision: ruling.binding.system_use_decision,
-    system_use_current_at_record: systemUseReferenceCurrent(state, ruling.binding.system_use_decision, at),
+    system_use_current_at_record: systemUse.isReferenceCurrent(state, ruling.binding.system_use_decision, at),
     proposed_action: proposal.proposed_action,
     basis: [...proposal.material_inputs.map((item) => item.id), ...proposal.derived_claims.map((item) => item.id)],
     authority_chain: authorityChainIds(mandateValue),
@@ -752,6 +754,7 @@ function committedSystemUseReference(ruling: GateRuling): SystemUseDecisionRefer
 
 function commitmentRecordEntry(
   state: WorldState,
+  systemUse: SystemUseDecisionService,
   ruling: GateRuling,
   actor: TransactionActor,
   entryId: string,
@@ -768,6 +771,9 @@ function commitmentRecordEntry(
   if (proposal === undefined) throw new Error(`ruling ${ruling.ruling_id} lost its proposal`);
   const mandateValue = state.mandates.get(mandateVersionKey(ruling.binding.mandate_id, ruling.binding.mandate_version));
   const systemUseDecision = committedSystemUseReference(ruling);
+  if (!systemUse.isReferenceCurrent(state, systemUseDecision, boundAt)) {
+    throw new AuthorizationError('system-use-unavailable', 'commitment record cannot bind a stale system-use decision');
+  }
   return {
     world_id: state.worldId,
     entry_id: entryId,
@@ -809,6 +815,7 @@ function commitmentRecordEntry(
 
 function commitmentEventRecordEntry(
   state: WorldState,
+  systemUse: SystemUseDecisionService,
   commitment: CommitmentRecord,
   actor: TransactionActor,
   entryId: string,
@@ -824,6 +831,11 @@ function commitmentEventRecordEntry(
   const mandateValue = state.mandates.get(
     mandateVersionKey(ruling.binding.mandate_id, ruling.binding.mandate_version),
   );
+  const systemUseCurrent = systemUse.isReferenceCurrent(state, commitment.system_use_decision, at);
+  const boundedEvent =
+    event.event === 'effect_outcome'
+      ? { ...event, system_use_current_at_record: systemUseCurrent }
+      : event;
   return {
     world_id: state.worldId,
     entry_id: entryId,
@@ -831,7 +843,7 @@ function commitmentEventRecordEntry(
     authenticated_actor: actor.credential,
     claimed_actor: { role: actor.claimed_role },
     system_use_decision: commitment.system_use_decision,
-    system_use_current_at_record: systemUseReferenceCurrent(state, commitment.system_use_decision, at),
+    system_use_current_at_record: systemUseCurrent,
     proposed_action: proposal.proposed_action,
     basis: [...proposal.material_inputs.map((item) => item.id), ...proposal.derived_claims.map((item) => item.id)],
     authority_chain: authorityChainIds(mandateValue),
@@ -843,7 +855,7 @@ function commitmentEventRecordEntry(
       acting_model_requested_id: proposal.acting_model.requested_id,
       acting_model_served_id: proposal.acting_model.served_id,
     },
-    commitment_and_effect: event,
+    commitment_and_effect: boundedEvent,
     human_intervention_event: intervention,
     challenge_and_remedy: null,
   };
@@ -1475,6 +1487,8 @@ export class AuthorizationCore {
       }
 
       const entry = rulingRecord(
+        state,
+        this.#systemUse,
         { ...input, proposal },
         ruling,
         defects.mandate,
@@ -1588,6 +1602,7 @@ export class AuthorizationCore {
                 op: 'record.action.append',
                 entry: escalationEventRecord(
                   state,
+                  this.#systemUse,
                   ruling,
                   input.actor,
                   recordEntryId,
@@ -1647,7 +1662,7 @@ export class AuthorizationCore {
           ops.push(...this.#patternNarrowingOps(state, timeoutPattern, at, ruling.ruling_id));
           ops.push({
             op: 'record.action.append',
-            entry: escalationEventRecord(state, ruling, { credential: 'proc:authz', claimed_role: null }, timeoutRecordEntryId, at, {
+            entry: escalationEventRecord(state, this.#systemUse, ruling, { credential: 'proc:authz', claimed_role: null }, timeoutRecordEntryId, at, {
               event: 'human_intervention_event',
               escalation_id: escalationId,
               payload: { kind: 'escalation_timeout', applied_default: appliedDefault, at },
@@ -1655,7 +1670,7 @@ export class AuthorizationCore {
           });
           ops.push({
             op: 'record.action.append',
-            entry: escalationEventRecord(state, ruling, input.actor, lateRecordEntryId, at, {
+            entry: escalationEventRecord(state, this.#systemUse, ruling, input.actor, lateRecordEntryId, at, {
               event: 'late_disposition_ignored',
               escalation_id: escalationId,
               attempted_disposition: disposition,
@@ -1683,7 +1698,7 @@ export class AuthorizationCore {
             ops: [
               {
                 op: 'record.action.append',
-                entry: escalationEventRecord(state, ruling, input.actor, recordEntryId, at, {
+                entry: escalationEventRecord(state, this.#systemUse, ruling, input.actor, recordEntryId, at, {
                   event: 'human_intervention_event',
                   escalation_id: escalationId,
                   payload: {
@@ -1754,6 +1769,7 @@ export class AuthorizationCore {
           op: 'record.action.append',
           entry: escalationEventRecord(
             state,
+            this.#systemUse,
             ruling,
             input.actor,
             recordEntryId,
@@ -1913,7 +1929,7 @@ export class AuthorizationCore {
             ops: [
               {
                 op: 'record.action.append',
-                entry: escalationEventRecord(state, ruling, input.actor, recordEntryId, at, {
+                entry: escalationEventRecord(state, this.#systemUse, ruling, input.actor, recordEntryId, at, {
                   event: 'late_disposition_ignored',
                   escalation_id: escalationId,
                   attempted_disposition: disposition,
@@ -1951,7 +1967,7 @@ export class AuthorizationCore {
           }
           ops.push({
             op: 'record.action.append',
-            entry: escalationEventRecord(state, ruling, { credential: 'proc:authz', claimed_role: null }, timeoutRecordEntryId, at, {
+            entry: escalationEventRecord(state, this.#systemUse, ruling, { credential: 'proc:authz', claimed_role: null }, timeoutRecordEntryId, at, {
               event: 'human_intervention_event',
               escalation_id: escalationId,
               payload: { kind: 'dialogue_timeout', applied_default: appliedDefault, at },
@@ -1976,7 +1992,7 @@ export class AuthorizationCore {
             ops: [
               {
                 op: 'record.action.append',
-                entry: escalationEventRecord(state, ruling, input.actor, recordEntryId, at, {
+                entry: escalationEventRecord(state, this.#systemUse, ruling, input.actor, recordEntryId, at, {
                   event: 'human_intervention_event',
                   escalation_id: escalationId,
                   payload: { kind: 'dialogue_response_refused', reason_code: reasonCode, at },
@@ -2046,7 +2062,7 @@ export class AuthorizationCore {
         }
         ops.push({
           op: 'record.action.append',
-          entry: escalationEventRecord(state, ruling, input.actor, recordEntryId, at, {
+          entry: escalationEventRecord(state, this.#systemUse, ruling, input.actor, recordEntryId, at, {
             event: 'human_intervention_event',
             escalation_id: escalationId,
             payload: {
@@ -2192,7 +2208,7 @@ export class AuthorizationCore {
 
         const recordEntryId = this.#ids.next('rec');
         const reviewObligationId = this.#ids.next('rev');
-        const baseRecord = escalationEventRecord(state, ruling, input.actor, recordEntryId, at, null);
+        const baseRecord = escalationEventRecord(state, this.#systemUse, ruling, input.actor, recordEntryId, at, null);
         return {
           ops: [
             {
@@ -2267,7 +2283,7 @@ export class AuthorizationCore {
             ops: [
               {
                 op: 'record.action.append',
-                entry: escalationEventRecord(state, sourceRuling, input.actor, recordEntryId, at, {
+                entry: escalationEventRecord(state, this.#systemUse, sourceRuling, input.actor, recordEntryId, at, {
                   event: 'human_intervention_event',
                   escalation_id: escalationId,
                   payload: {
@@ -2643,6 +2659,7 @@ export class AuthorizationCore {
           op: 'record.action.append',
           entry: commitmentRecordEntry(
             state,
+            this.#systemUse,
             ruling,
             input.actor,
             recordEntryId,
@@ -2717,7 +2734,7 @@ export class AuthorizationCore {
             ops: [
               {
                 op: 'record.action.append',
-                entry: commitmentEventRecordEntry(state, commitment, input.actor, retryEntryId, at, {
+                entry: commitmentEventRecordEntry(state, this.#systemUse, commitment, input.actor, retryEntryId, at, {
                   event: 'retry_served',
                   effect_id: effectId,
                   idempotency_key: idempotencyKey,
@@ -2736,7 +2753,7 @@ export class AuthorizationCore {
         const ruling = state.rulings.get(commitment.ruling_id);
         if (ruling === undefined) throw new Error(`commitment ${commitmentId} lost its ruling`);
         const recordEntryId = this.#ids.next('rec');
-        const systemUseCurrent = systemUseReferenceCurrent(state, commitment.system_use_decision, at);
+        const systemUseCurrent = this.#systemUse.isReferenceCurrent(state, commitment.system_use_decision, at);
         const ops: WalOp[] = [
           {
             op: 'effect.record',
@@ -2771,7 +2788,7 @@ export class AuthorizationCore {
         }
         ops.push({
           op: 'record.action.append',
-          entry: commitmentEventRecordEntry(state, commitment, input.actor, recordEntryId, at, {
+          entry: commitmentEventRecordEntry(state, this.#systemUse, commitment, input.actor, recordEntryId, at, {
             event: 'effect_outcome',
             effect_id: effectId,
             outcome: input.outcome,
@@ -2923,6 +2940,7 @@ export class AuthorizationCore {
             op: 'record.action.append',
             entry: commitmentEventRecordEntry(
               state,
+              this.#systemUse,
               commitment,
               actor,
               recordEntryId,
@@ -2934,7 +2952,7 @@ export class AuthorizationCore {
                 reported_at: at,
                 recovery_owner_role: commitment.recovery_owner_role,
                 system_use_decision: commitment.system_use_decision,
-                system_use_current_at_record: systemUseReferenceCurrent(state, commitment.system_use_decision, at),
+                system_use_current_at_record: this.#systemUse.isReferenceCurrent(state, commitment.system_use_decision, at),
                 detail: 'No durable service outcome was available after bounded reconciliation probes.',
               },
               {
@@ -3018,14 +3036,14 @@ export class AuthorizationCore {
         if (recovery !== undefined) ops.push({ op: 'escalation.cancel', escalation_id: recovery.escalation_id });
         ops.push({
           op: 'record.action.append',
-          entry: commitmentEventRecordEntry(state, commitment, actor, recordEntryId, at, {
+          entry: commitmentEventRecordEntry(state, this.#systemUse, commitment, actor, recordEntryId, at, {
             event: 'effect_outcome',
             effect_id: commitment.effect_id,
             outcome: 'no-effect',
             reported_at: at,
             recovery_owner_role: null,
             system_use_decision: commitment.system_use_decision,
-            system_use_current_at_record: systemUseReferenceCurrent(state, commitment.system_use_decision, at),
+            system_use_current_at_record: this.#systemUse.isReferenceCurrent(state, commitment.system_use_decision, at),
             detail: 'The services host restarted without a committed idempotency-ledger entry.',
           }),
         });

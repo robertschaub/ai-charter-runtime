@@ -260,30 +260,6 @@ export function resolveSystemUseForActiveMandate(
   return resolveCurrentSystemUseDecision(state, mandate, state.policy.policy_version, at, environment);
 }
 
-/** Re-resolve the full active scope before describing a durable reference as current. */
-export function systemUseReferenceCurrent(
-  state: WorldState,
-  reference: SystemUseDecisionReference | null,
-  atInput: string,
-): boolean {
-  if (reference === null || reference.conditions.some((condition) => !condition.satisfied)) return false;
-  const at = timestamp.parse(atInput);
-  const record = state.systemUseDecisions.get(systemUseDecisionVersionKey(reference.decision_id, reference.version));
-  if (record === undefined) return false;
-  try {
-    assertRecordIntegrity(record);
-    const resolved = resolveSystemUseForActiveMandate(state, at, {
-      systemId: record.subject.system_id,
-      useCaseId: record.use_case_id,
-      jurisdictions: record.subject.jurisdictions,
-      hardConditions: Object.fromEntries(reference.conditions.map((condition) => [condition.id, true])),
-    });
-    return canonicalize(resolved) === canonicalize(reference);
-  } catch {
-    return false;
-  }
-}
-
 function invalidationOps(state: WorldState, bindingDigest: string, reason: string): WalOp[] {
   const ops: WalOp[] = [];
   for (const ruling of state.rulings.values()) {
@@ -322,11 +298,11 @@ export class SystemUseDecisionService {
     ) => SystemUseDecisionRecord,
   ) {
     this.#store = store;
-    this.#environment = {
+    this.#environment = Object.freeze({
       ...environment,
-      jurisdictions: sorted(environment.jurisdictions),
-      hardConditions: { ...environment.hardConditions },
-    };
+      jurisdictions: Object.freeze(sorted(environment.jurisdictions)),
+      hardConditions: Object.freeze({ ...environment.hardConditions }),
+    });
     this.#bootstrapFactory = bootstrapFactory;
   }
 
@@ -340,6 +316,21 @@ export class SystemUseDecisionService {
 
   resolveActive(state: WorldState, at: string): SystemUseDecisionReference {
     return resolveSystemUseForActiveMandate(state, at, this.#environment);
+  }
+
+  /** Re-resolve currentness from this process's immutable scope and hard-condition map. */
+  isReferenceCurrent(
+    state: WorldState,
+    reference: SystemUseDecisionReference | null,
+    at: string,
+  ): boolean {
+    if (reference === null || reference.conditions.some((condition) => !condition.satisfied)) return false;
+    try {
+      return canonicalize(this.resolveActive(state, at)) === canonicalize(reference);
+    } catch (error) {
+      if (error instanceof SystemUseDecisionError) return false;
+      throw error;
+    }
   }
 
   prepareForMandate(

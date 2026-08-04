@@ -69,6 +69,10 @@ export type ModelCallBeginInput = ModelCallBeginRequest & { readonly actor: Tran
 export type ModelCallCompletionInput = ModelCallAdmissionRequest & { readonly actor: TransactionActor };
 export type ModelCallFailureInput = ModelCallFailureRequest & { readonly actor: TransactionActor };
 
+type ModelCallCompletionTransaction =
+  | { readonly kind: 'admission'; readonly admission: ModelCallAdmission }
+  | { readonly kind: 'system-use-invalidated'; readonly failure: ModelCallFailedRecord };
+
 export interface ConversationProjectionServiceOptions {
   readonly store: WalStore;
   readonly cards: CardRegistry;
@@ -287,7 +291,7 @@ export class ConversationProjectionService {
   async completeCall(input: ModelCallCompletionInput): Promise<ModelCallAdmission> {
     const { actor, ...requestInput } = input;
     const request = modelCallAdmissionRequest.parse(requestInput);
-    const completed = await this.#store.transactWithState<ModelCallAdmission>(
+    const completed = await this.#store.transactWithState<ModelCallCompletionTransaction>(
       'model_call_complete',
       actor,
       (state, at) => {
@@ -295,7 +299,37 @@ export class ConversationProjectionService {
         if (!this.#callMatchesOutput(call, request.output)) {
           throw new ConversationProjectionServiceError('invalid-scope', 'model output does not match its call attempt');
         }
-        const decision = this.#evaluateOutput(request.output, actor, state, at, call.system_use_decision);
+        let decision: ModelCallAdmission['decision'];
+        try {
+          decision = this.#evaluateOutput(request.output, actor, state, at, call.system_use_decision);
+        } catch (error) {
+          if (!(error instanceof ConversationProjectionServiceError) || error.code !== 'system-use-unavailable') {
+            throw error;
+          }
+          const failure = modelCallFailedRecord.parse({
+            ...call,
+            state: 'terminal',
+            outcome: 'failed',
+            provider_disclosure: 'confirmed',
+            completed_at: at,
+            served_id: request.output.served_id,
+            output_digest: null,
+            failure_reason: 'system-use-invalidated',
+          });
+          return {
+            ops: [
+              {
+                op: 'model_call.fail',
+                call_id: call.call_id,
+                provider_disclosure: 'confirmed',
+                served_id: request.output.served_id,
+                failure_reason: 'system-use-invalidated',
+                completed_at: at,
+              },
+            ],
+            result: { kind: 'system-use-invalidated', failure },
+          };
+        }
         const admission = modelCallAdmission.parse({ kind: 'model_call_admission', call_id: call.call_id, decision });
         return {
           ops: [
@@ -308,11 +342,17 @@ export class ConversationProjectionService {
               completed_at: at,
             },
           ],
-          result: admission,
+          result: { kind: 'admission', admission },
         };
       },
     );
-    return completed.result;
+    if (completed.result.kind === 'system-use-invalidated') {
+      throw new ConversationProjectionServiceError(
+        'system-use-unavailable',
+        'served response was durably refused because the bound system-use decision changed',
+      );
+    }
+    return completed.result.admission;
   }
 
   async failCall(input: ModelCallFailureInput): Promise<ModelCallFailedRecord> {
@@ -327,6 +367,12 @@ export class ConversationProjectionService {
         throw new ConversationProjectionServiceError('invalid-scope', 'model failure does not match its call attempt');
       }
       if (request.failure_reason === 'system-use-invalidated') {
+        if (request.provider_disclosure === 'confirmed') {
+          throw new ConversationProjectionServiceError(
+            'invalid-scope',
+            'confirmed system-use invalidation is derived only from an output-admission request',
+          );
+        }
         const mandateValue = state.mandates.get(mandateVersionKey(call.mandate_id, call.mandate_version));
         let stillCurrent = false;
         if (mandateValue !== undefined && state.policy !== undefined) {

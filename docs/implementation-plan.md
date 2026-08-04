@@ -372,7 +372,7 @@ not change the Charter specification or its governance semantics.
 This is an unreviewed candidate above the reviewed M5.5 baseline. It adds no live provider, native runtime,
 browser-message, output-release, model-switching, or M6 path and does not complete M5.
 
-Candidate validation is `npm run typecheck` clean plus 4 Git-safety hook tests and 316 Vitest tests across
+Candidate validation is `npm run typecheck` clean plus 4 Git-safety hook tests and 319 Vitest tests across
 36 files, `git diff --check` clean, and both unchanged signed cards verified.
 
 ## Resolved browser credential-handoff protocol
