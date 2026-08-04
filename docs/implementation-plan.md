@@ -30,9 +30,10 @@ commit, path, and digest above. A later upstream change does not silently move t
 ## Reviewed implementation baseline
 
 The latest cross-model adversarially reviewed implementation is
-`b247d5b0be9bb000bfdfa08598dee772f09db309` (`b247d5b`). It closes the M5.4 review finding by making the
-quarantine seal capability module-private; focused re-review returned **GO — finding closed, no new findings**.
-The reviewed M5.4 tranche reproduced `npm run typecheck`, 4 Git-safety hook tests, 300 Vitest tests across
+`1d992fa16c99decd1912c2bf7af60f3dc03ca7a2` (`1d992fa`). It closes the M5.5 custom-adapter robustness
+finding by making malformed-response parsing and evidence derivation total; focused re-review returned
+**GO — finding closed, no new findings**. The reviewed M5.5 tranche reproduced `npm run typecheck`,
+4 Git-safety hook tests, 305 Vitest tests across
 35 files, `git diff --check`, and verification of both unchanged signed cards. The published baseline remains
 M5.2 at `1973515`; later reviewed commits remain local until the maintainer decides to push.
 
@@ -56,7 +57,7 @@ distinguish an uncommitted latest checkpoint from confirmed remote rollback or m
 | M2 — transactional core | Implemented and fault-tested | Authorization remains the single durable serialization point; authority defects fail closed. |
 | M3 — vertical slice | Implemented | Deterministic authorize → propose → rule → commit-verify → effect → receipt path, adapters, service ledger, and signed cards are present. |
 | M4 — escalation + governance console | **Complete** | Final exact-SHA review of `e326562` returned GO with no findings; the offline acceptance ledger preserves the remaining partial and not-assessed boundaries. |
-| M5 — screening + empathy + switching | **In progress** | M5.1 is reviewed at `c1b5eb0`; M5.2 at `1973515`; M5.3 at `1cc7fb2`, with its Low wording finding closed at `2b7b45a`; M5.4 is reviewed at `b247d5b`; M5.5 durable call evidence is an implementation candidate. Runtime/browser/provider ingress remains closed. |
+| M5 — screening + empathy + switching | **In progress** | M5.1 is reviewed at `c1b5eb0`; M5.2 at `1973515`; M5.3 at `1cc7fb2`, with its Low wording finding closed at `2b7b45a`; M5.4 at `b247d5b`; M5.5 durable call evidence and its correction are reviewed at `1d992fa`. Runtime/browser/provider ingress remains closed. |
 | M6–M7 | Not started | Full capture/publication work follows the implementation milestones. |
 
 These labels describe repository implementation status, not assurance, certification, or independent
@@ -332,8 +333,10 @@ malformed-response evidence derivation throw before the typed halt/report path. 
 both response parsing and evidence derivation total. Regression coverage distinguishes the intended durable
 outcomes: a successful failure report records terminal `failed / malformed-response`, while an interrupted
 report leaves the attempt open and indeterminate; both paths halt the lane and return `provider-protocol`.
+Focused re-review of `1d992fa` returned **GO — M5.5 Low custom-adapter robustness finding closed; no new
+findings**. M5.5 is therefore a reviewed integration point, not an M5 completion claim.
 
-Correction-candidate validation is `npm run typecheck` clean plus 4 Git-safety hook tests and 305 Vitest tests across
+Reviewed validation is `npm run typecheck` clean plus 4 Git-safety hook tests and 305 Vitest tests across
 35 files, `git diff --check` clean, and both unchanged signed cards verified. The upstream specification pin is
 unchanged: this slice adds runtime provenance for the already specified model-call/disclosure boundary and does
 not change the Charter specification or its governance semantics.
@@ -355,12 +358,9 @@ authorization route. The bounded handoff and session implementation was independ
 
 ## Ordered next slices
 
-1. **Focused exact-SHA re-review of the M5.5 Low correction** — verify non-object or property-throwing custom
-   adapter results cannot escape the typed halt path; successful failure reporting terminalizes with fixed
-   malformed-response metadata, while reporting interruption alone preserves indeterminate state.
-2. **Stop after review.** Do not add native process wiring, browser messages,
-   conversation-item persistence, empathy/model switching, or any output consumer without a separately approved
-   bounded slice. Any future release proposal must treat lexical admission as necessary but not sufficient.
+1. **Stop at the reviewed M5.5 integration point.** A separately approved bounded slice must precede any further
+   native process wiring, browser messages, conversation-item persistence, empathy/model switching, or output
+   consumer. Any future release proposal must treat lexical admission as necessary but not sufficient.
 
 Substantive tranches are committed and reviewed at bounded integration points. A documentation-only status
 acknowledgement does not trigger a recursive review round; changes to ADRs, gates, invariants, ACLs,
