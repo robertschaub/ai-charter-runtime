@@ -143,6 +143,15 @@ interface HeldOutput {
   readonly bytes: Buffer;
 }
 
+type QuarantineSealer = (
+  request: ModelOutputAdmissionRequest,
+  decision: AdmittedOutput,
+  caseId: string,
+) => QuarantinedModelOutputRef;
+
+/** Module-private capability: importers can inspect or destroy quarantine entries but cannot create one. */
+const quarantineSealers = new WeakMap<ModelOutputQuarantine, QuarantineSealer>();
+
 function laneKey(cardIdInput: string, cardVersionInput: number, requestedIdInput: string): string {
   return `${cardSlug.parse(cardIdInput)}@${integer.min(1).parse(cardVersionInput)}\n${modelId.parse(requestedIdInput)}`;
 }
@@ -168,8 +177,10 @@ function bindingMatches(
 
 /**
  * Process-private holding area. M5.4 deliberately exposes metadata and destruction only:
- * no method can read or release the held bytes. A later reviewed slice must add a distinct,
- * single-use validated consumer rather than treating presence here as safety clearance.
+ * no exported method can seal, read, or release the held bytes. Sealing is a module-private
+ * coordinator capability, which provides structural confinement rather than cryptographic
+ * proof of authorization provenance. A later reviewed slice must add a distinct, single-use
+ * validated consumer rather than treating presence here as safety clearance.
  */
 export class ModelOutputQuarantine {
   readonly #held = new Map<string, HeldOutput>();
@@ -181,9 +192,10 @@ export class ModelOutputQuarantine {
   constructor(options: { readonly maxEntries?: number; readonly maxHeldBytes?: number } = {}) {
     this.#maxEntries = integer.min(1).parse(options.maxEntries ?? 8);
     this.#maxHeldBytes = integer.min(1).parse(options.maxHeldBytes ?? 1_048_576);
+    quarantineSealers.set(this, (request, decision, caseId) => this.#seal(request, decision, caseId));
   }
 
-  seal(
+  #seal(
     requestInput: ModelOutputAdmissionRequest,
     decisionInput: AdmittedOutput,
     caseIdInput: string,
@@ -247,6 +259,17 @@ export class ModelOutputQuarantine {
     this.#held.clear();
     this.#heldBytes = 0;
   }
+}
+
+function sealQuarantinedOutput(
+  quarantine: ModelOutputQuarantine,
+  request: ModelOutputAdmissionRequest,
+  decision: AdmittedOutput,
+  caseId: string,
+): QuarantinedModelOutputRef {
+  const seal = quarantineSealers.get(quarantine);
+  if (seal === undefined) throw new ModelTurnError('invalid-configuration');
+  return seal(request, decision, caseId);
 }
 
 function projectionPrompt(projection: ConversationProjection): ActingRequest['messages'] {
@@ -396,7 +419,7 @@ export class ModelTurnCoordinator {
         return {
           disposition: 'quarantined',
           admission,
-          quarantine: this.#quarantine.seal(request, admission, this.#caseId),
+          quarantine: sealQuarantinedOutput(this.#quarantine, request, admission, this.#caseId),
         };
       } catch (error) {
         return halt(error instanceof ModelTurnError ? error.code : 'admission-binding-invalid');

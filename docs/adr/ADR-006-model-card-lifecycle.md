@@ -90,6 +90,10 @@ the selected card binding before projection disclosure. A valid but substituted 
 durably recorded as withheld; the coordinator adds no quarantine entry and halts the lane. Timeout, malformed
 provider evidence, null content, or tool calls also halt without fallback, but this bounded slice adds no separate
 durable provider-failure event. That remaining record integration, process wiring, and any release policy stay deferred.
+The quarantine exposes no sealing operation to importers: a module-private coordinator capability creates entries
+only after admission and local binding verification. That is in-process structural confinement rather than
+cryptographic proof of decision provenance, and a future release consumer must not treat quarantine presence as
+safety clearance.
 
 ### 4. How mandates reference cards
 Each approved-model entry is role-scoped and pins `card_version` **and** `card_digest`. The digest is taken over **exactly the signed bytes** — the canonical card minus its `signature` block, `model-card` domain — so digest equality means signed-content equality, and re-signing a card under a rotated key leaves the digest untouched:

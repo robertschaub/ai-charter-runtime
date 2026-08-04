@@ -278,6 +278,9 @@ describe('M5.4 containment-only model-turn coordinator', () => {
       },
     });
     const quarantine = new ModelOutputQuarantine();
+    expect('seal' in quarantine).toBe(false);
+    expect(Object.getOwnPropertyNames(Object.getPrototypeOf(quarantine))).not.toContain('seal');
+    expect(Object.getOwnPropertySymbols(Object.getPrototypeOf(quarantine))).toHaveLength(0);
     const coordinator = new ModelTurnCoordinator({
       worldId: 'w-demo',
       caseId: 'case_demo',

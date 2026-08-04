@@ -282,14 +282,15 @@ recursive review round.
   duplicate turn, or any dependency failure adds no held-buffer entry and permanently halts that lane for the
   coordinator lifetime. There is no endpoint/model fallback and no retry of the same turn.
 - A clean `admitted` result is still not release clearance. The raw UTF-8 copy is held only in a process-private,
-  single-assignment quarantine; its API exposes fixed metadata, existence, destruction, and clear operations but
-  no content read or consume method. Entry-count and byte ceilings bound retention; capacity failure halts the lane.
-  Destruction zeroes the held byte buffer before removal without claiming that JavaScript can erase prior
-  immutable-string copies.
+  single-assignment quarantine. Only a module-private coordinator capability can seal an entry; the exported API
+  exposes fixed metadata, existence, destruction, and clear operations but no seal, content-read, or consume method.
+  This is structural in-process confinement, not cryptographic authorization provenance or release approval.
+  Entry-count and byte ceilings bound retention; capacity failure halts the lane. Destruction zeroes the held byte
+  buffer before removal without claiming that JavaScript can erase prior immutable-string copies.
 - Real-listener tests use the actual authorization HTTP routes plus a synthetic loopback OpenAI-compatible server.
   They cover filtered disclosure, sealed admission, turn replay, served-model mismatch, literal red-line withholding,
   unapproved selection before disclosure, revocation after disclosure, tool calls, malformed served evidence or
-  Unicode, lane halt, access metadata, and raw-output absence.
+  Unicode, absence of an external seal capability, lane halt, access metadata, and raw-output absence.
 - No live model is contacted; no conversation item, proposal, action authority, browser response, or generated
   record is created. Provider-failure event recording, native process wiring, model switching, dialogue triggers,
   and any output consumer/release policy remain deferred. M5 and demo beats 19–21 are not complete.
