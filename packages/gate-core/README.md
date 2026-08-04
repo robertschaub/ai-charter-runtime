@@ -45,9 +45,10 @@ reloads and verifies the signed card, intersects mandate and card clearances, an
 orchestrator-only acting projection for the configured case. Screening projects only fixture-named suspect
 proposal items under the screening role. Fixtures are keyed by exact proposal hash and gate; absent,
 mismatched, unavailable, or restricted evidence records a skipped check and required screening escalates.
-The M5.3 candidate adds a strict, Origin-guarded orchestrator process route that recomputes the current acting
-projection before admitting model output. Served-model mismatch or either deterministic output-enforced empathy
-red line withholds the output; a clean admission only governs later display/use and has `authority_effect: none`.
+M5.3, implementation-reviewed at `1cc7fb2`, adds a strict, Origin-guarded orchestrator process route that
+recomputes the current acting projection before admitting model output. Served-model mismatch or a configured
+lexical match for either output-enforced empathy red line withholds the output; obvious paraphrases can remain
+undetected, so a clean admission is not semantic red-line clearance. Every result has `authority_effect: none`.
 The access chain receives bindings, counts, tags, reasons, and domain-separated digests, never raw model text.
 The native process makes no model-provider call and the browser message route remains closed.
 Run `npm test` and `npm run typecheck` from the repository root.

@@ -29,11 +29,13 @@ commit, path, and digest above. A later upstream change does not silently move t
 
 ## Reviewed implementation baseline
 
-The latest maintainer-run, cross-model adversarially reviewed runtime implementation baseline is
-`1973515663ee9d1c59a1d105e7aa40aa4b38f906` (`1973515`). The focused M5.2 correction review returned
-**GO — both Low findings closed; no new findings** and reproduced `npm run typecheck`, 4 Git-safety hook
-tests, 286 Vitest tests across 33 files, `git diff --check`, and verification of both unchanged signed cards.
-That exact lineage is published on `origin/main`.
+The latest cross-model adversarially reviewed implementation is
+`1cc7fb2cb191287137586ca7a1203205a595709b` (`1cc7fb2`). Its M5.3 review found the boundary correctly
+implemented and reproduced `npm run typecheck`, 4 Git-safety hook tests, 295 Vitest tests across 34 files,
+`git diff --check`, and verification of both unchanged signed cards. One Low source-comment finding remained:
+the lexical check disclosed false positives but not its material false-negative limitation. This documentation-only
+follow-up closes that wording defect without changing executable behavior. The latest published reviewed baseline
+remains M5.2 at `1973515`; `1cc7fb2` and this follow-up are local until the maintainer decides to push.
 
 The final M4 acceptance review at `e326562f6c29fe2fc625a18127517163d5665dcd` returned **GO — M4
 acceptance complete; no findings**. Review of `d25f366` had found one Medium asymmetric
@@ -55,7 +57,7 @@ distinguish an uncommitted latest checkpoint from confirmed remote rollback or m
 | M2 — transactional core | Implemented and fault-tested | Authorization remains the single durable serialization point; authority defects fail closed. |
 | M3 — vertical slice | Implemented | Deterministic authorize → propose → rule → commit-verify → effect → receipt path, adapters, service ledger, and signed cards are present. |
 | M4 — escalation + governance console | **Complete** | Final exact-SHA review of `e326562` returned GO with no findings; the offline acceptance ledger preserves the remaining partial and not-assessed boundaries. |
-| M5 — screening + empathy + switching | **In progress** | M5.1 is reviewed at `c1b5eb0`; M5.2 is reviewed at `1973515`; M5.3 is an output-admission candidate awaiting exact-SHA review. Model ingress remains closed. |
+| M5 — screening + empathy + switching | **In progress** | M5.1 is reviewed at `c1b5eb0`; M5.2 at `1973515`; M5.3 implementation at `1cc7fb2`, with its one Low wording finding closed in this documentation-only follow-up. Model ingress remains closed. |
 | M6–M7 | Not started | Full capture/publication work follows the implementation milestones. |
 
 These labels describe repository implementation status, not assurance, certification, or independent
@@ -227,7 +229,7 @@ unavailable instead of treating an empty result as a performed check. This is a 
 new M5 slice. Focused re-review of `1973515` returned **GO — both M5.2 Low findings are closed; no new
 findings**. M5.2 is a reviewed integration point, not an M5 completion claim.
 
-### M5.3 implementation candidate — authorization-owned output admission and red-line quarantine
+### M5.3 implemented and reviewed at `1cc7fb2` — authorization-owned output admission and red-line quarantine
 
 - `POST /w/{world_id}/model-outputs/admit` is strict, Origin-guarded, authenticated only for
   `proc:orchestrator`, and classified as non-authorizing. It returns no ruling, nonce, token, or action authority.
@@ -236,26 +238,32 @@ findings**. M5.2 is a reviewed integration point, not an M5 completion claim.
   recomputes the acting projection before comparing its `conversation-projection` digest.
 - Requested and provider-served model ids are checked under the signed card's ADR-006 policy. Mismatch withholds;
   a benign unrecorded alias remains admitted with the factual `model_resolution_unrecorded` flag.
-- The deterministic English POC checker conservatively withholds the two red lines the specification assigns
-  directly to output control: claimed feeling/consciousness and need/miss/love or human-relationship replacement.
-  It is a fail-closed mechanism test, not a claim of semantic detection quality or coverage in other languages.
+- The narrow English lexical POC checker withholds configured literal forms and selected variants of the two
+  output-enforced red lines: claimed feeling/consciousness and need/miss/love or human-relationship replacement.
+  Obvious paraphrases remain false negatives, while quoted matching text can be a false positive. `admitted`
+  therefore means no configured pattern matched, not semantic red-line clearance or coverage in other languages.
 - A clean decision derives the sorted turn-level union of all projected input tags inside authorization. No
   output item is persisted yet, so later ingestion must consume this union without accepting caller narrowing.
 - Every completed decision appends fixed access-chain evidence containing bindings, counts, tags, reasons, and
   domain-separated projection/output digests. Raw admitted and withheld text is absent from the response,
   records, and errors.
-- A later ingress slice may release only the exact bytes whose recomputed output digest matches the retained
-  `admitted` decision for that turn; `withheld` terminates it. M5.3 keeps the browser route closed, so this
-  not-yet-implemented enforcement step is unreachable rather than optional.
+- Exact output-digest equality with a retained `admitted` decision is necessary for any later ingress, but the
+  lexical admission alone is not sufficient red-line clearance. A separately approved ingress slice must define
+  the additional release policy; `withheld` always terminates the turn. M5.3 keeps the browser route closed, so
+  this not-yet-implemented enforcement step is unreachable rather than optional.
 - Core, ACL/schema, real-listener, and native three-process tests cover safe admission, both red lines,
   provider substitution, unrecorded benign resolution, wrong actor, stale projection, revoked authority,
   caller-added scope, foreign Origin, access evidence, and raw-output absence.
 - The browser case-message route remains `501 model-interaction-not-active`; no provider is called, no output
   reaches a person or proposal, no conversation item is written, and model switching/dialogue triggers remain
-  deferred. This candidate therefore does not complete M5 or exercise demo beats 4, 19, 20, or 21 end to end.
+  deferred. This implementation therefore does not complete M5 or exercise demo beats 4, 19, 20, or 21 end to end.
 
-Candidate validation is `npm run typecheck` clean plus 4 Git-safety hook tests and 295 Vitest tests across
-34 files, `git diff --check` clean, and both unchanged signed cards verified.
+Candidate validation was `npm run typecheck` clean plus 4 Git-safety hook tests and 295 Vitest tests across
+34 files, `git diff --check` clean, and both unchanged signed cards verified. Exact-SHA review found no code or
+security defect and one Low documentation finding about the lexical detector's under-blocking profile. This
+documentation-only follow-up states that limitation at the implementation and status surfaces; it does not alter
+the reviewed gate, ADR, provenance pin, ACL, schema, projection, or safety restriction and does not require a
+recursive review round.
 
 ## Resolved browser credential-handoff protocol
 
@@ -274,12 +282,11 @@ authorization route. The bounded handoff and session implementation was independ
 
 ## Ordered next slices
 
-1. **Exact-SHA adversarial review of M5.3** — review the committed candidate against the pinned Charter
-   specification and ADR-002/005/006/007; verify that admission is non-authorizing, current authority/card and
-   projection evidence are re-resolved, served-model mismatch and both named red lines withhold, caller scope
-   cannot widen tags, raw output never enters records/responses, and provider/browser ingress remains closed.
-2. **Stop after review.** Do not start provider ingress, browser messages, conversation-item persistence,
-   empathy/model switching, or live output release without a separately approved bounded slice.
+1. **Stop after the M5.3 review and documentation-only finding closure.** Do not start provider ingress,
+   browser messages, conversation-item persistence, empathy/model switching, or live output release without a
+   separately approved bounded slice.
+2. **Carry the detector limit into ingress design.** A future proposal must treat digest-bound lexical admission
+   as necessary but not sufficient for release and define its additional policy before any output reaches a person.
 
 Substantive tranches are committed and reviewed at bounded integration points. A documentation-only status
 acknowledgement does not trigger a recursive review round; changes to ADRs, gates, invariants, ACLs,

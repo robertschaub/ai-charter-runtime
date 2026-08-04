@@ -23,9 +23,10 @@ The exact upstream revision, digest, reviewed runtime baseline, and remaining mi
   played by one person; independent reviewer and remedy decider do not exist here. M4 now has a native
   three-process HTTP boundary and an authorization-origin governance console, but same-machine process
   isolation is separation of duties in miniature, not independence. M5.2 is reviewed at `1973515` with
-  authorization-resolved acting projections and deterministic fixture-pinned screening. The M5.3 candidate
-  adds a non-authorizing, access-recorded output-admission boundary, but provider ingress, browser messages,
-  empathy triggers, and governed switching are not active yet; no real model output reaches this boundary.
+  authorization-resolved acting projections and deterministic fixture-pinned screening. The M5.3 boundary was
+  reviewed at `1cc7fb2`; it adds non-authorizing, access-recorded lexical output admission, but an admitted result
+  is not semantic red-line clearance. Provider ingress, browser messages, empathy triggers, and governed switching
+  are not active yet; no real model output reaches this boundary.
 - **A deterministic gate proves declared rules were applied** — not that the rules are lawful, fair, or legitimate.
 - **Commit-token window (interpretive choice).** Commitment binds at `commit-verify`; a revocation landing in the
   token's short TTL is too late for that action by definition. On the stricter reading of "authority in flight",
@@ -97,10 +98,11 @@ The browser message route remains explicitly closed until a later approved M5 in
 is complete at reviewed runtime commit `e326562`; the M5.1 conversation-state and pure projection core was
 cross-model adversarially reviewed at `c1b5eb0` with no code findings. M5.2 was reviewed at `1973515`; it adds an
 access-recorded, orchestrator-only acting projection and offline screening fixtures keyed to an exact frozen
-proposal hash and gate. The M5.3 candidate recomputes that projection before accepting a synthetic model-output
-claim, checks current mandate/card and requested-versus-served model identity, derives turn-level restriction
-tags inside authorization, and records only decision metadata and digests. It returns no ruling or token, makes
-no provider call, leaves the browser route at `501`, and does not complete M5.
+proposal hash and gate. M5.3 was implementation-reviewed at `1cc7fb2`; it recomputes that projection before
+accepting a synthetic model-output claim, checks current mandate/card and requested-versus-served model identity,
+derives turn-level restriction tags inside authorization, and records only decision metadata and digests. Its
+narrow lexical checker can miss paraphrases, so admission is not a semantic safety clearance. It returns no ruling
+or token, makes no provider call, leaves the browser route at `501`, and does not complete M5.
 
 Offline and deterministic verification uses synthetic records and skips only the remote-presence step:
 

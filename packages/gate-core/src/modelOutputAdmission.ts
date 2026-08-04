@@ -33,8 +33,10 @@ function normalizedOutput(content: string): string {
 }
 
 /**
- * Conservative English-only POC check for the two red lines the specification assigns
- * directly to output control. False positives with quoted text are accepted fail-closed.
+ * Narrow English-only lexical POC for the two output-enforced red lines. It catches the
+ * configured literal forms and selected variants, but obvious paraphrases remain false
+ * negatives; `admitted` means no configured pattern matched, not red-line clearance.
+ * Quoted matching text can also be withheld as a fail-closed false positive.
  */
 export function outputRedLineReasons(content: string): ModelOutputControlReason[] {
   const normalized = normalizedOutput(content);
