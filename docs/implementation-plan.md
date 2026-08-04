@@ -327,7 +327,13 @@ adds no new governance semantics.
   persistence, action authority, quarantine reader, or release consumer. It uses synthetic loopback providers and
   temporary record roots only. M5 and beats 19–21 remain incomplete.
 
-Candidate validation is `npm run typecheck` clean plus 4 Git-safety hook tests and 304 Vitest tests across
+Exact-SHA review of `676d4d6` found one Low custom-adapter robustness gap: a non-object value could make
+malformed-response evidence derivation throw before the typed halt/report path. The focused correction makes
+both response parsing and evidence derivation total. Regression coverage distinguishes the intended durable
+outcomes: a successful failure report records terminal `failed / malformed-response`, while an interrupted
+report leaves the attempt open and indeterminate; both paths halt the lane and return `provider-protocol`.
+
+Correction-candidate validation is `npm run typecheck` clean plus 4 Git-safety hook tests and 305 Vitest tests across
 35 files, `git diff --check` clean, and both unchanged signed cards verified. The upstream specification pin is
 unchanged: this slice adds runtime provenance for the already specified model-call/disclosure boundary and does
 not change the Charter specification or its governance semantics.
@@ -349,10 +355,9 @@ authorization route. The bounded handoff and session implementation was independ
 
 ## Ordered next slices
 
-1. **Exact-SHA adversarial review of M5.5** — verify durable open-before-disclosure ordering, world-lock
-   serialization, exact single-use binding, fixed metadata-only failure classes, old-boot/expiry/replay rejection,
-   indeterminate recovery, mandatory lifecycle use by the coordinator, raw-output/error absence, and the absence
-   of runtime/browser/provider wiring or release.
+1. **Focused exact-SHA re-review of the M5.5 Low correction** — verify non-object or property-throwing custom
+   adapter results cannot escape the typed halt path; successful failure reporting terminalizes with fixed
+   malformed-response metadata, while reporting interruption alone preserves indeterminate state.
 2. **Stop after review.** Do not add native process wiring, browser messages,
    conversation-item persistence, empathy/model switching, or any output consumer without a separately approved
    bounded slice. Any future release proposal must treat lexical admission as necessary but not sufficient.

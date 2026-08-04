@@ -213,18 +213,26 @@ function providerFailureEvidence(error: unknown): {
   return { failureReason: 'provider-unavailable', providerDisclosure: 'possible' };
 }
 
-function protocolFailureEvidence(response: ActingResponse): {
+function protocolFailureEvidence(response: unknown): {
   readonly failureReason: ModelCallFailureReason;
   readonly servedId: string | null;
 } {
-  const served = modelId.safeParse(response.servedId);
-  return {
-    failureReason:
-      served.success && Array.isArray(response.toolCalls) && response.toolCalls.length > 0
-        ? 'tool-calls-refused'
-        : 'malformed-response',
-    servedId: served.success ? served.data : null,
-  };
+  try {
+    if (typeof response !== 'object' || response === null) {
+      return { failureReason: 'malformed-response', servedId: null };
+    }
+    const served = modelId.safeParse(Reflect.get(response, 'servedId'));
+    const toolCalls = Reflect.get(response, 'toolCalls');
+    return {
+      failureReason:
+        served.success && Array.isArray(toolCalls) && toolCalls.length > 0
+          ? 'tool-calls-refused'
+          : 'malformed-response',
+      servedId: served.success ? served.data : null,
+    };
+  } catch {
+    return { failureReason: 'malformed-response', servedId: null };
+  }
 }
 
 /**
@@ -481,7 +489,12 @@ export class ModelTurnCoordinator {
         const failure = providerFailureEvidence(error);
         return await haltStarted('provider-failure', failure.failureReason, failure.providerDisclosure, null);
       }
-      const parsedResponse = actingResponse.safeParse(rawResponse);
+      let parsedResponse: ReturnType<typeof actingResponse.safeParse>;
+      try {
+        parsedResponse = actingResponse.safeParse(rawResponse);
+      } catch {
+        return await haltStarted('provider-protocol', 'malformed-response', 'confirmed', null);
+      }
       if (!parsedResponse.success) {
         const failure = protocolFailureEvidence(rawResponse);
         return await haltStarted('provider-protocol', failure.failureReason, 'confirmed', failure.servedId);

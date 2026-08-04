@@ -506,6 +506,109 @@ describe('M5.4 containment with M5.5 durable model-call evidence', () => {
     expect(provider.requests).toHaveLength(0);
   });
 
+  it('totalizes non-object custom-adapter results and preserves indeterminate state only if reporting fails', async () => {
+    const h = await authorizationHarness();
+    const provider = await loopbackProvider();
+    const malformed = new ModelTurnCoordinator({
+      worldId: 'w-demo',
+      caseId: 'case_demo',
+      authorization: h.authorization,
+      lanes: [
+        {
+          ...lane(provider),
+          adapter: {
+            lane: 'publicai',
+            requestedId: turn.requestedId,
+            act: async () => null as never,
+          },
+        },
+      ],
+    });
+    await expect(malformed.run({ ...turn, turnId: 'turn_model_null_result' })).rejects.toEqual(
+      expect.objectContaining({ code: 'provider-protocol' }),
+    );
+    expect(malformed.isLaneHalted(turn.cardId, turn.cardVersion, turn.requestedId)).toBe(true);
+    expect([...h.store.snapshot().modelCalls.values()].find((call) => call.turn_id === 'turn_model_null_result')).toMatchObject({
+      state: 'terminal',
+      outcome: 'failed',
+      failure_reason: 'malformed-response',
+      provider_disclosure: 'confirmed',
+      served_id: null,
+    });
+
+    const hostileResult = new Proxy(
+      {},
+      {
+        get(_target, property) {
+          if (property === 'then') return undefined;
+          throw new Error('synthetic hostile result detail');
+        },
+      },
+    );
+    const hostile = new ModelTurnCoordinator({
+      worldId: 'w-demo',
+      caseId: 'case_demo',
+      authorization: h.authorization,
+      lanes: [
+        {
+          ...lane(provider),
+          adapter: {
+            lane: 'publicai',
+            requestedId: turn.requestedId,
+            act: async () => hostileResult as never,
+          },
+        },
+      ],
+    });
+    await expect(hostile.run({ ...turn, turnId: 'turn_model_hostile_result' })).rejects.toEqual(
+      expect.objectContaining({ code: 'provider-protocol' }),
+    );
+    expect(hostile.isLaneHalted(turn.cardId, turn.cardVersion, turn.requestedId)).toBe(true);
+    expect(
+      [...h.store.snapshot().modelCalls.values()].find((call) => call.turn_id === 'turn_model_hostile_result'),
+    ).toMatchObject({
+      state: 'terminal',
+      outcome: 'failed',
+      failure_reason: 'malformed-response',
+      served_id: null,
+    });
+    expect(JSON.stringify(h.store.snapshot().accessRecords)).not.toContain('synthetic hostile result detail');
+
+    const interrupted = new ModelTurnCoordinator({
+      worldId: 'w-demo',
+      caseId: 'case_demo',
+      authorization: {
+        beginModelCall: (input) => h.authorization.beginModelCall(input),
+        admitModelOutput: (world, callId, input) => h.authorization.admitModelOutput(world, callId, input),
+        failModelCall: async () => {
+          throw new Error('synthetic failure-report interruption');
+        },
+      },
+      lanes: [
+        {
+          ...lane(provider),
+          adapter: {
+            lane: 'publicai',
+            requestedId: turn.requestedId,
+            act: async () => undefined as never,
+          },
+        },
+      ],
+    });
+    await expect(interrupted.run({ ...turn, turnId: 'turn_model_undefined_result' })).rejects.toEqual(
+      expect.objectContaining({ code: 'provider-protocol' }),
+    );
+    expect(interrupted.isLaneHalted(turn.cardId, turn.cardVersion, turn.requestedId)).toBe(true);
+    expect(
+      [...h.store.snapshot().modelCalls.values()].find((call) => call.turn_id === 'turn_model_undefined_result'),
+    ).toMatchObject({
+      state: 'open',
+      outcome: 'indeterminate',
+      provider_disclosure: 'possible',
+    });
+    expect(provider.requests).toHaveLength(0);
+  });
+
   it('halts on tool calls, malformed provider evidence, or a changed admission binding', async () => {
     const h = await authorizationHarness();
     const provider = await loopbackProvider();
