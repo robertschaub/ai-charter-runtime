@@ -3,6 +3,11 @@
 
 **Status:** accepted (M1, 2026-08-01; cards authored at M3). **Spec:** §4 Model card, §5 find → check → use, §9 (cryptography limits; provider-side substitution), §7 beats 19–21.
 
+**Amendment (M5.3 served-model admission, 2026-08-04):** the authorization-owned output boundary reloads the
+approved signed card, applies this ADR's resolution policy to the provider-reported served id, and withholds a
+mismatch before output may enter conversation state, a proposal, or a browser path. A benign unrecorded alias
+snapshot remains admitted with `model_resolution_unrecorded`; the decision carries no action authority.
+
 ## Context
 Cards are the v0 evidence registry: signed JSON in git, bound to the pinned deployed version, every field marked self-declared or probe-tested — never independently attested. The trust root is a public verification key in this repo; the private key stays local. The mandate governs disclosure; a card can narrow but never widen it.
 
@@ -75,6 +80,10 @@ The card pins the **requested id** — the alias where the provider aliases, the
 Outcomes: `exact` → continue; `benign-resolution` → continue, recording the resolved snapshot per call (`gen_ai.request.model` / `gen_ai.response.model`); **anything else, including a missing or malformed served id → mismatch → beat-21 quarantine** (response never enters conversation state or a proposal; violation recorded including that disclosure to the substitute already occurred; lane halted, fail closed).
 
 One addition: a benign snapshot **not yet listed** in `resolution.observed_snapshots` is recorded as `model_resolution_unrecorded` and raises a **Flag** — never a Stop, because the alias is what the principal approved and what the mandate pins. It marks the card's probe evidence stale and queues a re-probe plus a card-version bump. Silent provider-side rotation is drift (family 11), not defective authority.
+
+M5.3 exercises this comparison on the strict output-admission boundary. The model text is hashed under its own
+domain together with the current case/turn/projection and approval references; only that digest and the fixed
+comparison metadata enter the access record. This is the first native quarantine seam, not provider ingress.
 
 ### 4. How mandates reference cards
 Each approved-model entry is role-scoped and pins `card_version` **and** `card_digest`. The digest is taken over **exactly the signed bytes** — the canonical card minus its `signature` block, `model-card` domain — so digest equality means signed-content equality, and re-signing a card under a rotated key leaves the digest untouched:

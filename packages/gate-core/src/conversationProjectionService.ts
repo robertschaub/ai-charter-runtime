@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-/** M5.2 authorization-owned mandate/card resolution for acting and screening projections. */
+/** M5.2 projections plus M5.3 authorization-owned model-output admission. */
 import { canonicalize } from './canonicalize.js';
-import { CardRegistry } from './cardRegistry.js';
+import { CardRegistry, type CardInspection } from './cardRegistry.js';
 import { projectConversation, type ProjectConversationInput } from './conversationProjection.js';
+import { evaluateModelOutput, ModelOutputAdmissionError } from './modelOutputAdmission.js';
 import { verifyEmbeddedMac, type Keyring } from './keyring.js';
 import type { ScreeningResolution } from './authorizationCore.js';
 import {
@@ -15,6 +16,9 @@ import {
   type FrozenProposal,
   type Mandate,
   type ModelRole,
+  modelOutputAdmissionRequest,
+  type ModelOutputAdmission,
+  type ModelOutputAdmissionRequest,
 } from './schemas/index.js';
 import { screeningFixtureSet, type ScreeningFixture } from './screeningFixture.js';
 import { mandateVersionKey } from './state.js';
@@ -45,6 +49,10 @@ export interface ScreeningProjectionInput {
   readonly caseId?: string;
 }
 
+export type OutputAdmissionInput = ModelOutputAdmissionRequest & {
+  readonly actor: TransactionActor;
+};
+
 export interface ConversationProjectionServiceOptions {
   readonly store: WalStore;
   readonly cards: CardRegistry;
@@ -52,6 +60,17 @@ export interface ConversationProjectionServiceOptions {
   readonly caseId: string;
   readonly screeningFixtures: readonly ScreeningFixture[];
   readonly now?: () => string;
+}
+
+interface ResolvedProjectionInput {
+  readonly mandateId: string;
+  readonly mandateVersion: number;
+  readonly cardId: string;
+  readonly cardVersion: number;
+  readonly requestedId: string;
+  readonly role: ModelRole;
+  readonly caseId: string;
+  readonly entries?: ProjectConversationInput['entries'];
 }
 
 function sorted(values: Iterable<string>): string[] {
@@ -107,6 +126,40 @@ export class ConversationProjectionService {
   }
 
   acting(input: ActingProjectionInput): ReturnType<typeof projectConversation> {
+    return this.#resolveActing(input).projection;
+  }
+
+  admitOutput(input: OutputAdmissionInput): ModelOutputAdmission {
+    const { actor, ...request } = input;
+    const parsed = modelOutputAdmissionRequest.parse(request);
+    const resolved = this.#resolveActing({
+      mandateId: parsed.mandate_id,
+      mandateVersion: parsed.mandate_version,
+      cardId: parsed.card_id,
+      cardVersion: parsed.card_version,
+      requestedId: parsed.requested_id,
+      actor,
+    });
+    try {
+      return evaluateModelOutput({
+        request: parsed,
+        caseId: this.#caseId,
+        projection: resolved.projection,
+        resolutionPolicy: resolved.inspection.card.model.resolution.policy,
+        observedServedIds: resolved.inspection.card.model.resolution.observed_snapshots.map((entry) => entry.id),
+      });
+    } catch (error) {
+      if (error instanceof ModelOutputAdmissionError) {
+        throw new ConversationProjectionServiceError('invalid-scope', 'model output does not match the current acting projection');
+      }
+      throw error;
+    }
+  }
+
+  #resolveActing(input: ActingProjectionInput): {
+    readonly projection: ReturnType<typeof projectConversation>;
+    readonly inspection: CardInspection;
+  } {
     if (input.actor.credential !== 'proc:orchestrator') {
       throw new ConversationProjectionServiceError('forbidden', 'only the orchestrator process may read acting projection');
     }
@@ -119,7 +172,7 @@ export class ConversationProjectionService {
         'acting projection mandate does not match the sole active mandate',
       );
     }
-    return this.#project({
+    return this.#resolveProjection({
       mandateId,
       mandateVersion,
       cardId: cardSlug.parse(input.cardId),
@@ -279,16 +332,10 @@ export class ConversationProjectionService {
     return approval.requested_id;
   }
 
-  #project(input: {
-    readonly mandateId: string;
-    readonly mandateVersion: number;
-    readonly cardId: string;
-    readonly cardVersion: number;
-    readonly requestedId: string;
-    readonly role: ModelRole;
-    readonly caseId: string;
-    readonly entries?: ProjectConversationInput['entries'];
-  }): ReturnType<typeof projectConversation> {
+  #resolveProjection(input: ResolvedProjectionInput): {
+    readonly projection: ReturnType<typeof projectConversation>;
+    readonly inspection: CardInspection;
+  } {
     if (input.caseId !== this.#caseId) {
       throw new ConversationProjectionServiceError('invalid-scope', 'projection case does not match authorization configuration');
     }
@@ -318,14 +365,21 @@ export class ConversationProjectionService {
     if (mandateClearances === undefined || cardClearances === undefined) {
       throw new ConversationProjectionServiceError('model-unavailable', `model lacks ${input.role} clearance`);
     }
-    return projectConversation({
-      worldId: mandateValue.world_id,
-      caseId: this.#caseId,
-      provider: approval.card_id,
-      role: input.role,
-      mandateClearances,
-      cardClearances,
-      entries: input.entries ?? [...this.#store.snapshot().storeItems.values()],
-    });
+    return {
+      projection: projectConversation({
+        worldId: mandateValue.world_id,
+        caseId: this.#caseId,
+        provider: approval.card_id,
+        role: input.role,
+        mandateClearances,
+        cardClearances,
+        entries: input.entries ?? [...this.#store.snapshot().storeItems.values()],
+      }),
+      inspection,
+    };
+  }
+
+  #project(input: ResolvedProjectionInput): ReturnType<typeof projectConversation> {
+    return this.#resolveProjection(input).projection;
   }
 }

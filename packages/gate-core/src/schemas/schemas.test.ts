@@ -523,6 +523,65 @@ describe('schemas — accept the shapes the ADRs specify', () => {
       read_lengths: { action: 118, access: 42 },
     });
     expect(access.success, JSON.stringify(access.error?.issues)).toBe(true);
+    const outputEvidence = {
+      kind: 'model_output_control',
+      case_id: 'case_demo',
+      turn_id: 'turn_output',
+      mandate_id: 'mdt_demo_grant',
+      mandate_version: 1,
+      card_id: 'publicai-apertus-v1.5-70b',
+      card_version: 1,
+      requested_id: 'swiss-ai/apertus-v1.5-70b',
+      served_id: 'swiss-ai/apertus-v1.5-70b',
+      projection_digest: DIGEST,
+      projection_item_count: 3,
+      output_digest: DIGEST,
+      model_resolution: 'exact',
+      flags: [],
+      authority_effect: 'none',
+      disposition: 'admitted',
+      reasons: [],
+      derived_tags: ['conf:case', 'conf:public', 'purpose:grant-assessment'],
+    };
+    expect(
+      accessEntry.safeParse({
+        world_id: 'w-demo',
+        entry_id: 'acc_output_1',
+        at: '2026-08-01T09:20:00.000Z',
+        route: 'POST /w/{world_id}/model-outputs/admit',
+        authenticated_actor: 'proc:orchestrator',
+        claimed_actor: null,
+        outcome: 'served',
+        http_status: 200,
+        operation_evidence: outputEvidence,
+      }).success,
+    ).toBe(true);
+    expect(
+      accessEntry.safeParse({
+        world_id: 'w-demo',
+        entry_id: 'acc_output_wrong_route',
+        at: '2026-08-01T09:20:00.000Z',
+        route: 'GET /w/{world_id}/records/*',
+        authenticated_actor: 'proc:orchestrator',
+        claimed_actor: null,
+        outcome: 'served',
+        http_status: 200,
+        operation_evidence: outputEvidence,
+      }).success,
+    ).toBe(false);
+    expect(
+      accessEntry.safeParse({
+        world_id: 'w-demo',
+        entry_id: 'acc_output_raw_text',
+        at: '2026-08-01T09:20:00.000Z',
+        route: 'POST /w/{world_id}/model-outputs/admit',
+        authenticated_actor: 'proc:orchestrator',
+        claimed_actor: null,
+        outcome: 'served',
+        http_status: 200,
+        operation_evidence: { ...outputEvidence, content: 'must not enter the access chain' },
+      }).success,
+    ).toBe(false);
     expect(
       accessEntry.safeParse({
         world_id: 'w-demo',

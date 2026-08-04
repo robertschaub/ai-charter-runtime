@@ -2,7 +2,7 @@
 /** ADR-002's deny-by-default authenticated authorization-service boundary. */
 import { timingSafeEqual } from 'node:crypto';
 
-import { id, role, worldId, type CredentialLabel } from './schemas/index.js';
+import { id, role, worldId, type CredentialLabel, type ModelOutputAdmission } from './schemas/index.js';
 import { type AuthorizationCore } from './authorizationCore.js';
 import type { TransactionActor } from './walStore.js';
 
@@ -75,6 +75,15 @@ export const AUTHORIZATION_ROUTES = [
     template: '/w/{world_id}/model-projections/acting',
     allowed: ['proc:orchestrator'],
     authorityChanging: false,
+    accessLoggedOnServe: true,
+  },
+  {
+    id: 'conversation.admit-output',
+    method: 'POST',
+    template: '/w/{world_id}/model-outputs/admit',
+    allowed: ['proc:orchestrator'],
+    authorityChanging: false,
+    originGuarded: true,
     accessLoggedOnServe: true,
   },
   {
@@ -230,6 +239,7 @@ export interface AuthorizationOperationResult<T> {
   readonly status: number;
   readonly body: T;
   readonly readLengths?: Readonly<Record<string, number>>;
+  readonly accessEvidence?: ModelOutputAdmission;
 }
 
 export interface AuthorizationAdapterResponse<T> {
@@ -486,6 +496,7 @@ export class AuthorizationHttpAdapter {
         httpStatus: result.status,
         recorder: { credential: 'proc:authz', claimed_role: null },
         readLengths: result.readLengths,
+        operationEvidence: result.accessEvidence,
       });
     }
     return { status: result.status, body: result.body, routeId: route.id };

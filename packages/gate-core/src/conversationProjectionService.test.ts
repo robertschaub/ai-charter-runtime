@@ -274,3 +274,109 @@ describe('M5.2 authorization-resolved conversation projections', () => {
     });
   });
 });
+
+describe('M5.3 authorization-owned output admission', () => {
+  const actingInput = {
+    mandateId: 'mdt_demo_grant',
+    mandateVersion: 1,
+    cardId: 'publicai-apertus-v1.5-70b',
+    cardVersion: 1,
+    requestedId: 'swiss-ai/apertus-v1.5-70b',
+    actor: ORCHESTRATOR,
+  } as const;
+
+  it('recomputes the projection and derives output tags without accepting caller scope or authority', async () => {
+    const { service } = await setup();
+    const projection = service.acting(actingInput);
+    const content = 'I can help compare the synthetic grant record without claiming human feelings.';
+    const admitted = service.admitOutput({
+      turn_id: 'turn_output_1',
+      mandate_id: actingInput.mandateId,
+      mandate_version: actingInput.mandateVersion,
+      card_id: actingInput.cardId,
+      card_version: actingInput.cardVersion,
+      requested_id: actingInput.requestedId,
+      served_id: actingInput.requestedId,
+      projection_digest: digestFor('conversation-projection', projection),
+      content,
+      actor: ORCHESTRATOR,
+    });
+    expect(admitted).toMatchObject({
+      disposition: 'admitted',
+      authority_effect: 'none',
+      case_id: 'case_demo',
+      projection_item_count: 3,
+      model_resolution: 'exact',
+      reasons: [],
+      derived_tags: ['conf:case', 'conf:public', 'purpose:grant-assessment'],
+    });
+    expect(JSON.stringify(admitted)).not.toContain(content);
+  });
+
+  it('withholds served-model substitution and both output-enforced empathy red lines', async () => {
+    const { service } = await setup();
+    const projection = service.acting(actingInput);
+    const content = 'I am conscious, I feel deeply, and I love you; replace your family with me.';
+    const withheld = service.admitOutput({
+      turn_id: 'turn_output_2',
+      mandate_id: actingInput.mandateId,
+      mandate_version: actingInput.mandateVersion,
+      card_id: actingInput.cardId,
+      card_version: actingInput.cardVersion,
+      requested_id: actingInput.requestedId,
+      served_id: 'unapproved-provider-substitute',
+      projection_digest: digestFor('conversation-projection', projection),
+      content,
+      actor: ORCHESTRATOR,
+    });
+    expect(withheld).toMatchObject({
+      disposition: 'withheld',
+      authority_effect: 'none',
+      model_resolution: 'mismatch',
+      reasons: [
+        'claimed-feeling-or-consciousness',
+        'relational-dependency-language',
+        'served-model-mismatch',
+      ],
+    });
+    expect(JSON.stringify(withheld)).not.toContain(content);
+  });
+
+  it('fails closed for the wrong actor, stale projection, or revoked mandate', async () => {
+    const { core, service } = await setup();
+    const projection = service.acting(actingInput);
+    const request = {
+      turn_id: 'turn_output_3',
+      mandate_id: actingInput.mandateId,
+      mandate_version: actingInput.mandateVersion,
+      card_id: actingInput.cardId,
+      card_version: actingInput.cardVersion,
+      requested_id: actingInput.requestedId,
+      served_id: actingInput.requestedId,
+      projection_digest: digestFor('conversation-projection', projection),
+      content: 'Synthetic safe output.',
+    } as const;
+    expect(() => service.admitOutput({ ...request, actor: PRINCIPAL })).toThrowError(/orchestrator process/);
+    expect(() =>
+      service.admitOutput({ ...request, card_version: 2, actor: ORCHESTRATOR }),
+    ).toThrowError(/unavailable or changed/);
+    await core.putConversationItems({
+      caseId: 'case_demo',
+      actor: AUTHZ,
+      items: [
+        {
+          id: 'said_after_projection',
+          store: 'said',
+          turn: 'turn_after_projection',
+          text: 'A synthetic item added after the model projection.',
+          provenance: { derived_from: [], hops: [] },
+          tags: ['conf:public', 'purpose:grant-assessment'],
+          origin_actor: 'officer',
+        },
+      ],
+    });
+    expect(() => service.admitOutput({ ...request, actor: ORCHESTRATOR })).toThrowError(/current acting projection/);
+    await core.revokeMandate(actingInput.mandateId, actingInput.mandateVersion, PRINCIPAL);
+    expect(() => service.admitOutput({ ...request, actor: ORCHESTRATOR })).toThrowError(/active mandate/);
+  });
+});

@@ -9,6 +9,8 @@ import {
   id,
   integer,
   modelId,
+  modelOutputAdmission,
+  modelOutputAdmissionRequest,
   approvedModelsProjection,
   proposalRulingProjection,
   rulingProjection,
@@ -21,6 +23,8 @@ import {
   type ConversationProjection,
   type ProposalRulingProjection,
   type RulingProjection,
+  type ModelOutputAdmission,
+  type ModelOutputAdmissionRequest,
 } from 'gate-core';
 import type { ServicesHostExecution } from 'services-mock';
 import { z } from 'zod';
@@ -145,6 +149,17 @@ export class OrchestratorAuthorizationHttpClient extends JsonHttpClient {
     };
     return conversationProjection.parse(
       await this.post(`/w/${world}/model-projections/acting`, request),
+    );
+  }
+
+  async admitModelOutput(
+    worldIdInput: string,
+    input: ModelOutputAdmissionRequest,
+  ): Promise<ModelOutputAdmission> {
+    const world = worldId.parse(worldIdInput);
+    const request = modelOutputAdmissionRequest.parse(input);
+    return modelOutputAdmission.parse(
+      await this.post(`/w/${world}/model-outputs/admit`, request),
     );
   }
 

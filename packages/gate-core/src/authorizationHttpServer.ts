@@ -46,6 +46,7 @@ import {
   id,
   integer,
   modelId,
+  modelOutputAdmissionRequest,
   timestamp,
   worldId,
   type Mandate,
@@ -395,6 +396,19 @@ export class AuthorizationHttpServer {
           status: 200,
           body: projection,
           readLengths: { conversation_items: projection.items.length },
+        };
+      },
+      'conversation.admit-output': async (request, context) => {
+        const parsed = modelOutputAdmissionRequest.parse(await body(request));
+        const decision = options.conversationProjections.admitOutput({
+          ...parsed,
+          actor: requireActor(context),
+        });
+        return {
+          status: 200,
+          body: decision,
+          readLengths: { conversation_items: decision.projection_item_count },
+          accessEvidence: decision,
         };
       },
       'ruling.read': async (_request, context) => {

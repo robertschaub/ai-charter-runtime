@@ -49,6 +49,15 @@ the disclosure. No caller may supply case, role, items, tags, or effective clear
 case-to-mandate relation, so the route fails closed unless exactly one mandate is active in the world and the
 request's mandate id/version names that sole envelope; the orchestrator cannot choose among active mandates.
 
+**Amendment (M5.3 model-output admission boundary, 2026-08-04):** authorization exposes one non-authorizing,
+Origin-guarded process route to `proc:orchestrator`. Its strict body carries a turn id, the exact approved
+mandate/card/model references, the provider-reported served id, an authorization-projection digest, and bounded
+model text. Authorization injects the configured case and acting role, recomputes the current projection and
+card evidence, verifies the digest and served-id policy, derives turn-level tags, and applies the two red lines
+the specification assigns directly to output control. The fixed response and access record contain only
+bindings, counts, tags, reasons, and digests—never model text—and state `authority_effect: none`. Provider and
+browser ingress remain closed, so this slice exposes no model response to a person and grants no action authority.
+
 ## Context
 
 Three OS processes make "the model proposes, a component outside the model decides, the executing service
@@ -139,6 +148,7 @@ Authorization service, all data routes under `/w/{world_id}/…`:
 |---|---|
 | `POST /proposals` (submit frozen proposal → ruling) | `proc:orchestrator` |
 | `POST /model-projections/acting` (authorization-resolved conversation projection) | `proc:orchestrator` only; read-only and access-recorded |
+| `POST /model-outputs/admit` (revalidate and classify one bounded model result) | `proc:orchestrator` only; non-authorizing, Origin-guarded, and access-recorded |
 | `GET /rulings/{id}` (status projection, §7) | `proc:orchestrator` (own submissions), `proc:services_host` |
 | `GET /mandates/{id}/approved-models` (picker and principal card-evidence source, card-verified) | `proc:orchestrator`, `role:principal`, `role:case_officer` |
 | `POST /case-session-handoffs` (mint; adapter `authorityChanging: true`, `originGuarded: true`) | **`role:case_officer` only** |
@@ -192,8 +202,9 @@ Services host: `POST /w/{w}/services/{service}/execute` `proc:orchestrator`;
 `commit-verify`, effect outcomes, and reconciliation probes carry both the current services-host boot id
 and the persistent services-ledger id; only absence under the same ledger id can release a commitment.
 
-**The orchestrator's process credential appears on exactly six gate/data routes plus the dedicated
-case-session-handoff redemption route.** The six are proposal submission, acting-projection read,
+**The orchestrator's process credential appears on exactly seven gate/data routes plus the dedicated
+case-session-handoff redemption route.** The seven are proposal submission, acting-projection read,
+model-output admission,
 revised-proposal continuation, ruling read, approved-model read, and the read-only escalation mirror ADR-004
 §7 requires. Redemption
 returns only `{handoff_id, role, world_id, case_id, target_origin, authorization_boot_id, consumed_at}`
@@ -365,6 +376,12 @@ allowlist projection**, decided per route and per credential:
 - acting projection → `{world_id, case_id, provider, role: "acting", items, summary}` where the case and
   role are authorization-owned and `summary` names exact included/dropped counts, dropped ids, and unmet
   tags. Every attempt is access-recorded; the response carries no mandate binding or effective-clearance input;
+- model-output admission → `{kind, disposition: admitted | withheld, authority_effect: "none", case_id,
+  turn_id, mandate/card/model references, projection_digest, projection_item_count, output_digest,
+  model_resolution, flags, reasons, derived_tags?}`. A withheld result omits derived tags; neither result
+  contains model text, a ruling, a nonce, or a token. The same fixed decision metadata is appended to the
+  access chain before return;
+
 - approved models → for the orchestrator, case officer, and principal, the mandate id/version/state and
   acting-role entries only, each carrying its pinned
   approval, current signed public card, current digest and verifying key id, factual
@@ -387,6 +404,10 @@ allowlist projection**, decided per route and per credential:
 - applicant extract → server-side action, authority/ruling, effect, intervention-summary, challenge route,
   and local-receipt projections for the single synthetic applicant world. It excludes evidence payloads,
   bindings, nonces, reservations, idempotency keys, and full internal records.
+
+A later provider/browser ingress may release only the exact response bytes whose recomputed `model-output`
+digest equals the retained `admitted` decision for that turn; `withheld` terminates the turn. The M5.3 slice
+does not yet implement that release path, so the admission result cannot be bypassed by an active browser route.
 
 The strict challenge body is `{action_id, contested_entry_id, correction_text}`. Authorization verifies that
 the record belongs to the named action, rejects a duplicate open challenge, appends rather than edits, and
@@ -427,6 +448,11 @@ out-of-scope one — and `commit-verify` refuses it again.
 The M5.2 listener/process coverage additionally proves that non-orchestrator credentials receive 403,
 caller-added scope fields receive 422, the configured case and acting role are injected, and every successful
 or refused projection disclosure is represented in the access chain.
+M5.3 coverage proves that foreign Origin and non-orchestrator calls are refused before evaluation; caller-added
+case or tag scope is rejected; stale projection or authority evidence fails closed; served-model substitution
+and the deterministic feelings/dependency red lines withhold; and raw admitted or rejected text appears in
+neither response nor access record. The case-message route remains `501`, making the not-yet-implemented
+digest-to-release binding unreachable rather than silently optional.
 
 **Required with the browser handoff implementation.** Real-listener tests cover exact-origin/exact-window
 message acceptance and wrong/opaque origin or wrong-window refusal; mint-role confinement; absence from URLs,

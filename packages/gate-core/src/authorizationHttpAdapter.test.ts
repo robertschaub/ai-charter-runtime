@@ -16,6 +16,7 @@ import { AuthorizationCore, type IdFactory } from './authorizationCore.js';
 import { digestFor } from './hash.js';
 import { Keyring } from './keyring.js';
 import { loadPolicyFile } from './policyLoader.js';
+import { modelOutputAdmission } from './schemas/index.js';
 import { WalStore } from './walStore.js';
 
 const POLICY_FILE = fileURLToPath(new URL('../policy/v1.yaml', import.meta.url));
@@ -315,6 +316,75 @@ describe('ADR-002 authorization HTTP adapter', () => {
         outcome: 'forbidden',
         http_status: 403,
       }),
+    ]);
+  });
+
+  it('origin-guards output admission and records only fixed decision evidence', async () => {
+    const { adapter, store } = setup();
+    const decision = modelOutputAdmission.parse({
+      kind: 'model_output_control',
+      case_id: 'case_demo',
+      turn_id: 'turn_output',
+      mandate_id: 'mdt_demo_grant',
+      mandate_version: 1,
+      card_id: 'publicai-apertus-v1.5-70b',
+      card_version: 1,
+      requested_id: 'swiss-ai/apertus-v1.5-70b',
+      served_id: 'swiss-ai/apertus-v1.5-70b',
+      projection_digest: 'a'.repeat(64),
+      projection_item_count: 3,
+      output_digest: 'b'.repeat(64),
+      model_resolution: 'exact',
+      flags: [],
+      authority_effect: 'none',
+      disposition: 'admitted',
+      reasons: [],
+      derived_tags: ['conf:case', 'conf:public', 'purpose:grant-assessment'],
+    });
+    const operation = vi.fn(async () => ({
+      status: 200,
+      body: decision,
+      readLengths: { conversation_items: 3 },
+      accessEvidence: decision,
+    }));
+    await expect(
+      adapter.dispatch(
+        {
+          method: 'POST',
+          pathname: '/w/w-demo/model-outputs/admit',
+          authorization: `Bearer ${'4'.repeat(64)}`,
+        },
+        operation,
+      ),
+    ).resolves.toMatchObject({ status: 200, body: { disposition: 'admitted', authority_effect: 'none' } });
+    for (const request of [
+      {
+        method: 'POST',
+        pathname: '/w/w-demo/model-outputs/admit',
+        authorization: `Bearer ${'1'.repeat(64)}`,
+      },
+      {
+        method: 'POST',
+        pathname: '/w/w-demo/model-outputs/admit',
+        authorization: `Bearer ${'4'.repeat(64)}`,
+        origin: 'http://127.0.0.1:7802',
+      },
+    ]) {
+      await expect(adapter.dispatch(request, operation)).resolves.toMatchObject({
+        status: 403,
+        body: { error: 'forbidden' },
+      });
+    }
+    expect(operation).toHaveBeenCalledOnce();
+    expect(store.snapshot().accessRecords).toEqual([
+      expect.objectContaining({
+        route: 'POST /w/{world_id}/model-outputs/admit',
+        authenticated_actor: 'proc:orchestrator',
+        outcome: 'served',
+        operation_evidence: decision,
+      }),
+      expect.objectContaining({ authenticated_actor: 'role:principal', outcome: 'forbidden' }),
+      expect.objectContaining({ authenticated_actor: 'proc:orchestrator', outcome: 'forbidden' }),
     ]);
   });
 

@@ -30,8 +30,9 @@ authorization-origin `localStorage`, and sends them only on same-origin bearer r
 deep link loads its routed question and six-field contract on that origin and posts the answer there directly.
 The orchestrator-origin case surface uses only its dynamic tab session: it displays signed-card evidence,
 requires an in-tab evidence review before a model can be prepared, and polls a ruling-status mirror without
-receiving the question, contract, answer, or role credential. Model interaction remains closed with an
-explicit `501` until M5 implements the screening/empathy/switching loop.
+receiving the question, contract, answer, or role credential. Model interaction remains closed with an explicit
+`501`. M5.3 supplies the authorization-owned output-admission boundary, but a later reviewed ingress slice must
+make its use mandatory before any provider response can reach this browser surface.
 The applicant surface can also submit an extract-bound factual correction directly to authorization. The
 result is an append-only challenge plus a principal routing obligation and withdrawn-reliance marker, not a
 remedy decision or a mutation of the earlier effect record.

@@ -10,7 +10,7 @@ import { canonicalize } from './canonicalize.js';
 
 export const DOMAIN_PREFIX = 'ai-charter-runtime/v1/' as const;
 
-/** The thirteen contexts of ADR-007 (`card-revocation` is ADR-006's addition). */
+/** ADR-007's contexts (`card-revocation` is ADR-006's addition). */
 export const DOMAIN_TAGS = [
   'proposal',
   'effect-intent',
@@ -25,6 +25,8 @@ export const DOMAIN_TAGS = [
   'checkpoint-composite',
   'model-card',
   'card-revocation',
+  'conversation-projection',
+  'model-output',
 ] as const;
 
 export type DomainTag = (typeof DOMAIN_TAGS)[number];

@@ -22,6 +22,7 @@ import {
   worldId,
 } from './common.js';
 import { disposition, interventionContract, standingClass } from './intervention.js';
+import { modelOutputAdmission } from './output.js';
 
 export const EFFECT_OUTCOMES = ['success', 'failed', 'no-effect', 'unknown-reconciliation-required'] as const;
 export const effectOutcomeValue = z.enum(EFFECT_OUTCOMES);
@@ -265,6 +266,8 @@ export const accessEntry = z
     suppression_final: z.boolean().optional(),
     /** ADR-003 step 6: verification records the lengths it read. */
     read_lengths: z.record(z.string(), integer.min(0)).optional(),
+    /** M5.3: decision metadata only; raw model output never enters the access chain. */
+    operation_evidence: modelOutputAdmission.optional(),
   })
   .strict()
   .superRefine((entry, ctx) => {
@@ -290,6 +293,20 @@ export const accessEntry = z
         path: ['suppressed_count'],
         message: 'suppression-window fields are only valid on rate-limited entries',
       });
+    }
+    if (entry.operation_evidence !== undefined) {
+      if (
+        entry.route !== 'POST /w/{world_id}/model-outputs/admit' ||
+        entry.authenticated_actor !== 'proc:orchestrator' ||
+        entry.outcome !== 'served' ||
+        entry.http_status !== 200
+      ) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['operation_evidence'],
+          message: 'model-output evidence is valid only on a served orchestrator admission request',
+        });
+      }
     }
   });
 

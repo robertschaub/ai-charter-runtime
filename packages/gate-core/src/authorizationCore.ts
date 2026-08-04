@@ -37,6 +37,7 @@ import {
   type GateRuling,
   type InterventionContract,
   type Mandate,
+  type ModelOutputAdmission,
   type PatternEvent,
   type RecordEntry,
   type ScreeningSignal,
@@ -271,6 +272,7 @@ export interface RecordAccessInput {
   readonly httpStatus: number;
   readonly recorder: TransactionActor;
   readonly readLengths?: Readonly<Record<string, number>>;
+  readonly operationEvidence?: ModelOutputAdmission;
   readonly suppressedCount?: number;
   readonly suppressionWindowMs?: number;
   readonly suppressionFinal?: boolean;
@@ -2338,6 +2340,7 @@ export class AuthorizationCore {
             outcome: input.outcome,
             http_status: input.httpStatus,
             ...(input.readLengths === undefined ? {} : { read_lengths: input.readLengths }),
+            ...(input.operationEvidence === undefined ? {} : { operation_evidence: input.operationEvidence }),
             ...(input.suppressedCount === undefined ? {} : { suppressed_count: input.suppressedCount }),
             ...(input.suppressionWindowMs === undefined
               ? {}

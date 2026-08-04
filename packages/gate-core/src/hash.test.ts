@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from 'vitest';
 
-import { domainPrefix, taggedBytes } from './domain.js';
+import { DOMAIN_TAGS, domainPrefix, taggedBytes } from './domain.js';
 import { digestFor, hmacSha256, macFor, sha256Hex, verifyDigest, verifyMacValue } from './hash.js';
 
 const KEY_A = 'a'.repeat(64);
@@ -22,16 +22,8 @@ describe('hash', () => {
 
   it('gives a value a different digest in every context', () => {
     const value = { world_id: 'w-demo', seq: 1 };
-    const digests = new Set([
-      digestFor('proposal', value),
-      digestFor('effect-intent', value),
-      digestFor('record-entry', value),
-      digestFor('access-entry', value),
-      digestFor('wal-entry', value),
-      digestFor('model-card', value),
-      digestFor('card-revocation', value),
-    ]);
-    expect(digests.size).toBe(7);
+    const digests = new Set(DOMAIN_TAGS.map((tag) => digestFor(tag, value)));
+    expect(digests.size).toBe(DOMAIN_TAGS.length);
   });
 
   it('rejects an unknown domain tag rather than hashing untagged', () => {

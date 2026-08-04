@@ -17,6 +17,12 @@ gate, minimizes to fixture-named suspect proposal items, and revalidates the res
 Because the bounded POC has no case-to-mandate relation, acting projection also requires exactly one active
 mandate in the world and rejects ambiguity; the request's mandate reference must match that sole envelope.
 
+**Amendment (M5.3 output admission and tag inheritance, 2026-08-04):** authorization recomputes the exact
+acting projection and compares its domain-separated digest before evaluating a model result. For an admitted
+result it derives `U` from every projected item and returns that sorted union as decision metadata; the caller
+cannot supply case, role, items, tags, clearances, or a store operation. This slice persists no derived item and
+opens no model/browser ingress, so later ingestion must consume this server-derived union without narrowing it.
+
 ## Context
 Derived content inherits the **union of the restriction tags** of its inputs — a set over confidentiality, purpose and recipient, not a scalar level. Projection to a provider is a subset check against the mandate ∩ card permissions for that provider's **role** (acting or screening); membership in the approved-model set authorizes acting, not blanket disclosure.
 
@@ -94,6 +100,8 @@ role, included whole items, and an exact summary of dropped ids and unmet tags. 
 through an authenticated authorization route while keeping the case, role, store contents, and effective
 clearance server-owned. The caller supplies only exact mandate/card approval identifiers; accepting
 caller-supplied projection scope or effective clearance remains an authority bypass.
+M5.3 binds model-output admission to `H_conversation-projection(projection)` and derives the turn-level union
+inside authorization. The admission result has no action-authority effect and is not itself a store write.
 
 ### 6. Screening projections
 Screening carries the same tags and the same check, against the **screening-role** clearance set — permission to screen is not permission to act. Order: minimize first (the suspect input item only, not the case file), then subset-check. If the suspect item is not disclosable to any configured screening provider, no call is made and `screening_skipped: disclosure_restricted` is recorded. Because a signal can only raise and never allow, the deterministic rules simply stand — except where the policy file marks screening as **required** for that action class, in which case the missing check escalates (fail closed).
