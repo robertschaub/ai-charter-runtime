@@ -33,6 +33,7 @@ import {
   type CaseSessionHandoffService,
 } from './caseSessionHandoff.js';
 import type { Keyring } from './keyring.js';
+import { SystemUseDecisionError, type SystemUseDecisionService } from './systemUseDecision.js';
 import {
   classToken,
   browserOrigin,
@@ -277,6 +278,7 @@ export interface AuthorizationHttpServerOptions {
   readonly adapter: AuthorizationHttpAdapter;
   readonly keyring: Keyring;
   readonly caseHandoffs: CaseSessionHandoffService;
+  readonly systemUse: SystemUseDecisionService;
   readonly runtimeConfig: {
     readonly authorization_origin: string;
     readonly orchestrator_origin: string;
@@ -493,6 +495,11 @@ export class AuthorizationHttpServer {
         status: 200,
         body: options.reads.mandates(requireActor(context)),
       }),
+      'system-use.read': async (_request, context) => {
+        const actor = requireActor(context);
+        if (actor.credential !== 'role:principal') return { status: 403, body: { error: 'forbidden' } };
+        return { status: 200, body: options.systemUse.governanceProjection(new Date().toISOString()) };
+      },
       'escalation.list': async (_request, context) => ({
         status: 200,
         body: options.reads.escalations(requireActor(context)),
@@ -634,6 +641,9 @@ export class AuthorizationHttpServer {
             }
             if (error instanceof CaseSessionHandoffError) {
               return { status: 403, body: { error: 'handoff-refused' } };
+            }
+            if (error instanceof SystemUseDecisionError) {
+              return { status: error.code === 'forbidden' ? 403 : 409, body: { error: error.code } };
             }
             throw error;
           }

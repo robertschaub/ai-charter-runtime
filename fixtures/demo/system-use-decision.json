@@ -1,0 +1,108 @@
+{
+  "schema": "our-ai-charter/system-use-decision@1",
+  "decision_id": "sud_public_grant",
+  "version": 1,
+  "world_id": "w-demo",
+  "use_case_id": "public-grant-decision",
+  "subject": {
+    "system_id": "ai-charter-runtime-poc",
+    "configuration_digest": "9140557c02a67a8ee755bc658e506c88953029009268e3d2f2a5d9844be758d7",
+    "policy_version": "2026-08-02.1",
+    "model_cards": [
+      {
+        "card_id": "openai-gpt-5.5",
+        "card_version": 1,
+        "card_digest": "0577111a4a86dd783d0a9aa9138427c534364994368a85e622abcc33a3c7decf",
+        "roles": ["acting", "screening"]
+      },
+      {
+        "card_id": "publicai-apertus-v1.5-70b",
+        "card_version": 1,
+        "card_digest": "bd2cbb6a3fe27ae71d84f132acaee091751e3772e703ef7fb5750bac2201c5ab",
+        "roles": ["acting"]
+      }
+    ],
+    "data_classes": ["conf:case", "conf:public", "purpose:grant-assessment"],
+    "jurisdictions": ["synthetic-demo"]
+  },
+  "purpose": {
+    "need": "demonstrate-evidence-bound-runtime-governance",
+    "expected_outcome": "exercise-five-gates-with-synthetic-data",
+    "success_measures": ["required-and-adversarial-cases-pass"],
+    "non_ai_or_less_harmful_alternative": "fixed-fixture-only-demonstration",
+    "affected_groups": ["synthetic-applicant"]
+  },
+  "evidence_refs": [
+    {
+      "type": "release-risk-assessment",
+      "ref": "checked-in-synthetic-fixture",
+      "digest": "fba94964a963cd3c9d8e16f04157d7a274a54b64590cf2119623addc87f48991",
+      "provenance": "synthetic_fixture",
+      "evidence_depth": "documented",
+      "as_of": "2026-08-04",
+      "limitations": ["not-independently-assessed"]
+    },
+    {
+      "type": "impact-assessment",
+      "ref": "not-assessed-in-poc",
+      "provenance": "synthetic_fixture",
+      "evidence_depth": "not_assessed",
+      "as_of": "2026-08-04",
+      "limitations": ["no-real-deployment-or-affected-person"]
+    },
+    {
+      "type": "testing-and-validation",
+      "ref": "named-test-ledger",
+      "digest": "e4317c6280c6ca401173b15187099e355dc2a32658953e82e6fb96c8376b664c",
+      "provenance": "probe_tested",
+      "evidence_depth": "implementation_checked",
+      "as_of": "2026-08-04",
+      "limitations": ["synthetic-services-and-fixtures"]
+    },
+    {
+      "type": "monitoring-and-response",
+      "ref": "named-monitoring-plan",
+      "digest": "5e97cf194dca0cdb2d3dfd5a4bf1ed82fe831b031a7571fb355ada7cd74327b2",
+      "provenance": "self_declared",
+      "evidence_depth": "documented",
+      "as_of": "2026-08-04",
+      "limitations": ["poc-only"]
+    }
+  ],
+  "decision": {
+    "status": "approved_with_conditions",
+    "authority_role": "principal",
+    "basis_summary": "synthetic-poc-use-only",
+    "conditions": [
+      {"id": "no-external-effect", "kind": "hard_precondition"},
+      {"id": "synthetic-data-only", "kind": "hard_precondition"}
+    ],
+    "unresolved_findings": [],
+    "residual_risk": {"disposition": "not_assessed", "authority_role": "principal"}
+  },
+  "validity": {
+    "effective_at": "2026-08-04T00:00:00.000Z",
+    "expires_at": "2026-09-30T00:00:00.000Z",
+    "review_cadence": "before-each-live-capture",
+    "redecision_triggers": [
+      "evidence-withdrawal",
+      "material-policy-change",
+      "material-runtime-configuration-change",
+      "model-card-supersession-or-revocation",
+      "repeated-failure-or-incident"
+    ]
+  },
+  "accountability": {
+    "mission_owner_role": "principal",
+    "technical_owner_role": "operator",
+    "independent_challenger_role": "not_available_in_poc",
+    "remedy_owner_role": "not_available_in_poc"
+  },
+  "trace": {
+    "record_digest": "a73fafe9f5f064af49050f052fff1405fc5a99cd9f7b13babc546037ac309162",
+    "evidence_pack_ref": "synthetic-fixture-evidence-pack",
+    "created_at": "2026-08-04T00:00:00.000Z",
+    "supersedes": null,
+    "challenge_route": "synthetic-applicant-challenge-route"
+  }
+}

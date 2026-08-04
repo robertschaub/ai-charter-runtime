@@ -7,6 +7,7 @@ import {
   approvedModelEntry,
   authorityHop,
   cardSlug,
+  challengeAndRemedy,
   classToken,
   disposition,
   hexDigest,
@@ -29,6 +30,7 @@ import {
   worldId,
   substitutionRules,
   storeItem,
+  systemUseDecisionReference,
 } from './schemas/index.js';
 
 export const rulingProjection = z
@@ -288,10 +290,12 @@ export const applicantActionProjection = z
     target: targetProjection,
     material_consequences: z.array(z.string()),
     authority: z.object({ mandate_id: id, mandate_version: integer.min(1) }).strict(),
+    system_use_decision: systemUseDecisionReference.nullable(),
+    system_use_current_at_record: z.boolean(),
     ruling: rulingProjection.pick({ ruling_id: true, verdict: true, reason: true, status: true }),
     effects: z.array(applicantEffectProjection),
     interventions: z.array(applicantInterventionProjection),
-    challenge_and_remedy: recordEntry.shape.challenge_and_remedy,
+    challenge_and_remedy: challengeAndRemedy.nullable(),
   })
   .strict();
 
@@ -310,7 +314,16 @@ export const localRecordReceiptProjection = z
       .strict()
       .nullable(),
     action_entries: z.array(
-      z.object({ entry_id: id, action_id: id, index: integer.min(0), inside_anchored_prefix: z.boolean() }).strict(),
+      z
+        .object({
+          entry_id: id,
+          action_id: id,
+          index: integer.min(0),
+          inside_anchored_prefix: z.boolean(),
+          system_use_decision: systemUseDecisionReference.nullable(),
+          system_use_current_at_record: z.boolean(),
+        })
+        .strict(),
     ),
     open_window: z.object({ entries: integer.min(0), minutes: integer.min(0).nullable() }).strict(),
   })

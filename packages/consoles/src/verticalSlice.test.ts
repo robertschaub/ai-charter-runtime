@@ -72,6 +72,13 @@ describe('M3 fault-tested vertical slice', () => {
       outcome: 'success',
       anchoring_status: 'no-pushed-checkpoint',
       latest_pushed_checkpoint: null,
+      system_use_decision: {
+        decision_id: 'sud_test_fixture',
+        version: 1,
+        status: 'approved',
+        conditions: [],
+      },
+      system_use_current_at_record: true,
     });
     expect(receipt.local_receipt_notice).toContain('independent lodgment custody is outside this POC');
     expect(receipt).not.toHaveProperty('token');

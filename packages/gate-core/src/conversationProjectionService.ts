@@ -38,10 +38,11 @@ import {
 import { screeningFixtureSet, type ScreeningFixture } from './screeningFixture.js';
 import { mandateVersionKey, type WorldState } from './state.js';
 import type { TransactionActor, WalStore } from './walStore.js';
+import { SystemUseDecisionError, SystemUseDecisionService } from './systemUseDecision.js';
 
 export class ConversationProjectionServiceError extends Error {
   constructor(
-    readonly code: 'forbidden' | 'invalid-scope' | 'mandate-unavailable' | 'model-unavailable',
+    readonly code: 'forbidden' | 'invalid-scope' | 'mandate-unavailable' | 'model-unavailable' | 'system-use-unavailable',
     message: string,
   ) {
     super(message);
@@ -77,6 +78,7 @@ export interface ConversationProjectionServiceOptions {
   readonly screeningFixtures: readonly ScreeningFixture[];
   readonly now?: () => string;
   readonly modelCallTtlMs?: number;
+  readonly systemUse: SystemUseDecisionService;
 }
 
 interface ResolvedProjectionInput {
@@ -134,6 +136,7 @@ export class ConversationProjectionService {
   readonly #fixtures: readonly ScreeningFixture[];
   readonly #now: () => string;
   readonly #modelCallTtlMs: number;
+  readonly #systemUse: SystemUseDecisionService;
 
   constructor(options: ConversationProjectionServiceOptions) {
     this.#store = options.store;
@@ -144,6 +147,7 @@ export class ConversationProjectionService {
     this.#fixtures = screeningFixtureSet.parse(options.screeningFixtures);
     this.#now = options.now ?? (() => new Date().toISOString());
     this.#modelCallTtlMs = integer.min(1).max(300_000).parse(options.modelCallTtlMs ?? 60_000);
+    this.#systemUse = options.systemUse;
   }
 
   async beginCall(input: ModelCallBeginInput): Promise<ModelCallStart> {
@@ -180,6 +184,7 @@ export class ConversationProjectionService {
         requested_id: request.requested_id,
         projection_digest: digestFor('conversation-projection', resolved.projection),
         projection_item_count: resolved.projection.items.length,
+        system_use_decision: resolved.systemUseDecision,
         opened_at: at,
         expires_at: timestamp.parse(new Date(Date.parse(at) + this.#modelCallTtlMs).toISOString()),
         state: 'open',
@@ -203,6 +208,7 @@ export class ConversationProjectionService {
     actor: TransactionActor,
     state?: WorldState,
     nowInput?: string,
+    expectedSystemUse?: ModelCallOpenRecord['system_use_decision'],
   ): ModelOutputAdmission {
     const resolved = this.#resolveActing(
       {
@@ -216,6 +222,12 @@ export class ConversationProjectionService {
       state,
       nowInput,
     );
+    if (
+      expectedSystemUse !== undefined &&
+      canonicalize(resolved.systemUseDecision) !== canonicalize(expectedSystemUse)
+    ) {
+      throw new ConversationProjectionServiceError('system-use-unavailable', 'system-use decision changed after call open');
+    }
     try {
       return evaluateModelOutput({
         request,
@@ -283,7 +295,7 @@ export class ConversationProjectionService {
         if (!this.#callMatchesOutput(call, request.output)) {
           throw new ConversationProjectionServiceError('invalid-scope', 'model output does not match its call attempt');
         }
-        const decision = this.#evaluateOutput(request.output, actor, state, at);
+        const decision = this.#evaluateOutput(request.output, actor, state, at, call.system_use_decision);
         const admission = modelCallAdmission.parse({ kind: 'model_call_admission', call_id: call.call_id, decision });
         return {
           ops: [
@@ -313,6 +325,25 @@ export class ConversationProjectionService {
       const call = this.#openCall(state, request.call_id, at);
       if (!this.#callMatchesFailure(call, request)) {
         throw new ConversationProjectionServiceError('invalid-scope', 'model failure does not match its call attempt');
+      }
+      if (request.failure_reason === 'system-use-invalidated') {
+        const mandateValue = state.mandates.get(mandateVersionKey(call.mandate_id, call.mandate_version));
+        let stillCurrent = false;
+        if (mandateValue !== undefined && state.policy !== undefined) {
+          try {
+            stillCurrent =
+              canonicalize(this.#systemUse.resolve(state, mandateValue, state.policy.policy_version, at)) ===
+              canonicalize(call.system_use_decision);
+          } catch (error) {
+            if (!(error instanceof SystemUseDecisionError)) throw error;
+          }
+        }
+        if (stillCurrent) {
+          throw new ConversationProjectionServiceError(
+            'invalid-scope',
+            'system-use-invalidated requires evidence that the bound decision is no longer current',
+          );
+        }
       }
       const failed = modelCallFailedRecord.parse({
         ...call,
@@ -344,6 +375,7 @@ export class ConversationProjectionService {
   #resolveActing(input: ActingProjectionInput, state?: WorldState, nowInput?: string): {
     readonly projection: ReturnType<typeof projectConversation>;
     readonly inspection: CardInspection;
+    readonly systemUseDecision: ModelCallOpenRecord['system_use_decision'];
   } {
     if (input.actor.credential !== 'proc:orchestrator') {
       throw new ConversationProjectionServiceError('forbidden', 'only the orchestrator process may read acting projection');
@@ -532,12 +564,25 @@ export class ConversationProjectionService {
   #resolveProjection(input: ResolvedProjectionInput, stateInput?: WorldState, nowInput?: string): {
     readonly projection: ReturnType<typeof projectConversation>;
     readonly inspection: CardInspection;
+    readonly systemUseDecision: ModelCallOpenRecord['system_use_decision'];
   } {
     if (input.caseId !== this.#caseId) {
       throw new ConversationProjectionServiceError('invalid-scope', 'projection case does not match authorization configuration');
     }
     const state = stateInput ?? this.#store.snapshot();
     const mandateValue = this.#currentMandate(input.mandateId, input.mandateVersion, state, nowInput);
+    let systemUseDecision: ModelCallOpenRecord['system_use_decision'];
+    try {
+      if (state.policy === undefined) {
+        throw new SystemUseDecisionError('scope-mismatch', 'active policy is unavailable');
+      }
+      systemUseDecision = this.#systemUse.resolve(state, mandateValue, state.policy.policy_version, nowInput ?? this.#now());
+    } catch (error) {
+      if (error instanceof SystemUseDecisionError) {
+        throw new ConversationProjectionServiceError('system-use-unavailable', 'current system-use decision is unavailable');
+      }
+      throw error;
+    }
     const approval = mandateValue.approved_models.find(
       (candidate) =>
         candidate.card_id === input.cardId &&
@@ -574,6 +619,7 @@ export class ConversationProjectionService {
         entries: input.entries ?? [...state.storeItems.values()],
       }),
       inspection,
+      systemUseDecision,
     };
   }
 

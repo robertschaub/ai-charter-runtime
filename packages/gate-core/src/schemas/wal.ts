@@ -22,11 +22,23 @@ import {
   reviewObligation,
 } from './state.js';
 import { conversationStoreEntry } from './store.js';
+import { systemUseDecisionRecord, systemUseDecisionStatus } from './systemUseDecision.js';
 
 const transitionReason = z.string().min(1);
 
 export const walOp = z.discriminatedUnion('op', [
   z.object({ op: z.literal('proposal.freeze'), proposal: frozenProposal }).strict(),
+
+  z.object({ op: z.literal('system_use_decision.issue'), decision: systemUseDecisionRecord }).strict(),
+  z
+    .object({
+      op: z.literal('system_use_decision.transition'),
+      decision_id: id,
+      version: integer.min(1),
+      status: systemUseDecisionStatus,
+      changed_at: timestamp,
+    })
+    .strict(),
 
   z.object({ op: z.literal('case_session_handoff.issue'), handoff: caseSessionHandoffRecord }).strict(),
   z.object({ op: z.literal('case_session_handoff.consume'), handoff_id: id, consumed_at: timestamp }).strict(),

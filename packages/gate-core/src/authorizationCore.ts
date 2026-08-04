@@ -42,11 +42,17 @@ import {
   type RecordEntry,
   type ScreeningSignal,
   type StoreItem,
+  type SystemUseDecisionReference,
   type WalOp,
 } from './schemas/index.js';
 import { applyWorldTransaction, counterValue, mandateVersionKey, type WorldState } from './state.js';
 import type { LoadedPolicy } from './policyLoader.js';
 import { WalStore, type TransactionActor, type TransactionBuild } from './walStore.js';
+import {
+  SystemUseDecisionError,
+  SystemUseDecisionService,
+  systemUseReferenceCurrent,
+} from './systemUseDecision.js';
 
 const ZERO_DIGEST = '0'.repeat(64);
 
@@ -58,6 +64,7 @@ export class AuthorizationError extends Error {
       | 'proposal-conflict'
       | 'proposal-already-committed'
       | 'policy-not-active'
+      | 'system-use-unavailable'
       | 'invalid-counter-delta'
       | 'dialogue-case-scope'
       | 'unauthorized-actor'
@@ -81,6 +88,7 @@ export interface AuthorizationCoreOptions {
   readonly store: WalStore;
   readonly keyring: Keyring;
   readonly policy: LoadedPolicy;
+  readonly systemUse: SystemUseDecisionService;
   readonly rulingTtlMs?: number;
   readonly commitTokenTtlMs?: number;
   readonly ids?: IdFactory;
@@ -283,6 +291,7 @@ export type CommitDefect =
   | 'not-allowed'
   | 'counter-invalid'
   | 'expired-ruling'
+  | 'system-use-unavailable'
   | 'unauthorized-caller';
 
 export type CommitVerifyResult =
@@ -640,6 +649,8 @@ function rulingRecord(
     at,
     authenticated_actor: recordActor.credential,
     claimed_actor: { role: recordActor.claimed_role },
+    system_use_decision: ruling.binding.system_use_decision,
+    system_use_current_at_record: ruling.binding.system_use_decision !== null,
     proposed_action: input.proposal.proposed_action,
     basis: [
       ...input.proposal.material_inputs.map((item) => item.id),
@@ -696,6 +707,8 @@ function escalationEventRecord(
     at,
     authenticated_actor: actor.credential,
     claimed_actor: { role: actor.claimed_role },
+    system_use_decision: ruling.binding.system_use_decision,
+    system_use_current_at_record: systemUseReferenceCurrent(state, ruling.binding.system_use_decision, at),
     proposed_action: proposal.proposed_action,
     basis: [...proposal.material_inputs.map((item) => item.id), ...proposal.derived_claims.map((item) => item.id)],
     authority_chain: authorityChainIds(mandateValue),
@@ -730,6 +743,13 @@ function expectedEffectIntent(state: WorldState, ruling: GateRuling): EffectInte
   });
 }
 
+function committedSystemUseReference(ruling: GateRuling): SystemUseDecisionReference {
+  if (ruling.binding.system_use_decision === null) {
+    throw new AuthorizationError('system-use-unavailable', 'an authority-bearing ruling lost its system-use decision');
+  }
+  return ruling.binding.system_use_decision;
+}
+
 function commitmentRecordEntry(
   state: WorldState,
   ruling: GateRuling,
@@ -747,12 +767,15 @@ function commitmentRecordEntry(
   const proposal = proposalId === undefined ? undefined : state.proposals.get(proposalId);
   if (proposal === undefined) throw new Error(`ruling ${ruling.ruling_id} lost its proposal`);
   const mandateValue = state.mandates.get(mandateVersionKey(ruling.binding.mandate_id, ruling.binding.mandate_version));
+  const systemUseDecision = committedSystemUseReference(ruling);
   return {
     world_id: state.worldId,
     entry_id: entryId,
     at: boundAt,
     authenticated_actor: actor.credential,
     claimed_actor: { role: actor.claimed_role },
+    system_use_decision: systemUseDecision,
+    system_use_current_at_record: true,
     proposed_action: proposal.proposed_action,
     basis: [...proposal.material_inputs.map((item) => item.id), ...proposal.derived_claims.map((item) => item.id)],
     authority_chain: authorityChainIds(mandateValue),
@@ -773,6 +796,8 @@ function commitmentRecordEntry(
       frozen_proposal_hash: proposal.proposal_hash,
       effect_request_digest: effectRequestDigest,
       services_ledger_id: servicesLedgerId,
+      system_use_decision: systemUseDecision,
+      system_use_current_at_record: true,
       service: ruling.binding.service,
       bound_at: boundAt,
       token_expires_at: tokenExpiresAt,
@@ -805,6 +830,8 @@ function commitmentEventRecordEntry(
     at,
     authenticated_actor: actor.credential,
     claimed_actor: { role: actor.claimed_role },
+    system_use_decision: commitment.system_use_decision,
+    system_use_current_at_record: systemUseReferenceCurrent(state, commitment.system_use_decision, at),
     proposed_action: proposal.proposed_action,
     basis: [...proposal.material_inputs.map((item) => item.id), ...proposal.derived_claims.map((item) => item.id)],
     authority_chain: authorityChainIds(mandateValue),
@@ -834,11 +861,13 @@ export class AuthorizationCore {
   readonly #resolveScreening: AuthorizationCoreOptions['resolveScreening'];
   readonly #validateScreeningResolution: AuthorizationCoreOptions['validateScreeningResolution'];
   readonly #resolveRegistryEvidence: NonNullable<AuthorizationCoreOptions['resolveRegistryEvidence']>;
+  readonly #systemUse: SystemUseDecisionService;
 
   constructor(options: AuthorizationCoreOptions) {
     this.#store = options.store;
     this.#keyring = options.keyring;
     this.#policy = options.policy;
+    this.#systemUse = options.systemUse;
     this.#rulingTtlMs = options.rulingTtlMs ?? 120_000;
     this.#commitTokenTtlMs = options.commitTokenTtlMs ?? 5_000;
     if (!Number.isSafeInteger(this.#rulingTtlMs) || this.#rulingTtlMs <= 0) {
@@ -988,7 +1017,17 @@ export class AuthorizationCore {
     requireMandateActor(actor, true);
     const parsed = mandate.parse(value);
     requireValidMandateMac(this.#keyring, parsed);
-    await this.#store.transact('mandate_grant', actor, [{ op: 'mandate.grant', mandate: parsed }]);
+    await this.#store.transactWithState('mandate_grant', actor, (state, at) => {
+      try {
+        const prepared = this.#systemUse.prepareForMandate(state, parsed, this.#policy.policy.policy_version, at);
+        return { ops: [...prepared.ops, { op: 'mandate.grant' as const, mandate: parsed }], result: undefined };
+      } catch (error) {
+        if (error instanceof SystemUseDecisionError) {
+          throw new AuthorizationError('system-use-unavailable', 'current system-use decision is unavailable');
+        }
+        throw error;
+      }
+    });
   }
 
   /**
@@ -1090,8 +1129,16 @@ export class AuthorizationCore {
     requireMandateActor(actor, false);
     const parsed = mandate.parse(value);
     requireValidMandateMac(this.#keyring, parsed);
-    await this.#store.transactWithState('mandate_amend', actor, (state) => ({
-      ops: [
+    await this.#store.transactWithState('mandate_amend', actor, (state, at) => {
+      try {
+        this.#systemUse.resolve(state, parsed, this.#policy.policy.policy_version, at);
+      } catch (error) {
+        if (error instanceof SystemUseDecisionError) {
+          throw new AuthorizationError('system-use-unavailable', 'current system-use decision is unavailable');
+        }
+        throw error;
+      }
+      return { ops: [
         ...invalidationOps(
           state,
           (ruling) => ruling.binding.mandate_id === parsed.mandate_id,
@@ -1099,8 +1146,8 @@ export class AuthorizationCore {
         ),
         { op: 'mandate.amend', mandate: parsed },
       ],
-      result: undefined,
-    }));
+      result: undefined };
+    });
   }
 
   async revokeMandate(mandateId: string, version: number, actor: TransactionActor): Promise<void> {
@@ -1207,6 +1254,25 @@ export class AuthorizationCore {
       if (defects.defects.includes('stale-policy')) {
         throw new AuthorizationError('policy-not-active', 'the configured policy is not the active durable policy');
       }
+      const systemUseMandate =
+        defects.mandate ??
+        state.mandates.get(
+          mandateVersionKey(
+            proposal.mandate_ref.mandate_id,
+            state.mandateStatus.get(proposal.mandate_ref.mandate_id)?.version ?? proposal.mandate_ref.version,
+          ),
+        );
+      let systemUseDecision: SystemUseDecisionReference | null = null;
+      if (systemUseMandate !== undefined) {
+        try {
+          systemUseDecision = this.#systemUse.resolve(state, systemUseMandate, policy.policy.policy_version, at);
+        } catch (error) {
+          if (error instanceof SystemUseDecisionError) {
+            throw new AuthorizationError('system-use-unavailable', 'current system-use decision is unavailable');
+          }
+          throw error;
+        }
+      }
 
       const deltas = requestedDeltas({ ...input, proposal });
       const counters = Object.fromEntries(
@@ -1246,6 +1312,9 @@ export class AuthorizationCore {
               interventionContract: policy.policy.aggregate_ceiling_contract,
             }
           : policyEvaluation;
+      if (systemUseDecision === null && evaluation.verdict !== 'deny') {
+        throw new AuthorizationError('system-use-unavailable', 'current system-use decision is unavailable');
+      }
 
       const rulingId = this.#ids.next('rul');
       const nonceId = this.#ids.next('nce');
@@ -1279,6 +1348,7 @@ export class AuthorizationCore {
           acting_model_id: proposal.acting_model.requested_id,
           card_digest: defects.cardDigest,
           card_key_id: defects.cardKeyId,
+          system_use_decision: systemUseDecision,
           service: input.service,
           action_class: input.actionClass,
           nonce: nonceId,
@@ -2455,6 +2525,22 @@ export class AuthorizationCore {
       ) {
         defect = 'stale-policy';
       }
+      if (defect === undefined && mandateValue !== undefined) {
+        try {
+          const currentSystemUse = this.#systemUse.resolve(
+            state,
+            mandateValue,
+            ruling.policy_version,
+            at,
+          );
+          if (canonicalize(currentSystemUse) !== canonicalize(ruling.binding.system_use_decision)) {
+            defect = 'system-use-unavailable';
+          }
+        } catch (error) {
+          if (error instanceof SystemUseDecisionError) defect = 'system-use-unavailable';
+          else throw error;
+        }
+      }
       const nonce = state.nonces.get(ruling.binding.nonce);
       if (defect === undefined && (nonce === undefined || nonce.state !== 'issued')) defect = 'replayed-ruling';
       if (defect === undefined) {
@@ -2503,6 +2589,7 @@ export class AuthorizationCore {
       }
 
       const effectRequestDigest = digestFor('effect-intent', intent);
+      const systemUseDecision = committedSystemUseReference(ruling);
       const idempotencyKey = sha256Hex(
         canonicalize({ world_id: state.worldId, ruling_id: ruling.ruling_id, nonce: ruling.binding.nonce }),
       );
@@ -2544,6 +2631,8 @@ export class AuthorizationCore {
             token_expires_at: tokenExpiresAt,
             services_host_boot_id: servicesHostBootId,
             services_ledger_id: servicesLedgerId,
+            system_use_decision: systemUseDecision,
+            system_use_current_at_bind: true,
             recovery_contract: this.#policy.policy.recovery_escalation_contract,
             state: 'bound',
             outcome: null,
@@ -2647,6 +2736,7 @@ export class AuthorizationCore {
         const ruling = state.rulings.get(commitment.ruling_id);
         if (ruling === undefined) throw new Error(`commitment ${commitmentId} lost its ruling`);
         const recordEntryId = this.#ids.next('rec');
+        const systemUseCurrent = systemUseReferenceCurrent(state, commitment.system_use_decision, at);
         const ops: WalOp[] = [
           {
             op: 'effect.record',
@@ -2657,6 +2747,8 @@ export class AuthorizationCore {
               idempotency_key: idempotencyKey,
               effect_request_digest: effectRequestDigest,
               services_ledger_id: servicesLedgerId,
+              system_use_decision: commitment.system_use_decision,
+              system_use_current_at_record: systemUseCurrent,
               outcome: input.outcome,
               recorded_at: recordedAt,
               ...(input.detail === undefined ? {} : { detail: input.detail }),
@@ -2685,6 +2777,8 @@ export class AuthorizationCore {
             outcome: input.outcome,
             reported_at: at,
             recovery_owner_role: null,
+            system_use_decision: commitment.system_use_decision,
+            system_use_current_at_record: systemUseCurrent,
             ...(input.detail === undefined ? {} : { detail: input.detail }),
           }),
         });
@@ -2839,6 +2933,8 @@ export class AuthorizationCore {
                 outcome: 'unknown-reconciliation-required',
                 reported_at: at,
                 recovery_owner_role: commitment.recovery_owner_role,
+                system_use_decision: commitment.system_use_decision,
+                system_use_current_at_record: systemUseReferenceCurrent(state, commitment.system_use_decision, at),
                 detail: 'No durable service outcome was available after bounded reconciliation probes.',
               },
               {
@@ -2928,6 +3024,8 @@ export class AuthorizationCore {
             outcome: 'no-effect',
             reported_at: at,
             recovery_owner_role: null,
+            system_use_decision: commitment.system_use_decision,
+            system_use_current_at_record: systemUseReferenceCurrent(state, commitment.system_use_decision, at),
             detail: 'The services host restarted without a committed idempotency-ledger entry.',
           }),
         });

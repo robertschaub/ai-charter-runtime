@@ -23,6 +23,7 @@ import {
 } from './common.js';
 import { disposition, interventionContract, standingClass } from './intervention.js';
 import { modelCallAccessEvidence } from './modelCall.js';
+import { systemUseDecisionReference } from './systemUseDecision.js';
 
 export const EFFECT_OUTCOMES = ['success', 'failed', 'no-effect', 'unknown-reconciliation-required'] as const;
 export const effectOutcomeValue = z.enum(EFFECT_OUTCOMES);
@@ -37,6 +38,8 @@ export const commitmentEvent = z.object({
   frozen_proposal_hash: hexDigest,
   effect_request_digest: hexDigest,
   services_ledger_id: id,
+  system_use_decision: systemUseDecisionReference,
+  system_use_current_at_record: z.literal(true),
   service: id,
   bound_at: timestamp,
   token_expires_at: timestamp,
@@ -49,6 +52,8 @@ export const effectOutcomeEvent = z.object({
   reported_at: timestamp,
   /** Criterion 7's named recovery owner, for the `unknown` case (ADR-001 §8). */
   recovery_owner_role: role.nullable(),
+  system_use_decision: systemUseDecisionReference,
+  system_use_current_at_record: z.boolean(),
   detail: z.string().optional(),
 }).strict();
 
@@ -189,6 +194,33 @@ export const interventionRecordEvent = z.discriminatedUnion('event', [
   lateDispositionIgnoredEvent,
 ]);
 
+export const challengeAndRemedy = z
+  .object({
+    route: z.string(),
+    opened_at: timestamp,
+    contested_entry_id: id.optional(),
+    correction_text: z.string().min(1).max(32_768).optional(),
+    reliance_state: z.literal('withdrawn-pending-review').optional(),
+    recovery_owner_role: role.optional(),
+  })
+  .strict()
+  .superRefine((value, context) => {
+    const challengeFields = ['contested_entry_id', 'correction_text', 'reliance_state', 'recovery_owner_role'] as const;
+    if (value.route !== 'challenge') {
+      for (const field of challengeFields) {
+        if (value[field] !== undefined) {
+          context.addIssue({ code: 'custom', path: [field], message: `${field} is challenge-only` });
+        }
+      }
+      return;
+    }
+    for (const field of challengeFields) {
+      if (value[field] === undefined) {
+        context.addIssue({ code: 'custom', path: [field], message: `challenge requires ${field}` });
+      }
+    }
+  });
+
 /**
  * The split-custody field list. `prev_hash` and `entry_hash` are assigned by the chain
  * writer (chain.ts), not by the caller, so they are not part of the authored payload.
@@ -200,6 +232,9 @@ export const recordEntry = z.object({
   /** ADR-002 §4: two distinct fields; `claimed_actor` never decides authority. */
   authenticated_actor: credentialLabel,
   claimed_actor: claimedActor.nullable(),
+  /** Null only for a terminal denial made before a usable mandate exists. */
+  system_use_decision: systemUseDecisionReference.nullable(),
+  system_use_current_at_record: z.boolean(),
 
   proposed_action: z.string(),
   basis: z.array(z.string()),
@@ -217,34 +252,37 @@ export const recordEntry = z.object({
   }).strict(),
   commitment_and_effect: commitmentAndEffectEvent.nullable(),
   human_intervention_event: interventionRecordEvent.nullable(),
-  challenge_and_remedy: z
-    .object({
-      route: z.string(),
-      opened_at: timestamp,
-      contested_entry_id: id.optional(),
-      correction_text: z.string().min(1).max(32_768).optional(),
-      reliance_state: z.literal('withdrawn-pending-review').optional(),
-      recovery_owner_role: role.optional(),
-    })
-    .strict()
-    .superRefine((value, context) => {
-      const challengeFields = ['contested_entry_id', 'correction_text', 'reliance_state', 'recovery_owner_role'] as const;
-      if (value.route !== 'challenge') {
-        for (const field of challengeFields) {
-          if (value[field] !== undefined) {
-            context.addIssue({ code: 'custom', path: [field], message: `${field} is challenge-only` });
-          }
-        }
-        return;
-      }
-      for (const field of challengeFields) {
-        if (value[field] === undefined) {
-          context.addIssue({ code: 'custom', path: [field], message: `challenge requires ${field}` });
-        }
-      }
-    })
-    .nullable(),
-}).strict();
+  challenge_and_remedy: challengeAndRemedy.nullable(),
+})
+  .strict()
+  .superRefine((entry, context) => {
+    if (entry.admissibility_decision.verdict !== 'deny' && entry.system_use_decision === null) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['system_use_decision'],
+        message: 'an allow or escalate record requires a current system-use decision reference',
+      });
+    }
+    if (entry.system_use_decision === null && entry.system_use_current_at_record) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['system_use_current_at_record'],
+        message: 'a missing decision reference cannot be current',
+      });
+    }
+    if (
+      entry.commitment_and_effect !== null &&
+      'system_use_decision' in entry.commitment_and_effect &&
+      entry.system_use_decision !== null &&
+      JSON.stringify(entry.commitment_and_effect.system_use_decision) !== JSON.stringify(entry.system_use_decision)
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['commitment_and_effect', 'system_use_decision'],
+        message: 'commitment/effect decision reference must match the record reference',
+      });
+    }
+  });
 
 export type RecordEntry = z.infer<typeof recordEntry>;
 

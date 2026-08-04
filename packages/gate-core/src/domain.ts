@@ -27,6 +27,8 @@ export const DOMAIN_TAGS = [
   'card-revocation',
   'conversation-projection',
   'model-output',
+  'system-use-decision',
+  'system-use-configuration',
 ] as const;
 
 export type DomainTag = (typeof DOMAIN_TAGS)[number];

@@ -73,6 +73,13 @@ are non-authorizing, Origin-guarded, and access-recorded. Failure evidence is re
 timeout, unavailable, malformed, tool-call-refused, or authorization-invalidated class plus binding and
 provider-disclosure metadata; prompts, output, provider error text, endpoints, and credentials are forbidden.
 
+**Amendment (M5.6 read-only system-use view, 2026-08-04):** the authorization origin adds one
+principal-only, access-logged `GET /system-use-decision` route and a fixed console projection. It exposes
+currentness, exact configuration binding, bounded evidence depth/provenance/limitations, hard-condition
+results, validity, and accountability-role availability. It exposes no evidence pack, rationale detail,
+mutation control, trust badge, aggregate score, certification, or action-authority result and inherits the
+console's strict self-only CSP, `frame-ancestors 'none'`, no third-party code, no cookies, and no CORS.
+
 ## Context
 
 Three OS processes make "the model proposes, a component outside the model decides, the executing service
@@ -174,6 +181,7 @@ Authorization service, all data routes under `/w/{world_id}/…`:
 | `POST /access-events` (narrow services-host denial evidence) | **`proc:services_host` only** |
 | `POST /mandates` · `POST /mandates/{id}/amend` · `POST /mandates/{id}/revoke` | **`role:principal` only** |
 | `GET /mandates` (read) | `role:principal`, `role:case_officer` (envelope they work under) |
+| `GET /system-use-decision` (fixed read-only currentness/evidence projection) | **`role:principal` only**; access-recorded |
 | `GET /escalations` (inbox) | `role:principal`, `role:case_officer` — each sees only escalations routed to it |
 | `GET /escalations/{id}` (display mirror, §7 projection) | `proc:orchestrator` (read-only), `role:principal`, `role:case_officer`, and a routed `role:applicant` dialogue responder |
 | `POST /escalations/{id}/disposition` | **the escalation's eligible role token only** |
@@ -218,9 +226,9 @@ Services host: `POST /w/{w}/services/{service}/execute` `proc:orchestrator`;
 `commit-verify`, effect outcomes, and reconciliation probes carry both the current services-host boot id
 and the persistent services-ledger id; only absence under the same ledger id can release a commitment.
 
-**The orchestrator's process credential appears on exactly seven gate/data routes plus the dedicated
-case-session-handoff redemption route.** The seven are proposal submission, acting-projection read,
-model-output admission,
+**The orchestrator's process credential appears on exactly eight gate/data routes plus the dedicated
+case-session-handoff redemption route.** The eight are proposal submission, model-call begin,
+model-output admission, model-call failure,
 revised-proposal continuation, ruling read, approved-model read, and the read-only escalation mirror ADR-004
 §7 requires. Redemption
 returns only `{handoff_id, role, world_id, case_id, target_origin, authorization_boot_id, consumed_at}`
@@ -301,7 +309,7 @@ would start empty), sent as a bearer header. No login, no session exchange, no c
 The static console has no inline executable content and no third-party dependency. Its external module and
 stylesheet are same-origin resources; its browser fetches use relative paths, omit cookies, and keep token
 values out of URLs, rendered output, and error messages. The principal surface calls only mandate,
-approved-card, routed-escalation, and record routes already owned by this service. The applicant surface
+approved-card, system-use-decision, routed-escalation, and record routes already owned by this service. The applicant surface
 calls only the server-side scoped-extract route. UI disposition controls are intersected with the general
 disposition vocabulary and appear only while the returned contract is open; the endpoint remains the
   authority and can still refuse a stale or forged request. The dialogue deep-link surface intersects the
@@ -421,8 +429,12 @@ allowlist projection**, decided per route and per credential:
 - record verification → `no-divergence-detected | alarm`, the named checkpoint and only this world's
   stream rows, latest remotely confirmed checkpoint facts when available, and explicit open-window facts;
 - applicant extract → server-side action, authority/ruling, effect, intervention-summary, challenge route,
-  and local-receipt projections for the single synthetic applicant world. It excludes evidence payloads,
+  bounded system-use reference/current-at-record facts, and local-receipt projections for the single synthetic applicant world. It excludes evidence payloads,
   bindings, nonces, reservations, idempotency keys, and full internal records.
+- system-use decision → principal-only fixed currentness, exact configuration binding, evidence
+  type/provenance/depth/as-of/limitations, hard-condition results, validity/redecision triggers, bounded
+  basis/unresolved-finding facts, and accountability-role availability. It excludes evidence refs and packs,
+  detailed rationale, prompts, outputs, credentials, badges, scores, certifications, and mutation controls;
 
 A later provider/browser ingress may release only the exact response bytes whose recomputed `model-output`
 digest equals the retained `admitted` decision for that turn; `withheld` terminates the turn. The M5.3 slice

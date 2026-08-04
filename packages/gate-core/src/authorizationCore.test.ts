@@ -23,11 +23,24 @@ import type { ConversationProjectionService } from './conversationProjectionServ
 import { digestFor } from './hash.js';
 import { Keyring, verifyEmbeddedMac } from './keyring.js';
 import { loadPolicyFile, type LoadedPolicy } from './policyLoader.js';
-import { recordEntry, type EffectIntent, type FrozenProposal, type Mandate, type ScreeningSignal } from './schemas/index.js';
+import {
+  recordEntry,
+  systemUseDecisionRecord,
+  type EffectIntent,
+  type FrozenProposal,
+  type Mandate,
+  type ScreeningSignal,
+} from './schemas/index.js';
 import { applyWorldTransaction, cloneWorldState, counterValue } from './state.js';
 import { runSweeper } from './sweeper.js';
 import { verifyCommitTokenForIntent } from './tokenVerifier.js';
 import { WalStore } from './walStore.js';
+import {
+  createSyntheticSystemUseDecision,
+  syntheticSystemUseForTests,
+  systemUseDecisionDigest,
+  SystemUseDecisionService,
+} from './systemUseDecision.js';
 
 const KEY_ID = 'hmac-test';
 const KEY = 'a'.repeat(64);
@@ -57,6 +70,7 @@ interface Harness {
   readonly ids: SequentialIds;
   readonly store: WalStore;
   readonly core: AuthorizationCore;
+  readonly systemUse: SystemUseDecisionService;
   setNow(value: string): void;
   setScreening(proposalId: string, value: readonly ScreeningSignal[] | Error): void;
 }
@@ -144,10 +158,12 @@ function harness(
   });
   openStores.push(store);
   const screenings = new Map<string, readonly ScreeningSignal[] | Error>();
+  const systemUse = syntheticSystemUseForTests(store);
   const core = new AuthorizationCore({
     store,
     keyring,
     policy,
+    systemUse,
     ids,
     resolveAuthorizedAgent: (actor) => (actor.credential === 'proc:orchestrator' ? 'agent_demo' : undefined),
     resolveScreening: (proposal) => {
@@ -176,6 +192,7 @@ function harness(
     ids,
     store,
     core,
+    systemUse,
     setNow: (value) => (now = value),
     setScreening: (proposalId, value) => screenings.set(proposalId, value),
   };
@@ -305,6 +322,136 @@ async function initialize(value: Harness, body = mandateBody()): Promise<Mandate
 }
 
 describe('M2 authorization transactions', () => {
+  it('requires a current system-use decision before a mandate can create a case', async () => {
+    const missing = harness();
+    const environment = {
+      systemId: 'ai-charter-runtime-poc',
+      useCaseId: 'public-grant-decision',
+      jurisdictions: ['synthetic-demo'],
+      hardConditions: { 'synthetic-data-only': true },
+    } as const;
+    const noDecision = new SystemUseDecisionService(missing.store, environment);
+    const makeCore = (systemUse: SystemUseDecisionService) =>
+      new AuthorizationCore({
+        store: missing.store,
+        keyring: missing.keyring,
+        policy: missing.policy,
+        systemUse,
+        ids: missing.ids,
+        resolveAuthorizedAgent: () => 'agent_demo',
+        resolveScreening: () => ({ performed: true, signals: [], evidenceRefs: [] }),
+        validateScreeningResolution: () => true,
+        resolveModelEvidence: () => ({
+          servedModelAccepted: true,
+          cardStatus: 'current',
+          cardKeyId: 'card-test',
+          cardDigest: CARD_DIGEST,
+        }),
+      });
+    const missingCore = makeCore(noDecision);
+    await missingCore.activatePolicy();
+    await expect(missingCore.grantMandate(bindMandate(missing.keyring, mandateBody()), PRINCIPAL)).rejects.toMatchObject({
+      code: 'system-use-unavailable',
+    });
+    expect(missing.store.snapshot().mandates.size).toBe(0);
+
+    const conditional = new SystemUseDecisionService(
+      missing.store,
+      { ...environment, hardConditions: { 'synthetic-data-only': false } },
+      (mandateValue, policyVersion, systemEnvironment, at) => {
+        const base = createSyntheticSystemUseDecision(mandateValue, policyVersion, systemEnvironment, at);
+        const unsigned = systemUseDecisionRecord.parse({
+          ...base,
+          decision: {
+            ...base.decision,
+            status: 'approved_with_conditions',
+            conditions: [{ id: 'synthetic-data-only', kind: 'hard_precondition' }],
+          },
+          trace: { ...base.trace, record_digest: '0'.repeat(64) },
+        });
+        return systemUseDecisionRecord.parse({
+          ...unsigned,
+          trace: { ...unsigned.trace, record_digest: systemUseDecisionDigest(unsigned) },
+        });
+      },
+    );
+    await expect(makeCore(conditional).grantMandate(bindMandate(missing.keyring, mandateBody()), PRINCIPAL)).rejects.toMatchObject({
+      code: 'system-use-unavailable',
+    });
+    expect(missing.store.snapshot().systemUseDecisions.size).toBe(0);
+    expect(missing.store.snapshot().mandates.size).toBe(0);
+  });
+
+  it('eagerly invalidates a ruling and commit authority when its system-use decision terminates', async () => {
+    const h = harness();
+    await initialize(h);
+    const frozen = proposal(63, { action_id: 'act_system_use_invalidation' });
+    const ruled = await h.core.ruleProposal(ruleInput(frozen));
+    expect(ruled.ruling.verdict).toBe('allow');
+    await h.systemUse.transition('sud_test_fixture', 1, 'suspended', AUTHZ);
+    const state = h.store.snapshot();
+    expect(state.rulings.get(ruled.ruling.ruling_id)?.status).toBe('invalidated');
+    for (const reservation of ruled.ruling.counter_reservations) {
+      expect(state.reservations.get(reservation.id)?.state).toBe('released');
+    }
+    expect(
+      await h.core.commitVerify({
+        rulingId: ruled.ruling.ruling_id,
+        intent: intentFor(frozen, ruled.ruling.ruling_id),
+        servicesHostBootId: 'services_boot_system_use',
+        servicesLedgerId: SERVICES_LEDGER_ID,
+        actor: SERVICES_HOST,
+      }),
+    ).toMatchObject({ ok: false });
+    expect(h.store.snapshot().commitments.size).toBe(0);
+    await expect(h.core.ruleProposal(ruleInput(proposal(64)))).rejects.toMatchObject({ code: 'system-use-unavailable' });
+  });
+
+  it('preserves truthful current-at-record facts when a bound effect reports after decision termination', async () => {
+    const h = harness();
+    await initialize(h);
+    const frozen = proposal(65, { action_id: 'act_system_use_late_effect' });
+    const ruled = await h.core.ruleProposal(ruleInput(frozen));
+    const committed = await h.core.commitVerify({
+      rulingId: ruled.ruling.ruling_id,
+      intent: intentFor(frozen, ruled.ruling.ruling_id),
+      servicesHostBootId: 'services_boot_system_use_effect',
+      servicesLedgerId: SERVICES_LEDGER_ID,
+      actor: SERVICES_HOST,
+    });
+    if (!committed.ok) throw new Error('expected commitment');
+    expect(h.store.snapshot().commitments.get(committed.commitmentId)?.system_use_current_at_bind).toBe(true);
+
+    await h.systemUse.transition('sud_test_fixture', 1, 'withdrawn', AUTHZ);
+    await expect(
+      h.core.reportEffectOutcome({
+        worldId: 'w-demo',
+        commitmentId: committed.commitmentId,
+        effectId: committed.token.effect_id,
+        idempotencyKey: committed.token.idempotency_key,
+        effectRequestDigest: committed.token.effect_request_digest,
+        servicesHostBootId: 'services_boot_system_use_effect',
+        servicesLedgerId: SERVICES_LEDGER_ID,
+        outcome: 'success',
+        recordedAt: '2026-08-01T09:00:00.500Z',
+        delivery: 'executed',
+        actor: SERVICES_HOST,
+      }),
+    ).resolves.toMatchObject({ accepted: true, status: 'recorded' });
+    expect(h.store.snapshot().effects.get(committed.token.effect_id)).toMatchObject({
+      system_use_decision: ruled.ruling.binding.system_use_decision,
+      system_use_current_at_record: false,
+    });
+    expect(
+      h.store.snapshot().actionRecords.find(
+        (entry) => entry.commitment_and_effect?.event === 'effect_outcome' && entry.commitment_and_effect.effect_id === committed.token.effect_id,
+      ),
+    ).toMatchObject({
+      system_use_current_at_record: false,
+      commitment_and_effect: { system_use_current_at_record: false },
+    });
+  });
+
   it('keeps case-scoped conversation ingestion authorization-owned and idempotent', async () => {
     const h = harness();
     await initialize(h);
@@ -821,6 +968,7 @@ describe('M2 authorization transactions', () => {
       store: substituted.store,
       keyring: substituted.keyring,
       policy: substituted.policy,
+      systemUse: substituted.systemUse,
       ids: substituted.ids,
       resolveAuthorizedAgent: () => 'agent_demo',
       resolveScreening: () => ({ performed: true, signals: [], evidenceRefs: [] }),
@@ -956,6 +1104,7 @@ describe('M2 authorization transactions', () => {
       store: superseded.store,
       keyring: superseded.keyring,
       policy: superseded.policy,
+      systemUse: superseded.systemUse,
       ids: superseded.ids,
       resolveAuthorizedAgent: () => 'agent_demo',
       resolveScreening: () => ({ performed: true, signals: [], evidenceRefs: [] }),
@@ -978,6 +1127,7 @@ describe('M2 authorization transactions', () => {
       store: withdrawn.store,
       keyring: withdrawn.keyring,
       policy: withdrawn.policy,
+      systemUse: withdrawn.systemUse,
       ids: withdrawn.ids,
       resolveAuthorizedAgent: () => 'agent_demo',
       resolveScreening: () => ({ performed: true, signals: [], evidenceRefs: [] }),
@@ -1002,6 +1152,7 @@ describe('M2 authorization transactions', () => {
       store: h.store,
       keyring: h.keyring,
       policy: h.policy,
+      systemUse: h.systemUse,
       ids: h.ids,
       resolveAuthorizedAgent: () => 'agent_demo',
       resolveScreening: () => ({ performed: true, signals: [], evidenceRefs: [] }),
@@ -1036,6 +1187,7 @@ describe('M2 authorization transactions', () => {
       store: atRuling.store,
       keyring: atRuling.keyring,
       policy: atRuling.policy,
+      systemUse: atRuling.systemUse,
       ids: atRuling.ids,
       resolveAuthorizedAgent: () => 'agent_demo',
       resolveScreening: () => ({ performed: true, signals: [], evidenceRefs: [] }),
@@ -1061,6 +1213,7 @@ describe('M2 authorization transactions', () => {
       store: atCommit.store,
       keyring: atCommit.keyring,
       policy: atCommit.policy,
+      systemUse: atCommit.systemUse,
       ids: atCommit.ids,
       resolveAuthorizedAgent: () => 'agent_demo',
       resolveScreening: () => ({ performed: true, signals: [], evidenceRefs: [] }),
@@ -1319,6 +1472,7 @@ describe('M2 authorization transactions', () => {
       store: h.store,
       keyring: h.keyring,
       policy: h.policy,
+      systemUse: h.systemUse,
       ids: h.ids,
       resolveAuthorizedAgent: () => 'agent_demo',
       resolveScreening: () => ({ performed: true, signals: [], evidenceRefs: [] }),
@@ -1355,6 +1509,7 @@ describe('M2 authorization transactions', () => {
       store: h.store,
       keyring: h.keyring,
       policy: h.policy,
+      systemUse: h.systemUse,
       ids: h.ids,
       resolveAuthorizedAgent: () => 'agent_demo',
       resolveScreening: () => ({ performed: true, signals: [signal], evidenceRefs: [projectionRef] }),
@@ -2368,6 +2523,7 @@ describe('M2 authorization transactions', () => {
       adapter,
       keyring: h.keyring,
       caseHandoffs: {} as CaseSessionHandoffService,
+      systemUse: h.systemUse,
       runtimeConfig: {
         authorization_origin: 'http://127.0.0.1:7801',
         orchestrator_origin: 'http://127.0.0.1:7802',

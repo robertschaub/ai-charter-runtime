@@ -20,10 +20,14 @@ import type {
   RecordEntry,
   ReservationRecord,
   ReviewObligation,
+  SystemUseDecisionRecord,
+  SystemUseDecisionStatus,
   WalOp,
 } from './schemas/index.js';
 import type { accessChainEntry } from './schemas/record.js';
 import { modelCallRecord } from './schemas/modelCall.js';
+import { systemUseDecisionRecord } from './schemas/systemUseDecision.js';
+import { systemUseDecisionDigest } from './systemUseDecision.js';
 
 type AccessChainValue = z.infer<typeof accessChainEntry>;
 
@@ -43,6 +47,11 @@ export interface MandateRuntimeStatus {
   readonly changed_at: string;
 }
 
+export interface SystemUseDecisionRuntimeStatus {
+  readonly status: SystemUseDecisionStatus;
+  readonly changed_at: string;
+}
+
 export interface WorldState {
   readonly worldId: string;
   lastTimestamp: string | undefined;
@@ -50,6 +59,8 @@ export interface WorldState {
   readonly mandateStatus: Map<string, MandateRuntimeStatus>;
   readonly proposals: Map<string, FrozenProposal>;
   readonly proposalByHash: Map<string, string>;
+  readonly systemUseDecisions: Map<string, SystemUseDecisionRecord>;
+  readonly systemUseDecisionStatus: Map<string, SystemUseDecisionRuntimeStatus>;
   readonly caseSessionHandoffs: Map<string, CaseSessionHandoffRecord>;
   readonly nonces: Map<string, NonceRecord>;
   readonly reservations: Map<string, ReservationRecord>;
@@ -72,6 +83,10 @@ export function mandateVersionKey(mandateId: string, version: number): string {
   return `${mandateId}@${version}`;
 }
 
+export function systemUseDecisionVersionKey(decisionId: string, version: number): string {
+  return `${decisionId}@${version}`;
+}
+
 export function createWorldState(worldId: string): WorldState {
   return {
     worldId,
@@ -80,6 +95,8 @@ export function createWorldState(worldId: string): WorldState {
     mandateStatus: new Map(),
     proposals: new Map(),
     proposalByHash: new Map(),
+    systemUseDecisions: new Map(),
+    systemUseDecisionStatus: new Map(),
     caseSessionHandoffs: new Map(),
     nonces: new Map(),
     reservations: new Map(),
@@ -107,6 +124,8 @@ export function cloneWorldState(state: WorldState): WorldState {
     mandateStatus: new Map(state.mandateStatus),
     proposals: new Map(state.proposals),
     proposalByHash: new Map(state.proposalByHash),
+    systemUseDecisions: new Map(state.systemUseDecisions),
+    systemUseDecisionStatus: new Map(state.systemUseDecisionStatus),
     caseSessionHandoffs: new Map(state.caseSessionHandoffs),
     nonces: new Map(state.nonces),
     reservations: new Map(state.reservations),
@@ -188,6 +207,64 @@ function recordAccessId(entry: AccessChainValue): string {
 
 export function applyWorldOp(state: WorldState, op: WalOp, transactionTimestamp: string): void {
   switch (op.op) {
+    case 'system_use_decision.issue': {
+      requireWorld(state, op.decision, 'system-use decision');
+      const decision = systemUseDecisionRecord.parse(op.decision);
+      if (!verifyDigest(decision.trace.record_digest, systemUseDecisionDigest(decision))) {
+        fail('system-use-integrity', `system-use decision ${decision.decision_id}@${decision.version} has the wrong digest`);
+      }
+      const existing = [...state.systemUseDecisions.values()];
+      if (existing.some((candidate) => candidate.decision_id !== decision.decision_id)) {
+        fail('system-use-ambiguous', 'the bounded POC permits one system-use decision lineage per world');
+      }
+      const key = systemUseDecisionVersionKey(decision.decision_id, decision.version);
+      requireUnique(state.systemUseDecisions, key, `system-use decision ${key}`);
+      const priorVersions = existing
+        .filter((candidate) => candidate.decision_id === decision.decision_id)
+        .map((candidate) => candidate.version)
+        .sort((left, right) => left - right);
+      if (priorVersions.length === 0) {
+        if (decision.version !== 1 || decision.trace.supersedes !== null) {
+          fail('system-use-version', 'the first system-use decision must be version 1 without a predecessor');
+        }
+      } else {
+        const priorVersion = priorVersions.at(-1) as number;
+        if (
+          decision.version !== priorVersion + 1 ||
+          decision.trace.supersedes?.decision_id !== decision.decision_id ||
+          decision.trace.supersedes.version !== priorVersion
+        ) {
+          fail('system-use-version', 'a system-use successor must be contiguous and name its predecessor');
+        }
+        const priorStatus = state.systemUseDecisionStatus.get(systemUseDecisionVersionKey(decision.decision_id, priorVersion));
+        if (priorStatus?.status !== 'superseded') {
+          fail('system-use-predecessor', 'a successor requires its predecessor to be superseded in the same or prior transaction');
+        }
+      }
+      state.systemUseDecisions.set(key, decision);
+      state.systemUseDecisionStatus.set(key, { status: decision.decision.status, changed_at: decision.trace.created_at });
+      break;
+    }
+    case 'system_use_decision.transition': {
+      const key = systemUseDecisionVersionKey(op.decision_id, op.version);
+      const current = requireValue(state.systemUseDecisionStatus, key, `system-use decision ${key}`);
+      const allowed: Record<SystemUseDecisionStatus, readonly SystemUseDecisionStatus[]> = {
+        proposed: ['approved', 'approved_with_conditions', 'rejected'],
+        approved: ['superseded', 'suspended', 'withdrawn', 'expired'],
+        approved_with_conditions: ['superseded', 'suspended', 'withdrawn', 'expired'],
+        rejected: [],
+        superseded: [],
+        suspended: [],
+        withdrawn: [],
+        expired: [],
+      };
+      if (!allowed[current.status].includes(op.status)) {
+        fail('illegal-transition', `system-use decision ${key}: ${current.status} -> ${op.status}`);
+      }
+      if (op.changed_at < current.changed_at) fail('clock-regression', `system-use decision ${key} changed backwards in time`);
+      state.systemUseDecisionStatus.set(key, { status: op.status, changed_at: op.changed_at });
+      break;
+    }
     case 'proposal.freeze': {
       requireWorld(state, op.proposal, 'proposal');
       requireUnique(state.proposals, op.proposal.proposal_id, `proposal ${op.proposal.proposal_id}`);

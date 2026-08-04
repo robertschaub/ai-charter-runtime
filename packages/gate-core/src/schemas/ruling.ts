@@ -20,6 +20,7 @@ import {
   validityWindow,
   worldId,
 } from './common.js';
+import { systemUseDecisionReference } from './systemUseDecision.js';
 
 /** The five runtime gates. */
 export const GATES = ['authorize', 'submit', 'verify', 'commit', 'rely'] as const;
@@ -135,6 +136,12 @@ export const rulingBinding = z.object({
   /** ADR-006: the card digest and the key id that verified it, behind the model entry. */
   card_digest: hexDigest,
   card_key_id: id,
+  /**
+   * ADR-008/ADR-001: exact current system-use decision is part of ruling invalidation.
+   * A terminal denial issued before any usable mandate exists carries null: no case,
+   * model call, reservation, commitment, or effect may proceed from that ruling.
+   */
+  system_use_decision: systemUseDecisionReference.nullable(),
   service: id,
   action_class: classToken,
   /** Issued with the ruling, consumed exactly once at `commit-verify`. */
@@ -219,6 +226,13 @@ export const gateRuling = z
         code: z.ZodIssueCode.custom,
         path: ['counter_reservations'],
         message: 'a denied ruling reserves no counters',
+      });
+    }
+    if (ruling.verdict !== 'deny' && ruling.binding.system_use_decision === null) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['binding', 'system_use_decision'],
+        message: 'an allow or escalate ruling requires a current system-use decision',
       });
     }
   });

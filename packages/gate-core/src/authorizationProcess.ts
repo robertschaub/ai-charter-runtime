@@ -28,8 +28,9 @@ import { loadKeyring } from './keyring.js';
 import { loadPolicyFile } from './policyLoader.js';
 import { runRuntimeMaintenance } from './runtimeMaintenance.js';
 import { screeningFixtureSet } from './screeningFixture.js';
-import { id, storeItem, worldId } from './schemas/index.js';
+import { id, storeItem, systemUseDecisionRecord, worldId } from './schemas/index.js';
 import { ServicesProbeHttpClient } from './servicesProbeHttpClient.js';
+import { SystemUseDecisionService } from './systemUseDecision.js';
 import { WalStore } from './walStore.js';
 
 function required(env: NodeJS.ProcessEnv, name: string): string {
@@ -149,6 +150,9 @@ export async function startAuthorizationProcess(
   const screeningFixtureFile = resolve(
     env['RUNTIME_SCREENING_FIXTURE'] ?? 'fixtures/demo/screening.json',
   );
+  const systemUseFixtureFile = resolve(
+    env['RUNTIME_SYSTEM_USE_FIXTURE'] ?? 'fixtures/demo/system-use-decision.json',
+  );
   const consolesRoot = fileURLToPath(new URL('../../consoles/', import.meta.url));
   const consoleAssetsRoot = resolve(
     env['RUNTIME_CONSOLE_ASSETS_ROOT'] ?? join(consolesRoot, 'assets', 'governance-console'),
@@ -164,6 +168,9 @@ export async function startAuthorizationProcess(
   const cards = CardRegistry.load(cardsRoot);
   const screeningFixtures = screeningFixtureSet.parse(
     JSON.parse(readFileSync(screeningFixtureFile, 'utf8')),
+  );
+  const systemUseFixture = systemUseDecisionRecord.parse(
+    JSON.parse(readFileSync(systemUseFixtureFile, 'utf8')),
   );
   const servicesProbe = new ServicesProbeHttpClient({
     origin: servicesOrigin,
@@ -187,6 +194,12 @@ export async function startAuthorizationProcess(
     authorizationBootId: bootId,
     targetOrigin: orchestratorOrigin,
     caseExists: (caseId) => caseId === demoCaseId,
+  });
+  const systemUse = new SystemUseDecisionService(store, {
+    systemId: 'ai-charter-runtime-poc',
+    useCaseId: 'public-grant-decision',
+    jurisdictions: ['synthetic-demo'],
+    hardConditions: { 'no-external-effect': true, 'synthetic-data-only': true },
   });
   let server: AuthorizationHttpServer | undefined;
   let maintenanceTimer: NodeJS.Timeout | undefined;
@@ -215,6 +228,7 @@ export async function startAuthorizationProcess(
     const recordVerification = await verifyCurrentRecords();
     store.beginRun();
     await recordVerificationAccess(store, recordVerification.readLengths);
+    await systemUse.installFixture(systemUseFixture, { credential: 'proc:authz', claimed_role: null });
     await caseHandoffs.expireIssued();
     await servicesProbe.requireHealthy();
     const conversationProjections = new ConversationProjectionService({
@@ -224,11 +238,13 @@ export async function startAuthorizationProcess(
       caseId: demoCaseId,
       authorizationBootId: bootId,
       screeningFixtures,
+      systemUse,
     });
     const authorization = new AuthorizationCore({
       store,
       keyring,
       policy,
+      systemUse,
       resolveAuthorizedAgent: (actor) =>
         actor.credential === 'proc:orchestrator' ? (env['RUNTIME_AUTHORIZED_AGENT_ID'] ?? 'agent_demo') : undefined,
       resolveScreening: (proposal, gate, caseId) =>
@@ -276,6 +292,7 @@ export async function startAuthorizationProcess(
       adapter,
       keyring,
       caseHandoffs,
+      systemUse,
       runtimeConfig: {
         authorization_origin: `http://${host}:${port}`,
         orchestrator_origin: orchestratorOrigin,

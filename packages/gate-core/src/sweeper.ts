@@ -8,6 +8,7 @@ import type { Keyring } from './keyring.js';
 import type { LoadedPolicy } from './policyLoader.js';
 import type { Disposition, GateRuling, Mandate, PatternEvent, RecordEntry, WalOp } from './schemas/index.js';
 import { mandateVersionKey, type WorldState } from './state.js';
+import { systemUseReferenceCurrent } from './systemUseDecision.js';
 import type { TransactionActor, WalStore } from './walStore.js';
 
 const defaultIds: IdFactory = { next: (prefix) => `${prefix}_${randomUUID()}` };
@@ -49,6 +50,8 @@ function timeoutRecord(
     at,
     authenticated_actor: 'proc:authz',
     claimed_actor: { role: null },
+    system_use_decision: ruling.binding.system_use_decision,
+    system_use_current_at_record: systemUseReferenceCurrent(state, ruling.binding.system_use_decision, at),
     proposed_action: proposal.proposed_action,
     basis: [...proposal.material_inputs.map((item) => item.id), ...proposal.derived_claims.map((item) => item.id)],
     authority_chain: chainIds(mandate),

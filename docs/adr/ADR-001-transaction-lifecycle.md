@@ -25,6 +25,14 @@ missing, expired, mismatched, replayed, or previous-boot reference fails closed.
 attempt as `open / indeterminate / provider_disclosure: possible`; recovery never invents a terminal outcome,
 and the same case/turn cannot start a replacement attempt.
 
+**Amendment (M5.6 system-use decision, 2026-08-04):** every authority-bearing ruling adds the exact
+system-use decision id, version, and record digest to the binding tuple, with bounded status and condition
+results carried beside it. A decision transition eagerly invalidates every issued ruling bound to that
+version and releases its reservations; ruling issuance lazily resolves the current record, and
+`commit-verify` re-resolves and compares it under the world lock. A terminal denial produced before any
+usable mandate exists may carry a null decision reference because it creates no case, reservation,
+commitment, or effect; an `allow` or `escalate` ruling may not.
+
 ## Context
 
 The authorization service is the single serialization point. Commitment is two-phase: `commit-verify`
@@ -144,14 +152,18 @@ the arc is placed where it can actually occur.
 The binding tuple is §4's: frozen-proposal hash, mandate id + version, acting-model id, service + action
 class, nonce, validity window — plus the policy version and policy content digest the ruling records
 (§4's invalidation rule names policy version, so it is part of what is re-checked), and the card digest
-and verifying `key_id` behind the acting-model entry (ADR-006).
+and verifying `key_id` behind the acting-model entry (ADR-006), and the exact current system-use decision
+`{decision_id, version, record_digest}` (ADR-008). The full bounded decision reference also records its
+approved status and mechanically evaluated condition results; no evidence pack or rationale enters a ruling.
 
 Invalidation is **eager and lazy**, deliberately redundant:
 
-- *Eager:* a mandate amend/revoke, a policy reload, or a model-set change marks every `issued` ruling
+- *Eager:* a mandate amend/revoke, policy reload, model-set change, or terminal/superseding system-use
+  transition marks every affected `issued` ruling
   bound to the superseded value `invalidated` **in the same transaction**. Because both that transaction
   and `commit-verify` need the same world mutex, they cannot interleave.
-- *Lazy:* `commit-verify` re-reads every binding-tuple element from current state before consuming the
+- *Lazy:* ruling issuance resolves the exact system-use record, and `commit-verify` re-reads every
+  binding-tuple element—including decision currentness, digest, scope, validity, and hard conditions—before consuming the
   nonce. A missed sweep therefore still fails closed.
 
 The mid-flight-revocation test has exactly two admissible outcomes, decided by mutex acquisition order:

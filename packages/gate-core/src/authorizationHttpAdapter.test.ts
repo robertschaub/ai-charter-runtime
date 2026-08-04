@@ -18,6 +18,7 @@ import { Keyring } from './keyring.js';
 import { loadPolicyFile } from './policyLoader.js';
 import { modelCallAdmission, modelCallFailedRecord, modelOutputAdmission } from './schemas/index.js';
 import { WalStore } from './walStore.js';
+import { syntheticSystemUseForTests } from './systemUseDecision.js';
 
 const POLICY_FILE = fileURLToPath(new URL('../policy/v1.yaml', import.meta.url));
 const BUILD_DIGEST = digestFor('evaluator-build', { package: 'gate-core', test: 'http-adapter' });
@@ -72,6 +73,7 @@ function setup(
     store,
     keyring: new Keyring(new Map([['hmac-test', 'a'.repeat(64)]]), 'hmac-test'),
     policy,
+    systemUse: syntheticSystemUseForTests(store),
     ids: new SequentialIds(),
     resolveAuthorizedAgent: (actor) => (actor.credential === 'proc:orchestrator' ? 'agent_demo' : undefined),
     resolveScreening: () => ({ performed: true, signals: [], evidenceRefs: [] }),
@@ -121,6 +123,57 @@ describe('ADR-002 authorization HTTP adapter', () => {
         outcome: 'unauthenticated',
         http_status: 401,
       }),
+    ]);
+  });
+
+  it('confines the read-only system-use projection to the principal and access-records the read', async () => {
+    const { adapter, store } = setup();
+    const projection = {
+      currentness: 'current',
+      decision: { decision_id: 'sud_demo', version: 1, evidence: [], conditions: [] },
+    };
+    const operation = vi.fn(async () => ({ status: 200, body: projection }));
+    await expect(
+      adapter.dispatch(
+        {
+          method: 'GET',
+          pathname: '/w/w-demo/system-use-decision',
+          authorization: `Bearer ${'1'.repeat(64)}`,
+        },
+        operation,
+      ),
+    ).resolves.toMatchObject({ status: 200, body: projection });
+    for (const token of ['2', '4']) {
+      await expect(
+        adapter.dispatch(
+          {
+            method: 'GET',
+            pathname: '/w/w-demo/system-use-decision',
+            authorization: `Bearer ${token.repeat(64)}`,
+          },
+          operation,
+        ),
+      ).resolves.toMatchObject({ status: 403, body: { error: 'forbidden' } });
+    }
+    await expect(
+      adapter.dispatch(
+        {
+          method: 'POST',
+          pathname: '/w/w-demo/system-use-decision',
+          authorization: `Bearer ${'1'.repeat(64)}`,
+        },
+        operation,
+      ),
+    ).resolves.toMatchObject({ status: 404, body: { error: 'not-found' } });
+    expect(operation).toHaveBeenCalledOnce();
+    expect(store.snapshot().accessRecords).toEqual([
+      expect.objectContaining({
+        route: 'GET /w/{world_id}/system-use-decision',
+        authenticated_actor: 'role:principal',
+        outcome: 'served',
+      }),
+      expect.objectContaining({ authenticated_actor: 'role:case_officer', outcome: 'forbidden' }),
+      expect.objectContaining({ authenticated_actor: 'proc:orchestrator', outcome: 'forbidden' }),
     ]);
   });
 
@@ -412,6 +465,13 @@ describe('ADR-002 authorization HTTP adapter', () => {
       requested_id: 'swiss-ai/apertus-v1.5-70b',
       projection_digest: 'a'.repeat(64),
       projection_item_count: 3,
+      system_use_decision: {
+        decision_id: 'sud_demo',
+        version: 1,
+        record_digest: 'b'.repeat(64),
+        status: 'approved',
+        conditions: [],
+      },
       opened_at: '2026-08-02T08:59:59.000Z',
       expires_at: '2026-08-02T09:00:59.000Z',
       state: 'terminal',

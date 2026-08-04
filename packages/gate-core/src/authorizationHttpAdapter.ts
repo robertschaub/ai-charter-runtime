@@ -161,6 +161,14 @@ export const AUTHORIZATION_ROUTES = [
     authorityChanging: false,
   },
   {
+    id: 'system-use.read',
+    method: 'GET',
+    template: '/w/{world_id}/system-use-decision',
+    allowed: ['role:principal'],
+    authorityChanging: false,
+    accessLoggedOnServe: true,
+  },
+  {
     id: 'escalation.list',
     method: 'GET',
     template: '/w/{world_id}/escalations',

@@ -11,12 +11,14 @@ import {
   freezeProposal,
   jsonScalarOrList,
   loadPolicyFile,
+  syntheticSystemUseForTests,
   WalStore,
   type CardRegistry,
   type CheckpointReceiptReference,
   type Keyring,
   type Mandate,
   type RecordsVerificationReport,
+  type SystemUseDecisionReference,
 } from 'gate-core';
 import type { OpenAiCompatibleAdapter } from 'model-adapters';
 import { EffectLedger, MockServicesHost } from 'services-mock';
@@ -107,6 +109,8 @@ export interface LocalRecordReceipt {
   readonly effect_id: string;
   readonly outcome: 'success' | 'failed';
   readonly record_entry_id: string;
+  readonly system_use_decision: SystemUseDecisionReference;
+  readonly system_use_current_at_record: boolean;
   readonly anchoring_status: 'anchored-prefix' | 'open-window' | 'no-pushed-checkpoint';
   readonly latest_pushed_checkpoint: CheckpointReceiptReference | null;
   readonly local_receipt_notice: string;
@@ -141,6 +145,7 @@ export async function runVerticalSlice(options: VerticalSliceOptions): Promise<L
       store,
       keyring: options.keyring,
       policy,
+      systemUse: syntheticSystemUseForTests(store),
       resolveAuthorizedAgent: (actor) => (actor.credential === 'proc:orchestrator' ? 'agent_demo' : undefined),
       resolveScreening: () => ({
         performed: false,
@@ -241,10 +246,13 @@ export async function runVerticalSlice(options: VerticalSliceOptions): Promise<L
       throw new VerticalSliceError('receipt', 'authorization service did not seal an outcome receipt');
     }
     const recordEntryId = executed.report.recordEntryId;
-    const actionEntryIndex = store
-      .snapshot()
-      .actionRecords.findIndex((entry) => entry.entry_id === recordEntryId);
+    const actionRecords = store.snapshot().actionRecords;
+    const actionEntryIndex = actionRecords.findIndex((entry) => entry.entry_id === recordEntryId);
     if (actionEntryIndex < 0) throw new VerticalSliceError('receipt', 'outcome receipt is absent from the action chain');
+    const actionRecord = actionRecords[actionEntryIndex];
+    if (actionRecord?.system_use_decision === null || actionRecord?.system_use_decision === undefined) {
+      throw new VerticalSliceError('receipt', 'outcome receipt lost its system-use decision reference');
+    }
     const latestPushedCheckpoint = checkpointReceiptReference(
       options.recordVerification,
       boundMandate.world_id,
@@ -262,6 +270,8 @@ export async function runVerticalSlice(options: VerticalSliceOptions): Promise<L
       effect_id: executed.effect.effect_id,
       outcome: executed.effect.outcome,
       record_entry_id: recordEntryId,
+      system_use_decision: actionRecord.system_use_decision,
+      system_use_current_at_record: actionRecord.system_use_current_at_record,
       anchoring_status:
         latestPushedCheckpoint === null
           ? 'no-pushed-checkpoint'

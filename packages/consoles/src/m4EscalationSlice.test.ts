@@ -16,6 +16,7 @@ import {
   freezeProposal,
   Keyring,
   loadPolicyFile,
+  syntheticSystemUseForTests,
   WalStore,
   type DisposeEscalationResult,
   type ContinueEscalationRevisionResult,
@@ -61,6 +62,7 @@ describe('M4 headless escalation slice', () => {
       store,
       keyring,
       policy,
+      systemUse: syntheticSystemUseForTests(store),
       resolveAuthorizedAgent: (actor) => (actor.credential === 'proc:orchestrator' ? 'agent_demo' : undefined),
       resolveScreening: (proposal) => ({
         performed: true,

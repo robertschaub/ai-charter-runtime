@@ -29,6 +29,14 @@ const DIGEST = 'c'.repeat(64);
 const MAC_VALUE = Buffer.from('m'.repeat(32), 'utf8').toString('base64');
 const SIGNATURE = Buffer.from('s'.repeat(64), 'utf8').toString('base64');
 
+const SYSTEM_USE_REFERENCE = {
+  decision_id: 'sud_demo',
+  version: 1,
+  record_digest: DIGEST,
+  status: 'approved' as const,
+  conditions: [],
+};
+
 const macBlock = { alg: 'hmac-sha256', key_id: 'hmac-2026-08-01', value: MAC_VALUE };
 
 function saidItem(overrides: Record<string, unknown> = {}): Record<string, unknown> {
@@ -194,6 +202,7 @@ function validRuling(overrides: Record<string, unknown> = {}): Record<string, un
       acting_model_id: 'swiss-ai/apertus-v1.5-70b',
       card_digest: DIGEST,
       card_key_id: 'card-2026-08-01',
+      system_use_decision: SYSTEM_USE_REFERENCE,
       service: 'filing',
       action_class: 'grant-filing',
       nonce: 'nce_7f3a',
@@ -326,6 +335,8 @@ describe('schemas — accept the shapes the ADRs specify', () => {
         frozen_proposal_hash: DIGEST,
         effect_request_digest: DIGEST,
         services_ledger_id: 'ledger_test',
+        system_use_decision: SYSTEM_USE_REFERENCE,
+        system_use_current_at_record: true,
         service: 'filing',
         bound_at: '2026-08-01T09:14:22.418Z',
         token_expires_at: '2026-08-01T09:14:27.418Z',
@@ -336,6 +347,8 @@ describe('schemas — accept the shapes the ADRs specify', () => {
         outcome: 'unknown-reconciliation-required',
         reported_at: '2026-08-01T09:14:30.000Z',
         recovery_owner_role: 'principal',
+        system_use_decision: SYSTEM_USE_REFERENCE,
+        system_use_current_at_record: true,
       },
       {
         event: 'retry_served',
@@ -448,6 +461,8 @@ describe('schemas — accept the shapes the ADRs specify', () => {
       entry_id: 'rec_1044',
       at: '2026-08-01T09:14:22.418Z',
       authenticated_actor: 'proc:services_host',
+      system_use_decision: SYSTEM_USE_REFERENCE,
+      system_use_current_at_record: true,
       claimed_actor: { role: 'case_officer', session: 's_41c' },
       proposed_action: 'Submit the filing to the cantonal grant office.',
       basis: ['said_3', 'inf_7'],
@@ -469,6 +484,8 @@ describe('schemas — accept the shapes the ADRs specify', () => {
         frozen_proposal_hash: DIGEST,
         effect_request_digest: DIGEST,
         services_ledger_id: 'ledger_test',
+        system_use_decision: SYSTEM_USE_REFERENCE,
+        system_use_current_at_record: true,
         service: 'filing',
         bound_at: '2026-08-01T09:14:22.418Z',
         token_expires_at: '2026-08-01T09:14:27.418Z',
@@ -588,6 +605,7 @@ describe('schemas — accept the shapes the ADRs specify', () => {
       requested_id: 'swiss-ai/apertus-v1.5-70b',
       projection_digest: DIGEST,
       projection_item_count: 3,
+      system_use_decision: SYSTEM_USE_REFERENCE,
       opened_at: '2026-08-01T09:19:00.000Z',
       expires_at: '2026-08-01T09:20:00.000Z',
       state: 'open',

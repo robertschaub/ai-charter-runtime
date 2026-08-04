@@ -35,6 +35,8 @@ import {
 } from 'model-adapters';
 import { z } from 'zod';
 
+import { RuntimeDependencyError } from './runtimeHttpClients.js';
+
 const modelTurnInput = z
   .object({
     turnId: id,
@@ -108,6 +110,16 @@ export class ModelTurnError extends Error {
     super(code);
     this.name = 'ModelTurnError';
   }
+}
+
+function isSystemUseInvalidation(error: unknown): boolean {
+  if (error instanceof RuntimeDependencyError) return error.responseCode === 'system-use-unavailable';
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    'code' in error &&
+    (error as { readonly code?: unknown }).code === 'system-use-unavailable'
+  );
 }
 
 interface ActingAdapter {
@@ -524,10 +536,10 @@ export class ModelTurnCoordinator {
         admissionEnvelope = modelCallAdmission.parse(
           await this.#authorization.admitModelOutput(this.#worldId, call.call_id, request),
         );
-      } catch {
+      } catch (error) {
         return await haltStarted(
           'authorization-refused',
-          'authorization-invalidated',
+          isSystemUseInvalidation(error) ? 'system-use-invalidated' : 'authorization-invalidated',
           'confirmed',
           response.servedId,
         );

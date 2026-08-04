@@ -21,6 +21,7 @@ describe('authorization-origin governance console contract', () => {
     );
     expect(consoleApiPath('w-demo', 'mandates', 'mdt:demo')).toBe('/w/w-demo/mandates/mdt:demo');
     expect(consoleApiPath('w-demo', 'challenges')).toBe('/w/w-demo/challenges');
+    expect(consoleApiPath('w-demo', 'system-use-decision')).toBe('/w/w-demo/system-use-decision');
     expect(validWorldId('w-demo')).toBe(true);
     expect(validWorldId('con')).toBe(false);
     expect(() => consoleApiPath('w-demo', '..', 'mandates')).toThrow(/invalid API path segment/);
@@ -71,6 +72,11 @@ describe('authorization-origin governance console contract', () => {
     expect(shell).toContain('<script type="module" src="/console/app.js"></script>');
     expect(shell).toContain('<link rel="stylesheet" href="/console/styles.css">');
     expect(shell).toContain('id="challenge-form"');
+    expect(shell).toContain('id="load-system-use"');
+    expect(shell).toContain('Read-only currentness');
+    expect(shell).toContain('synthetic fixture, self-declared, probe-tested, or not assessed');
+    expect(shell).toContain('unavailable independent challenger and remedy roles');
+    expect(shell).not.toContain('id="mutate-system-use"');
     expect(shell).not.toMatch(/<script(?![^>]*\bsrc=)/i);
     expect(shell).not.toMatch(/<style\b/i);
     expect(shell).not.toMatch(/\son[a-z]+=/i);

@@ -23,6 +23,7 @@ export * from './modelOutputAdmission.js';
 export * from './screeningFixture.js';
 export * from './worldLock.js';
 export * from './state.js';
+export * from './systemUseDecision.js';
 export * from './writerLease.js';
 export * from './walStore.js';
 export * from './policyLoader.js';

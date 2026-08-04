@@ -12,20 +12,21 @@ the source document is linked here and is never copied into this repository.
 
 ## Specification authority and provenance
 
-| Field | Pinned value |
-|---|---|
-| Canonical URL | `https://github.com/robertschaub/our-ai-charter/blob/main/docs/wip/runtime-gates-poc-spec.md` |
-| Charter commit | `00c32f521d550800990c795c9a38d5a83f2daf01` |
-| Specification path | `docs/wip/runtime-gates-poc-spec.md` |
-| Immutable URL | `https://github.com/robertschaub/our-ai-charter/blob/00c32f521d550800990c795c9a38d5a83f2daf01/docs/wip/runtime-gates-poc-spec.md` |
-| SHA-256 | `33014caab9831674225fd77d711f06065c02ee65839d278c036331e8aa27bf60` |
-| Publication status | Published upstream; the immutable URL resolves to the pinned path and digest |
+Both governing sources are pinned to the same reviewed Charter commit. A cross-link from one source to the
+other is not a provenance pin; both paths and byte digests are verified independently.
 
-The provenance row changes only after an approved upstream specification change. Update the Charter commit
-and digest together. The required publication sequence was completed: the pinned Charter commit was
-published and its immutable URL verified before the runtime M4 baseline was published. The canonical `main`
-URL is a moving reference and may now serve a newer revision; reproducibility relies on the immutable URL,
-commit, path, and digest above. A later upstream change does not silently move this pin.
+| Source | Path | SHA-256 | Immutable URL |
+|---|---|---|---|
+| Runtime-gates POC specification | `docs/wip/runtime-gates-poc-spec.md` | `5616c9859da6e7ce1bc2bd516a9dd18a8edd3ab636fa43e3b04d7eeddf696b1f` | `https://github.com/robertschaub/our-ai-charter/blob/6a52bd9c3806721b60de738206deff8d0357cecf/docs/wip/runtime-gates-poc-spec.md` |
+| System-use decision record | `docs/wip/system-use-decision-record.md` | `ea4342c16221687c33bffb6ca3a4d94f267ce98e3d18880bacc08316278e0a84` | `https://github.com/robertschaub/our-ai-charter/blob/6a52bd9c3806721b60de738206deff8d0357cecf/docs/wip/system-use-decision-record.md` |
+
+Shared Charter commit: `6a52bd9c3806721b60de738206deff8d0357cecf`. Publication status: both immutable
+URLs resolve to the named path and independently verified digest.
+
+The provenance rows change only after an approved upstream specification change. Move both source pins in
+one runtime commit, even when only one source changed, and re-verify both byte digests against the shared
+Charter commit. The canonical `main` URLs are moving references; reproducibility relies on the immutable
+URLs, commit, paths, and digests above. A later upstream change does not silently move either pin.
 
 ## Reviewed implementation baseline
 
@@ -57,7 +58,7 @@ distinguish an uncommitted latest checkpoint from confirmed remote rollback or m
 | M2 — transactional core | Implemented and fault-tested | Authorization remains the single durable serialization point; authority defects fail closed. |
 | M3 — vertical slice | Implemented | Deterministic authorize → propose → rule → commit-verify → effect → receipt path, adapters, service ledger, and signed cards are present. |
 | M4 — escalation + governance console | **Complete** | Final exact-SHA review of `e326562` returned GO with no findings; the offline acceptance ledger preserves the remaining partial and not-assessed boundaries. |
-| M5 — screening + empathy + switching | **In progress** | M5.1 is reviewed at `c1b5eb0`; M5.2 at `1973515`; M5.3 at `1cc7fb2`, with its Low wording finding closed at `2b7b45a`; M5.4 at `b247d5b`; M5.5 durable call evidence and its correction are reviewed at `1d992fa`. Runtime/browser/provider ingress remains closed. |
+| M5 — screening + empathy + switching | **In progress** | M5.1 is reviewed at `c1b5eb0`; M5.2 at `1973515`; M5.3 at `1cc7fb2`, with its Low wording finding closed at `2b7b45a`; M5.4 at `b247d5b`; M5.5 durable call evidence and its correction are reviewed at `1d992fa`. A post-M5.5 M5.6 system-use-decision candidate is implemented but not yet exact-SHA reviewed. Runtime/browser/provider ingress remains closed. |
 | M6–M7 | Not started | Full capture/publication work follows the implementation milestones. |
 
 These labels describe repository implementation status, not assurance, certification, or independent
@@ -341,9 +342,42 @@ Reviewed validation is `npm run typecheck` clean plus 4 Git-safety hook tests an
 unchanged: this slice adds runtime provenance for the already specified model-call/disclosure boundary and does
 not change the Charter specification or its governance semantics.
 
+### M5.6 implementation candidate — system-use decision prerequisite
+
+- Authorization owns a versioned, digest-bound, append-only system-use decision lineage. Startup loads one
+  checked-in synthetic fixture through a `proc:authz`-only seam; no HTTP or browser mutation route exists.
+- Exact world, use case, system, material configuration, policy, signed-card versions/digests/roles, data
+  classes, jurisdiction, validity, status, integrity, and hard conditions are resolved internally. Callers
+  cannot select or override decision facts or currentness.
+- Mandate/case creation, model-call begin and output admission, authority-bearing ruling issuance,
+  `commit-verify`, and record/receipt production bind or recheck the bounded decision reference. Terminal
+  transition eagerly invalidates issued rulings and releases their reservations; lazy reads and
+  `commit-verify` remain backstops. A pre-mandate terminal denial records a null reference and creates no use
+  or authority; allow/escalate records may not.
+- The M5.5 failure vocabulary adds the substantive review-surface candidate `system-use-invalidated`.
+  Disclosure stays evidence-derived: a post-provider admission refusal records `confirmed`; decision state
+  alone never upgrades an indeterminate open call.
+- Model-call/access evidence, action records, commitments, effects, applicant extracts, and local receipts carry
+  only bounded reference/condition/current-at-record facts. Evidence packs, detailed rationale, prompts,
+  outputs, provider errors, endpoints, credentials, and personal data remain structurally excluded.
+- A principal-only, access-logged, read-only governance projection shows currentness, exact binding, evidence
+  depth/provenance/limitations, hard conditions, validity, and absent accountability roles. It inherits the
+  strict self-only CSP, `frame-ancestors 'none'`, no third-party code, no cookies, and no CORS; it exposes no
+  mutation, badge, score, certification, legal approval, conformity result, or action authority.
+- Dedicated tests cover inactive/expired/integrity-invalid state, every exact-scope mismatch, unmet conditions,
+  authorization-only fixture loading, successor replay and rollback refusal, grant and ruling boundaries,
+  eager invalidation, pre-commit prevention, post-call invalidation with no quarantine/conversation persistence,
+  disclosure honesty, bounded projection privacy, console content, ACL, and access logging.
+
+This is an unreviewed candidate above the reviewed M5.5 baseline. It adds no live provider, native runtime,
+browser-message, output-release, model-switching, or M6 path and does not complete M5.
+
+Candidate validation is `npm run typecheck` clean plus 4 Git-safety hook tests and 316 Vitest tests across
+36 files, `git diff --check` clean, and both unchanged signed cards verified.
+
 ## Resolved browser credential-handoff protocol
 
-The normative decision is pinned above at Charter commit `00c32f5`: a user-initiated authorization-origin
+The normative decision is pinned above at Charter commit `6a52bd9`: a user-initiated authorization-origin
 control mints an at-least-256-bit, single-use, maximum-30-second code bound to role, world, case, exact
 orchestrator origin, and authorization boot id. An exact-origin/exact-window `postMessage` exchange carries
 it without URL or persistent-storage exposure; the orchestrator redeems it over its process-authenticated
@@ -358,9 +392,9 @@ authorization route. The bounded handoff and session implementation was independ
 
 ## Ordered next slices
 
-1. **Stop at the reviewed M5.5 integration point.** A separately approved bounded slice must precede any further
-   native process wiring, browser messages, conversation-item persistence, empathy/model switching, or output
-   consumer. Any future release proposal must treat lexical admission as necessary but not sufficient.
+1. **Exact-SHA review the bounded M5.6 candidate, then stop.** Do not begin further native process wiring,
+   browser messages, conversation-item persistence, empathy/model switching, or output consumer work. Any
+   future release proposal must treat lexical admission and system-use approval as necessary but not sufficient.
 
 Substantive tranches are committed and reviewed at bounded integration points. A documentation-only status
 acknowledgement does not trigger a recursive review round; changes to ADRs, gates, invariants, ACLs,

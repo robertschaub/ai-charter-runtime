@@ -17,6 +17,7 @@ import {
   digestFor,
   Keyring,
   loadPolicyFile,
+  syntheticSystemUseForTests,
   storeItem,
   WalStore,
   type Mandate,
@@ -149,10 +150,12 @@ async function authorizationHarness() {
     now: () => '2026-08-01T09:00:00.000Z',
   });
   stores.push(store);
+  const systemUse = syntheticSystemUseForTests(store);
   const core = new AuthorizationCore({
     store,
     keyring,
     policy,
+    systemUse,
     resolveAuthorizedAgent: (actor) => (actor.credential === 'proc:orchestrator' ? 'agent_demo' : undefined),
     resolveScreening: () => ({ performed: false, signals: [], evidenceRefs: [] }),
     validateScreeningResolution: () => false,
@@ -184,6 +187,7 @@ async function authorizationHarness() {
     caseId: 'case_demo',
     authorizationBootId: 'authz_boot_model_turn_1',
     screeningFixtures: [],
+    systemUse,
     now: () => '2026-08-01T09:00:00.000Z',
   });
   const adapter = new AuthorizationHttpAdapter({
@@ -205,6 +209,7 @@ async function authorizationHarness() {
     adapter,
     keyring,
     caseHandoffs: {} as CaseSessionHandoffService,
+    systemUse,
     runtimeConfig: {
       authorization_origin: 'http://127.0.0.1:7801',
       orchestrator_origin: 'http://127.0.0.1:7802',
@@ -219,6 +224,7 @@ async function authorizationHarness() {
   return {
     core,
     store,
+    systemUse,
     authorization: new OrchestratorAuthorizationHttpClient({
       origin: address.origin,
       token: ORCHESTRATOR_TOKEN,
@@ -457,6 +463,37 @@ describe('M5.4 containment with M5.5 durable model-call evidence', () => {
       state: 'terminal',
       outcome: 'failed',
       failure_reason: 'authorization-invalidated',
+      provider_disclosure: 'confirmed',
+    });
+  });
+
+  it('records evidence-honest system-use invalidation after provider disclosure and persists no output', async () => {
+    const h = await authorizationHarness();
+    const provider = await loopbackProvider();
+    const content = 'Synthetic output produced immediately before the decision is suspended.';
+    provider.enqueue({
+      model: turn.requestedId,
+      content,
+      beforeReply: () => h.systemUse.transition('sud_test_fixture', 1, 'suspended', AUTHZ),
+    });
+    const coordinator = new ModelTurnCoordinator({
+      worldId: 'w-demo',
+      caseId: 'case_demo',
+      authorization: h.authorization,
+      lanes: [lane(provider)],
+    });
+
+    await expect(coordinator.run({ ...turn, turnId: 'turn_system_use_suspended' })).rejects.toEqual(
+      expect.objectContaining({ code: 'authorization-refused' }),
+    );
+    expect(coordinator.quarantine.size).toBe(0);
+    expect([...h.store.snapshot().storeItems.values()].some((entry) => entry.item.text === content)).toBe(false);
+    expect(
+      [...h.store.snapshot().modelCalls.values()].find((call) => call.turn_id === 'turn_system_use_suspended'),
+    ).toMatchObject({
+      state: 'terminal',
+      outcome: 'failed',
+      failure_reason: 'system-use-invalidated',
       provider_disclosure: 'confirmed',
     });
   });

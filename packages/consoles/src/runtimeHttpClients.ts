@@ -71,6 +71,22 @@ async function responseJson(response: Response, maxBytes: number): Promise<unkno
   }
 }
 
+export class RuntimeDependencyError extends Error {
+  constructor(
+    readonly httpStatus: number,
+    readonly responseCode: string | null,
+  ) {
+    super(`runtime dependency rejected transport request with HTTP ${httpStatus}`);
+    this.name = 'RuntimeDependencyError';
+  }
+}
+
+function responseErrorCode(value: unknown): string | null {
+  if (typeof value !== 'object' || value === null || !Object.hasOwn(value, 'error')) return null;
+  const code = (value as { readonly error?: unknown }).error;
+  return typeof code === 'string' ? code : null;
+}
+
 function containsTokenField(value: unknown): boolean {
   if (Array.isArray(value)) return value.some(containsTokenField);
   if (typeof value !== 'object' || value === null) return false;
@@ -114,7 +130,7 @@ abstract class JsonHttpClient {
       throw new Error('runtime dependency unavailable');
     }
     const parsed = await responseJson(response, this.#maxResponseBytes);
-    if (!response.ok) throw new Error(`runtime dependency rejected transport request with HTTP ${response.status}`);
+    if (!response.ok) throw new RuntimeDependencyError(response.status, responseErrorCode(parsed));
     return parsed;
   }
 
@@ -130,7 +146,7 @@ abstract class JsonHttpClient {
       throw new Error('runtime dependency unavailable');
     }
     const parsed = await responseJson(response, this.#maxResponseBytes);
-    if (!response.ok) throw new Error(`runtime dependency rejected transport request with HTTP ${response.status}`);
+    if (!response.ok) throw new RuntimeDependencyError(response.status, responseErrorCode(parsed));
     return parsed;
   }
 }

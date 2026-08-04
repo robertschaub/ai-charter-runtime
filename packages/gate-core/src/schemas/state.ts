@@ -5,6 +5,7 @@ import { z } from 'zod';
 import { classToken, hexDigest, id, integer, modelId, role, timestamp, worldId } from './common.js';
 import { disposition, interventionContract } from './intervention.js';
 import { counterName, gateRuling } from './ruling.js';
+import { systemUseDecisionReference } from './systemUseDecision.js';
 
 export const browserOrigin = z
   .string()
@@ -111,6 +112,8 @@ export const commitmentRecord = z
     token_expires_at: timestamp,
     services_host_boot_id: id,
     services_ledger_id: id,
+    system_use_decision: systemUseDecisionReference,
+    system_use_current_at_bind: z.literal(true),
     /** Pinned at commitment time so a later policy reload cannot reroute recovery. */
     recovery_contract: interventionContract,
     state: commitmentState,
@@ -159,6 +162,8 @@ export const effectRecord = z
     idempotency_key: hexDigest,
     effect_request_digest: hexDigest,
     services_ledger_id: id,
+    system_use_decision: systemUseDecisionReference,
+    system_use_current_at_record: z.boolean(),
     outcome: z.enum(['success', 'failed', 'unknown-reconciliation-required']),
     recorded_at: timestamp,
     detail: z.string().optional(),

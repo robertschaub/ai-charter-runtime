@@ -504,6 +504,7 @@ export class AuthorizationReadSide {
         (entry) => proposalForRuling(entry.admissibility_decision.ruling_id)?.proposal_id === proposal.proposal_id,
       );
       const challenge = [...related].reverse().find((entry) => entry.challenge_and_remedy !== null)?.challenge_and_remedy ?? null;
+      const latestRelated = related.at(-1);
       return {
         action_id: proposal.action_id,
         proposal_id: proposal.proposal_id,
@@ -516,6 +517,8 @@ export class AuthorizationReadSide {
           mandate_id: selectedRuling.binding.mandate_id,
           mandate_version: selectedRuling.binding.mandate_version,
         },
+        system_use_decision: selectedRuling.binding.system_use_decision,
+        system_use_current_at_record: latestRelated?.system_use_current_at_record ?? false,
         ruling: {
           ruling_id: selectedRuling.ruling_id,
           verdict: selectedRuling.verdict,
@@ -541,6 +544,8 @@ export class AuthorizationReadSide {
           action_id: proposal.action_id,
           index: envelope.seq,
           inside_anchored_prefix: latest !== null && Number(envelope.seq) < anchoredActionLength,
+          system_use_decision: entry.system_use_decision,
+          system_use_current_at_record: entry.system_use_current_at_record,
         },
       ];
     });

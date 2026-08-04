@@ -336,6 +336,14 @@ async function loadCards(): Promise<void> {
   setActivity('Loaded signed model-card evidence. No aggregate assurance result was computed.');
 }
 
+async function loadSystemUseDecision(): Promise<void> {
+  const state = currentState();
+  requireRole(state, 'principal');
+  const result = await apiRequest(state, consoleApiPath(state.worldId, 'system-use-decision'));
+  setOutput('system-use-output', result);
+  setActivity('Loaded the read-only system-use decision view. No authority or certification result was computed.');
+}
+
 async function submitMandate(operation: 'grant' | 'amend'): Promise<void> {
   const state = currentState();
   requireRole(state, 'principal');
@@ -672,6 +680,10 @@ export function mountGovernanceConsole(): void {
   element<HTMLButtonElement>('load-mandates').addEventListener(
     'click',
     () => void loadMandates().catch(reportError),
+  );
+  element<HTMLButtonElement>('load-system-use').addEventListener(
+    'click',
+    () => void loadSystemUseDecision().catch(reportError),
   );
   wireForm('card-form', loadCards);
   wireForm('grant-form', () => submitMandate('grant'));

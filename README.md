@@ -28,6 +28,8 @@ The exact upstream revision, digest, reviewed runtime baseline, and remaining mi
   is not semantic red-line clearance. M5.4 is reviewed at `b247d5b`; it adds a containment-only coordinator
   exercised against a synthetic loopback provider. The M5.5 candidate adds authorization-owned, durable,
   metadata-only evidence for each such attempt before disclosure and for its terminal admission or fixed failure.
+  The post-M5.5 M5.6 candidate adds an authorization-owned, replayable system-use decision prerequisite and a
+  principal-only read view; approval is necessary for the synthetic use but never sufficient for an action.
   Neither slice is wired into `runtime:start` or a browser/provider route. Live provider
   ingress, browser messages, empathy triggers, and governed switching are not active yet.
 - **A deterministic gate proves declared rules were applied** — not that the rules are lawful, fair, or legitimate.
@@ -85,7 +87,7 @@ reported without being confused with missing authority. The orchestrator binds l
 installed before the first spawn, and supervised children close when their IPC parent disconnects. All listeners
 use `127.0.0.1` by default.
 The authorization-origin read-side APIs now serve strict ruling, model-card, mandate, escalation,
-record-verification, chain-view, and applicant-extract projections. The governance console at
+record-verification, chain-view, applicant-extract, and system-use-decision projections. The governance console at
 `http://127.0.0.1:7801/console` now provides the principal mandate/card/escalation/record surfaces and the
 applicant extract, plus the case officer's user-initiated handoff control. It has no third-party content,
 emits no CORS headers, stores a pasted role token only in that origin's `localStorage`, and presents evidence
@@ -114,6 +116,11 @@ turn/mandate/card/model/projection binding before returning the projection, then
 fixed failure class without raw output, prompts, provider errors, endpoints, or credentials. Expired, replayed,
 mismatched, and previous-boot references fail closed; an unfinished attempt remains explicitly indeterminate after
 recovery. This evidence does not release output, call a live provider, or complete M5.
+The M5.6 candidate additionally requires one exact, current system-use decision at the case, model-call,
+ruling/commit, and record/receipt boundaries. It binds only decision id/version/digest, bounded status/condition
+facts, and current-at-record results; evidence packs and rationale stay out of runtime records. A transition
+invalidates outstanding rulings and blocks post-provider admission without releasing or persisting the output.
+The principal view is read-only evidence, not a trust score, certification, legal approval, or action authority.
 
 Offline and deterministic verification uses synthetic records and skips only the remote-presence step:
 

@@ -24,6 +24,7 @@ import {
 } from './schemas/index.js';
 import { screeningFixtureSet, type ScreeningFixture } from './screeningFixture.js';
 import { WalStore } from './walStore.js';
+import { syntheticSystemUseForTests } from './systemUseDecision.js';
 
 const ROOT = fileURLToPath(new URL('../../..', import.meta.url));
 const POLICY_FILE = fileURLToPath(new URL('../policy/v1.yaml', import.meta.url));
@@ -67,10 +68,12 @@ async function setup(extraFixtures: readonly ScreeningFixture[] = []) {
     now: () => clock.now,
   });
   stores.push(store);
+  const systemUse = syntheticSystemUseForTests(store);
   const core = new AuthorizationCore({
     store,
     keyring,
     policy,
+    systemUse,
     resolveAuthorizedAgent: (actor) =>
       actor.credential === 'proc:orchestrator' ? 'agent_demo' : undefined,
     resolveScreening: () => ({ performed: false, signals: [], evidenceRefs: [] }),
@@ -98,10 +101,11 @@ async function setup(extraFixtures: readonly ScreeningFixture[] = []) {
     caseId: 'case_demo',
     authorizationBootId: 'authz_boot_projection_1',
     screeningFixtures: fixtures,
+    systemUse,
     now: () => clock.now,
   });
   const proposal = frozenProposal.parse(readJson(join(DEMO, 'screening-proposal.json')));
-  return { core, keyring, service, proposal, store, root, policy, buildDigest, fixtures, clock };
+  return { core, keyring, service, proposal, store, root, policy, buildDigest, fixtures, clock, systemUse };
 }
 
 describe('M5.2 authorization-resolved conversation projections', () => {
@@ -524,6 +528,7 @@ describe('M5.5 durable model-call lifecycle', () => {
       caseId: 'case_demo',
       authorizationBootId: 'authz_boot_projection_2',
       screeningFixtures: fixtures,
+      systemUse: syntheticSystemUseForTests(reopened),
       now: () => clock.now,
     });
     expect(reopened.snapshot().modelCalls.get(started.call.call_id)).toMatchObject({
@@ -541,5 +546,45 @@ describe('M5.5 durable model-call lifecycle', () => {
     await expect(restarted.beginCall({ ...beginInput, turn_id: started.call.turn_id })).rejects.toThrowError(
       /already has a durable call attempt/,
     );
+  });
+});
+
+describe('M5.6 system-use failure evidence', () => {
+  it('rejects a false invalidation claim and preserves possible disclosure when no provider evidence exists', async () => {
+    const { service, store, systemUse } = await setup();
+    const start = await service.beginCall({
+      turn_id: 'turn_system_use_possible',
+      mandate_id: 'mdt_demo_grant',
+      mandate_version: 1,
+      card_id: 'publicai-apertus-v1.5-70b',
+      card_version: 1,
+      requested_id: 'swiss-ai/apertus-v1.5-70b',
+      actor: ORCHESTRATOR,
+    });
+    const failure = {
+      call_id: start.call.call_id,
+      turn_id: start.call.turn_id,
+      mandate_id: start.call.mandate_id,
+      mandate_version: start.call.mandate_version,
+      card_id: start.call.card_id,
+      card_version: start.call.card_version,
+      requested_id: start.call.requested_id,
+      projection_digest: start.call.projection_digest,
+      failure_reason: 'system-use-invalidated' as const,
+      provider_disclosure: 'possible' as const,
+      served_id: null,
+      actor: ORCHESTRATOR,
+    };
+    await expect(service.failCall(failure)).rejects.toThrowError(/requires evidence/);
+    expect(store.snapshot().modelCalls.get(start.call.call_id)?.state).toBe('open');
+
+    await systemUse.transition('sud_test_fixture', 1, 'suspended', AUTHZ);
+    await expect(service.failCall(failure)).resolves.toMatchObject({
+      state: 'terminal',
+      outcome: 'failed',
+      failure_reason: 'system-use-invalidated',
+      provider_disclosure: 'possible',
+      served_id: null,
+    });
   });
 });

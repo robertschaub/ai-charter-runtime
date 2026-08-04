@@ -4,6 +4,7 @@ import { z } from 'zod';
 
 import { cardSlug, hexDigest, id, integer, modelId, timestamp, worldId } from './common.js';
 import { modelOutputAdmission, modelOutputAdmissionRequest } from './output.js';
+import { systemUseDecisionReference } from './systemUseDecision.js';
 
 export const MODEL_CALL_FAILURE_REASONS = [
   'provider-timeout',
@@ -11,6 +12,7 @@ export const MODEL_CALL_FAILURE_REASONS = [
   'malformed-response',
   'tool-calls-refused',
   'authorization-invalidated',
+  'system-use-invalidated',
 ] as const;
 export const modelCallFailureReason = z.enum(MODEL_CALL_FAILURE_REASONS);
 export type ModelCallFailureReason = z.infer<typeof modelCallFailureReason>;
@@ -41,6 +43,7 @@ const modelCallBinding = z.object({
   requested_id: modelId,
   projection_digest: hexDigest,
   projection_item_count: integer.min(0),
+  system_use_decision: systemUseDecisionReference,
   opened_at: timestamp,
   expires_at: timestamp,
 });
