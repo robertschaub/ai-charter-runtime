@@ -58,6 +58,14 @@ the specification assigns directly to output control. The fixed response and acc
 bindings, counts, tags, reasons, and digests—never model text—and state `authority_effect: none`. Provider and
 browser ingress remain closed, so this slice exposes no model response to a person and grants no action authority.
 
+**Amendment (M5.4 containment-only model turn, 2026-08-04):** the orchestrator edge composes the existing
+acting-projection and output-admission routes around one configured OpenAI-compatible adapter. It verifies the
+adapter's lane/requested-id identity before disclosure, accepts no caller-supplied messages or projection scope,
+and halts the lane on authorization, provider, protocol, binding, or withheld-output failure. An admitted result
+is copied into a process-private quarantine exposing metadata and destruction only—there is no content reader or
+release consumer. This coordinator is not wired into the native process or any HTTP/browser route; `/messages`
+remains `501`, and `runtime:start` still cannot initiate a provider call.
+
 ## Context
 
 Three OS processes make "the model proposes, a component outside the model decides, the executing service

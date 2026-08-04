@@ -83,5 +83,6 @@ describe('M5.3 deterministic output control', () => {
     const first = request();
     const second = request({ content: 'A different bounded synthetic response.' });
     expect(digestModelOutput(first, 'case_demo')).not.toBe(digestModelOutput(second, 'case_demo'));
+    expect(() => digestModelOutput(request({ content: '\ud800' }), 'case_demo')).toThrow();
   });
 });

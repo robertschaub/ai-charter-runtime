@@ -33,6 +33,14 @@ requires an in-tab evidence review before a model can be prepared, and polls a r
 receiving the question, contract, answer, or role credential. Model interaction remains closed with an explicit
 `501`. M5.3 supplies the authorization-owned output-admission boundary, but a later reviewed ingress slice must
 make its use mandatory before any provider response can reach this browser surface.
+The M5.4 candidate adds a headless `ModelTurnCoordinator`: it accepts only a configured card/version/requested-id
+tuple, fetches the current authorization-owned projection, invokes an injected adapter, and returns the raw result
+to authorization for M5.3 admission. An admitted result is copied into a process-private quarantine that exposes
+metadata and destruction only, with bounded entry and byte capacity; withheld output or any
+authority/provider/protocol/capacity failure adds no held-buffer entry and halts that lane for the coordinator
+lifetime. Real-listener tests use a synthetic loopback provider. The coordinator has no HTTP, browser,
+conversation-store, proposal, or runtime-process entry point, so this is containment plumbing rather than active
+provider ingress or output release.
 The applicant surface can also submit an extract-bound factual correction directly to authorization. The
 result is an append-only challenge plus a principal routing obligation and withdrawn-reliance marker, not a
 remedy decision or a mutation of the earlier effect record.

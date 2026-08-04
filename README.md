@@ -25,8 +25,9 @@ The exact upstream revision, digest, reviewed runtime baseline, and remaining mi
   isolation is separation of duties in miniature, not independence. M5.2 is reviewed at `1973515` with
   authorization-resolved acting projections and deterministic fixture-pinned screening. The M5.3 boundary was
   reviewed at `1cc7fb2`; it adds non-authorizing, access-recorded lexical output admission, but an admitted result
-  is not semantic red-line clearance. Provider ingress, browser messages, empathy triggers, and governed switching
-  are not active yet; no real model output reaches this boundary.
+  is not semantic red-line clearance. The M5.4 candidate adds a containment-only coordinator exercised against
+  a synthetic loopback provider; it is not wired into `runtime:start` or a browser/process route. Live provider
+  ingress, browser messages, empathy triggers, and governed switching are not active yet.
 - **A deterministic gate proves declared rules were applied** — not that the rules are lawful, fair, or legitimate.
 - **Commit-token window (interpretive choice).** Commitment binds at `commit-verify`; a revocation landing in the
   token's short TTL is too late for that action by definition. On the stricter reading of "authority in flight",
@@ -48,9 +49,9 @@ The exact upstream revision, digest, reviewed runtime baseline, and remaining mi
 | `docs/cards/` | Signed model cards (version-pinned evidence-registry artifacts) | M3 |
 | `tooling/probe.mjs` | M0 capability probe (endpoints, model ids, `tools`, `response_format`, latency, limits) | M0 |
 | `packages/gate-core/` | Authorization service — the independent gate (AGPL-3.0-only) | M2 |
-| `packages/adapters/` | OpenAI-compatible model adapters (MIT) | M3 |
+| `packages/adapters/` | OpenAI-compatible model adapters (MIT) | M3–M5 |
 | `packages/services-mock/` | Executing services with commitment verification (MIT) | M3 |
-| `packages/consoles/` | M3 deterministic loop, M4 orchestrator process, governance console, and case-session handoff assets (MIT) | M3–M4 |
+| `packages/consoles/` | M3 deterministic loop, M4 process/consoles, and M5 containment-only model-turn coordinator (MIT) | M3–M5 |
 | `fixtures/` | Synthetic grant-scenario data and pinned test fixtures (MIT) | M3+ |
 
 Licensing is per-directory — see [LICENSE.md](LICENSE.md).
@@ -102,7 +103,10 @@ proposal hash and gate. M5.3 was implementation-reviewed at `1cc7fb2`; it recomp
 accepting a synthetic model-output claim, checks current mandate/card and requested-versus-served model identity,
 derives turn-level restriction tags inside authorization, and records only decision metadata and digests. Its
 narrow lexical checker can miss paraphrases, so admission is not a semantic safety clearance. It returns no ruling
-or token, makes no provider call, leaves the browser route at `501`, and does not complete M5.
+or token, makes no provider call, leaves the browser route at `501`, and does not complete M5. The M5.4 candidate
+connects an authorization projection to a synthetic loopback adapter and returns the response to authorization;
+an admitted result is held behind a process-private metadata/destroy-only quarantine with no release path. This
+coordinator is not constructed by the runtime process, so `runtime:start` still makes no provider call.
 
 Offline and deterministic verification uses synthetic records and skips only the remote-presence step:
 

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 export * from './verticalSlice.js';
 export * from './runtimeHttpClients.js';
+export * from './modelTurnCoordinator.js';
 export * from './caseSessionStore.js';
 export * from './caseConsoleState.js';
 export * from './orchestratorHttpServer.js';

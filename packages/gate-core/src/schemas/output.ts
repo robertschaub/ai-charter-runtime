@@ -26,6 +26,20 @@ export const MODEL_OUTPUT_CONTROL_FLAGS = ['model_resolution_unrecorded'] as con
 export const modelOutputControlFlag = z.enum(MODEL_OUTPUT_CONTROL_FLAGS);
 export type ModelOutputControlFlag = z.infer<typeof modelOutputControlFlag>;
 
+function isWellFormedUnicode(value: string): boolean {
+  for (let index = 0; index < value.length; index += 1) {
+    const unit = value.charCodeAt(index);
+    if (unit >= 0xd800 && unit <= 0xdbff) {
+      const next = value.charCodeAt(index + 1);
+      if (!(next >= 0xdc00 && next <= 0xdfff)) return false;
+      index += 1;
+    } else if (unit >= 0xdc00 && unit <= 0xdfff) {
+      return false;
+    }
+  }
+  return true;
+}
+
 export const modelOutputAdmissionRequest = z
   .object({
     turn_id: id,
@@ -36,7 +50,11 @@ export const modelOutputAdmissionRequest = z
     requested_id: modelId,
     served_id: modelId,
     projection_digest: hexDigest,
-    content: z.string().min(1).max(MAX_MODEL_OUTPUT_CHARS),
+    content: z
+      .string()
+      .min(1)
+      .max(MAX_MODEL_OUTPUT_CHARS)
+      .refine(isWellFormedUnicode, 'model output must be well-formed Unicode'),
   })
   .strict();
 

@@ -85,6 +85,12 @@ M5.3 exercises this comparison on the strict output-admission boundary. The mode
 domain together with the current case/turn/projection and approval references; only that digest and the fixed
 comparison metadata enter the access record. This is the first native quarantine seam, not provider ingress.
 
+M5.4 adds the containment-only caller of that seam. The configured adapter's lane and requested id must match
+the selected card binding before projection disclosure. A valid but substituted served id reaches M5.3 and is
+durably recorded as withheld; the coordinator adds no quarantine entry and halts the lane. Timeout, malformed
+provider evidence, null content, or tool calls also halt without fallback, but this bounded slice adds no separate
+durable provider-failure event. That remaining record integration, process wiring, and any release policy stay deferred.
+
 ### 4. How mandates reference cards
 Each approved-model entry is role-scoped and pins `card_version` **and** `card_digest`. The digest is taken over **exactly the signed bytes** — the canonical card minus its `signature` block, `model-card` domain — so digest equality means signed-content equality, and re-signing a card under a rotated key leaves the digest untouched:
 

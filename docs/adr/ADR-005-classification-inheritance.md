@@ -102,6 +102,9 @@ clearance server-owned. The caller supplies only exact mandate/card approval ide
 caller-supplied projection scope or effective clearance remains an authority bypass.
 M5.3 binds model-output admission to `H_conversation-projection(projection)` and derives the turn-level union
 inside authorization. The admission result has no action-authority effect and is not itself a store write.
+M5.4 passes only that freshly resolved projection to a configured adapter and seals admitted bytes under the
+returned server-derived union. It exposes no store-write or release consumer, so it neither persists a derived
+item nor creates a path for the model or caller to narrow the inherited tags.
 
 ### 6. Screening projections
 Screening carries the same tags and the same check, against the **screening-role** clearance set — permission to screen is not permission to act. Order: minimize first (the suspect input item only, not the case file), then subset-check. If the suspect item is not disclosable to any configured screening provider, no call is made and `screening_skipped: disclosure_restricted` is recorded. Because a signal can only raise and never allow, the deterministic rules simply stand — except where the policy file marks screening as **required** for that action class, in which case the missing check escalates (fail closed).

@@ -140,6 +140,14 @@ export class OpenAiCompatibleAdapter {
     this.#fetch = fetchImplementation;
   }
 
+  get lane(): ModelLane {
+    return this.#config.lane;
+  }
+
+  get requestedId(): string {
+    return this.#config.requestedModel;
+  }
+
   async act(request: ActingRequest): Promise<ActingResponse> {
     if (!Number.isSafeInteger(request.maxOutputTokens) || request.maxOutputTokens <= 0) {
       throw new ModelAdapterError('invalid-config', 'maxOutputTokens must be a positive safe integer');

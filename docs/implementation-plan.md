@@ -57,7 +57,7 @@ distinguish an uncommitted latest checkpoint from confirmed remote rollback or m
 | M2 — transactional core | Implemented and fault-tested | Authorization remains the single durable serialization point; authority defects fail closed. |
 | M3 — vertical slice | Implemented | Deterministic authorize → propose → rule → commit-verify → effect → receipt path, adapters, service ledger, and signed cards are present. |
 | M4 — escalation + governance console | **Complete** | Final exact-SHA review of `e326562` returned GO with no findings; the offline acceptance ledger preserves the remaining partial and not-assessed boundaries. |
-| M5 — screening + empathy + switching | **In progress** | M5.1 is reviewed at `c1b5eb0`; M5.2 at `1973515`; M5.3 implementation at `1cc7fb2`, with its one Low wording finding closed in this documentation-only follow-up. Model ingress remains closed. |
+| M5 — screening + empathy + switching | **In progress** | M5.1 is reviewed at `c1b5eb0`; M5.2 at `1973515`; M5.3 implementation at `1cc7fb2`, with its Low wording finding closed at `2b7b45a`; M5.4 is a containment-only coordinator candidate. Runtime/browser ingress remains closed. |
 | M6–M7 | Not started | Full capture/publication work follows the implementation milestones. |
 
 These labels describe repository implementation status, not assurance, certification, or independent
@@ -265,6 +265,40 @@ documentation-only follow-up states that limitation at the implementation and st
 the reviewed gate, ADR, provenance pin, ACL, schema, projection, or safety restriction and does not require a
 recursive review round.
 
+### M5.4 implementation candidate — headless model-turn quarantine
+
+- `ModelTurnCoordinator` is an orchestrator-owned library seam with no HTTP or browser route. It is not
+  constructed by `orchestratorProcess`, so normal runtime startup cannot call a provider.
+- A turn names only its id, current mandate/card/requested-model references, and a bounded output-token count.
+  The coordinator chooses an exact configured adapter binding and refuses duplicated or mismatched lane identity
+  before any projection disclosure; the caller cannot supply messages, projection items, tags, or clearances.
+- Authorization re-resolves the current acting projection over its existing authenticated process route. Only
+  those whole projected items enter a fixed canonical model message; dropped items remain absent.
+- The provider result must contain bounded nonempty text, no tool calls, and the configured requested lane/id.
+  Admission rejects non-well-formed Unicode so canonical string binding and retained UTF-8 bytes cannot diverge.
+  The coordinator submits the exact content and provider-reported served id to M5.3 admission, then locally
+  recomputes and compares the admission binding before retaining anything.
+- `withheld`, provider substitution, revoked authority, timeout, malformed response, tool calls, binding mismatch,
+  duplicate turn, or any dependency failure adds no held-buffer entry and permanently halts that lane for the
+  coordinator lifetime. There is no endpoint/model fallback and no retry of the same turn.
+- A clean `admitted` result is still not release clearance. The raw UTF-8 copy is held only in a process-private,
+  single-assignment quarantine; its API exposes fixed metadata, existence, destruction, and clear operations but
+  no content read or consume method. Entry-count and byte ceilings bound retention; capacity failure halts the lane.
+  Destruction zeroes the held byte buffer before removal without claiming that JavaScript can erase prior
+  immutable-string copies.
+- Real-listener tests use the actual authorization HTTP routes plus a synthetic loopback OpenAI-compatible server.
+  They cover filtered disclosure, sealed admission, turn replay, served-model mismatch, literal red-line withholding,
+  unapproved selection before disclosure, revocation after disclosure, tool calls, malformed served evidence or
+  Unicode, lane halt, access metadata, and raw-output absence.
+- No live model is contacted; no conversation item, proposal, action authority, browser response, or generated
+  record is created. Provider-failure event recording, native process wiring, model switching, dialogue triggers,
+  and any output consumer/release policy remain deferred. M5 and demo beats 19–21 are not complete.
+
+Candidate validation is `npm run typecheck` clean plus 4 Git-safety hook tests and 300 Vitest tests across
+35 files, `git diff --check` clean, and both unchanged signed cards verified. The upstream specification pin is
+unchanged: M5.4 implements the existing per-provider projection and provider-substitution containment path and
+adds no new governance semantics.
+
 ## Resolved browser credential-handoff protocol
 
 The normative decision is pinned above at Charter commit `00c32f5`: a user-initiated authorization-origin
@@ -282,11 +316,12 @@ authorization route. The bounded handoff and session implementation was independ
 
 ## Ordered next slices
 
-1. **Stop after the M5.3 review and documentation-only finding closure.** Do not start provider ingress,
-   browser messages, conversation-item persistence, empathy/model switching, or live output release without a
-   separately approved bounded slice.
-2. **Carry the detector limit into ingress design.** A future proposal must treat digest-bound lexical admission
-   as necessary but not sufficient for release and define its additional policy before any output reaches a person.
+1. **Exact-SHA adversarial review of M5.4** — verify configuration binding before disclosure, mandatory fresh
+   projection and output admission, local digest re-check, destroy-only quarantine, lane halt, raw-output absence,
+   and the absence of runtime/browser/process wiring or release.
+2. **Stop after review.** Do not add provider-failure records, native process wiring, browser messages,
+   conversation-item persistence, empathy/model switching, or any output consumer without a separately approved
+   bounded slice. Any future release proposal must treat lexical admission as necessary but not sufficient.
 
 Substantive tranches are committed and reviewed at bounded integration points. A documentation-only status
 acknowledgement does not trigger a recursive review round; changes to ADRs, gates, invariants, ACLs,
