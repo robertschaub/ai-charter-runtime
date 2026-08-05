@@ -80,7 +80,7 @@ results, validity, and accountability-role availability. It exposes no evidence 
 mutation control, trust badge, aggregate score, certification, or action-authority result and inherits the
 console's strict self-only CSP, `frame-ancestors 'none'`, no third-party code, no cookies, and no CORS.
 
-**Proposed amendment (M5.7 headless selection protocol, 2026-08-05):** authorization adds one fixed current
+**Amendment (M5.7 headless selection protocol, reviewed at `442397a`, 2026-08-05):** authorization adds one fixed current
 selection read, one boot-bound single-use card-evidence check, and one append-only case selection transition for
 `proc:orchestrator`. All are Origin-guarded, access-recorded, and non-authorizing; the writes are strict-body.
 The select operation can consume only an exact current check and is monotonically authority-narrowing: it may

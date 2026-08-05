@@ -32,8 +32,8 @@ The exact upstream revision, digest, reviewed runtime baseline, and remaining mi
   M5.6 is reviewed at `b57c01e`; it adds an authorization-owned, replayable system-use decision prerequisite and a
   principal-only read view. Approval is necessary for the synthetic use but never sufficient for an action.
   The authorization gate and principal read view are wired into `runtime:start`; model-turn provider ingress,
-  browser mutation/message ingress, and an output-release consumer are not. The M5.7 implementation candidate
-  adds replayable headless selection and switching through orchestrator-authenticated authorization routes, but
+  browser mutation/message ingress, and an output-release consumer are not. M5.7, reviewed at `442397a`, adds
+  replayable headless selection and switching through orchestrator-authenticated authorization routes, but
   `runtime:start` has no caller for them and the browser path remains closed. Empathy triggers are also inactive.
 - **A deterministic gate proves declared rules were applied** — not that the rules are lawful, fair, or legitimate.
 - **Commit-token window (interpretive choice).** Commitment binds at `commit-verify`; a revocation landing in the
@@ -126,11 +126,11 @@ id/version/digest, bounded status/condition
 facts, and current-at-record results; evidence packs and rationale stay out of runtime records. A transition
 invalidates outstanding rulings and blocks post-provider admission without releasing or persisting the output.
 The principal view is read-only evidence, not a trust score, certification, legal approval, or action authority.
-The M5.7 implementation candidate replaces the legacy proposal-time selection marker with one append-only,
+M5.7, reviewed at `442397a`, replaces the legacy proposal-time selection marker with one append-only,
 authorization-owned current selection per configured case. Boot-bound single-use checks precede initial selection
 or switching; selection identity binds calls, admission, proposals, rulings, and commitment verification. A switch
 atomically retires unresolved prior-lane rulings and calls, while served identity is appended only from confirmed
-terminal call evidence. This candidate remains pending exact-SHA adversarial review and adds no browser selection,
+terminal call evidence. The reviewed implementation adds no browser selection,
 native provider ingress, conversation ingestion, output release, live probe, or M6 path.
 
 Offline and deterministic verification uses synthetic records and skips only the remote-presence step:

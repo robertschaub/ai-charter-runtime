@@ -15,7 +15,7 @@ may state only timeout, unavailable, malformed response, tool-call refusal, or a
 bounded disclosure/served-model metadata. An interrupted call remains indeterminate after recovery; it is neither
 retried nor represented as successful.
 
-**Proposed amendment (M5.7 governed selection, 2026-08-05):** the mandate HMAC binds an explicit
+**Amendment (M5.7 governed selection, reviewed at `442397a`, 2026-08-05):** the mandate HMAC binds an explicit
 `default_acting_model` that exactly matches one approved acting entry. Authorization issues a short-lived
 single-use check over the current signed card before accepting an initial selection or switch. The append-only
 transition records requested target/card/key evidence; served identity is appended only later from confirmed

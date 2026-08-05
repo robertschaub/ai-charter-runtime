@@ -33,7 +33,7 @@ version and releases its reservations; ruling issuance lazily resolves the curre
 usable mandate exists may carry a null decision reference because it creates no case, reservation,
 commitment, or effect; an `allow` or `escalate` ruling may not.
 
-**Proposed amendment (M5.7 governed model selection, 2026-08-05):** ADR-009 gives each case one append-only
+**Amendment (M5.7 governed model selection, reviewed at `442397a`, 2026-08-05):** ADR-009 gives each case one append-only
 current `selection_id`. A switch atomically consumes its exact evidence-check reference, appends the successor
 selection, invalidates affected issued rulings, releases their reservations, and terminalizes open prior-lane
 model calls with the distinct `selection-invalidated` reason and evidence-derived `possible` disclosure when no

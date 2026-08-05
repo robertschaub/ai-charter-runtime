@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: CC-BY-4.0 -->
 # ADR-009 — Governed model selection and switching
 
-**Status:** definition accepted at `4611843`; implementation candidate pending exact-SHA review (2026-08-05).
+**Status:** accepted; implementation reviewed at `442397a` with GO — no findings (2026-08-05).
 **Spec:** §3 (case-console model picker),
 §4 (mandate, ruling, and model-card bindings), §5 (model navigation and selection), §7 beats 14 and 19–21,
 and §10 M5.
@@ -150,7 +150,7 @@ For a switch, it:
 transaction, must carry `provider_disclosure: possible` with a null served id, and is rejected on the caller-facing
 `POST /model-calls/failures` request. The implementation therefore separates caller-reportable failure reasons from
 the durable/internal reason vocabulary. Adding that durable reason and refinement is a substantive amendment to
-the frozen M5.5 call schema; the separately reviewed M5.7 implementation SHA must carry the schema change and its
+the frozen M5.5 call schema; the reviewed M5.7 implementation SHA carries the schema change and its
 tests explicitly. It does not weaken M5.5's rule that existing `authorization-invalidated`, malformed-response,
 and tool-call-refusal failures are post-response and therefore require confirmed disclosure.
 
@@ -192,7 +192,7 @@ reservation, raw output, prompt, credential, or record payload. Access evidence 
 and digests. Card fields remain factual `self-declared` or `probe-tested` evidence—never a score, trust badge,
 certification, legal approval, conformity result, or recommendation.
 
-The M5.7 implementation candidate deletes the old proposal-time `recordModelSelection(proposal)` API and the
+The reviewed M5.7 implementation deletes the old proposal-time `recordModelSelection(proposal)` API and the
 served-id-bearing `model.select` WAL operation, state projection, and tests. The exported M3 deterministic
 vertical-slice harness is rewired to perform the new check/select lifecycle before its synthetic provider call
 and to thread the returned selection id through the new call/proposal/ruling bindings. At reviewed baseline

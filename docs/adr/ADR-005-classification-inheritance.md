@@ -23,7 +23,7 @@ result it derives `U` from every projected item and returns that sorted union as
 cannot supply case, role, items, tags, clearances, or a store operation. This slice persists no derived item and
 opens no model/browser ingress, so later ingestion must consume this server-derived union without narrowing it.
 
-**Proposed amendment (M5.7 governed selection, 2026-08-05):** ADR-009 makes one authorization-owned
+**Amendment (M5.7 governed selection, reviewed at `442397a`, 2026-08-05):** ADR-009 makes one authorization-owned
 `selection_id` current for the configured case. A fresh model call derives its target and recomputes its projection
 from that selection; callers no longer choose the card tuple on model-call begin. A switch invalidates prior work,
 and every later admission, proposal, ruling, and commitment rejects the stale selection. The headless slice still
