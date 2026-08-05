@@ -15,6 +15,12 @@ may state only timeout, unavailable, malformed response, tool-call refusal, or a
 bounded disclosure/served-model metadata. An interrupted call remains indeterminate after recovery; it is neither
 retried nor represented as successful.
 
+**Proposed amendment (M5.7 governed selection, 2026-08-05):** the mandate HMAC binds an explicit
+`default_acting_model` that exactly matches one approved acting entry. Authorization issues a short-lived
+single-use check over the current signed card before accepting an initial selection or switch. The append-only
+transition records requested target/card/key evidence; served identity is appended only later from confirmed
+model-call evidence and can never select a substitute.
+
 ## Context
 Cards are the v0 evidence registry: signed JSON in git, bound to the pinned deployed version, every field marked self-declared or probe-tested — never independently attested. The trust root is a public verification key in this repo; the private key stays local. The mandate governs disclosure; a card can narrow but never widen it.
 
@@ -119,6 +125,11 @@ Each approved-model entry is role-scoped and pins `card_version` **and** `card_d
   "data_classes": { "acting": ["conf:public","conf:case","purpose:grant-assessment"],
                     "screening": ["conf:public","purpose:grant-assessment"] } }
 ```
+
+The mandate also names one exact `default_acting_model` reference `{card_id, card_version, requested_id}`.
+It must match an entry above with the `acting` role. This implements the specification's rule that the default
+comes from the mandate, not array order or software configuration. The reference adds no second digest: the
+matching approved entry already carries the HMAC-bound card digest and role permissions.
 
 Effective disclosure = `mandate.data_classes[role] ∩ card.declared_data_classes[role]` (ADR-005 §5). Because the intersection is recomputed per projection, **a card update can only ever shrink effective disclosure** — a widened card field is inert unless the principal separately amends the mandate.
 

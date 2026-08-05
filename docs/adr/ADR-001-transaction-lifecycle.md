@@ -33,6 +33,13 @@ version and releases its reservations; ruling issuance lazily resolves the curre
 usable mandate exists may carry a null decision reference because it creates no case, reservation,
 commitment, or effect; an `allow` or `escalate` ruling may not.
 
+**Proposed amendment (M5.7 governed model selection, 2026-08-05):** ADR-009 gives each case one append-only
+current `selection_id`. A switch atomically consumes its exact evidence-check reference, appends the successor
+selection, invalidates affected issued rulings, releases their reservations, and terminalizes open prior-lane
+model calls without fabricating confirmed disclosure. Model-call, proposal, and ruling bindings carry the
+selection id; `commit-verify` compares current selection as the lazy backstop. An `A → B → A` sequence therefore
+cannot revive authority issued under the earlier A selection.
+
 ## Context
 
 The authorization service is the single serialization point. Commitment is two-phase: `commit-verify`
@@ -154,17 +161,19 @@ class, nonce, validity window — plus the policy version and policy content dig
 (§4's invalidation rule names policy version, so it is part of what is re-checked), and the card digest
 and verifying `key_id` behind the acting-model entry (ADR-006), and the exact current system-use decision
 `{decision_id, version, record_digest}` (ADR-008). The full bounded decision reference also records its
-approved status and mechanically evaluated condition results; no evidence pack or rationale enters a ruling.
+approved status and mechanically evaluated condition results. M5.7 additionally carries ADR-009's current
+`selection_id` as protocol binding, so returning to the same acting model cannot revive an earlier ruling.
+No evidence pack or rationale enters a ruling.
 
 Invalidation is **eager and lazy**, deliberately redundant:
 
-- *Eager:* a mandate amend/revoke, policy reload, model-set change, or terminal/superseding system-use
+- *Eager:* a mandate amend/revoke, policy reload, model-set change, governed model switch, or terminal/superseding system-use
   transition marks every affected `issued` ruling
   bound to the superseded value `invalidated` **in the same transaction**. Because both that transaction
   and `commit-verify` need the same world mutex, they cannot interleave.
-- *Lazy:* ruling issuance resolves the exact system-use record, and `commit-verify` re-reads every
-  binding-tuple element—including decision currentness, digest, scope, validity, and hard conditions—before consuming the
-  nonce. A missed sweep therefore still fails closed.
+- *Lazy:* ruling issuance resolves the exact selection and system-use record, and `commit-verify` re-reads every
+  binding-tuple element—including selection identity and decision currentness, digest, scope, validity, and hard
+  conditions—before consuming the nonce. A missed sweep therefore still fails closed.
 
 The mid-flight-revocation test has exactly two admissible outcomes, decided by mutex acquisition order:
 revocation first → the ruling is invalid, deny; `commit-verify` first → the effect stands and is recorded.

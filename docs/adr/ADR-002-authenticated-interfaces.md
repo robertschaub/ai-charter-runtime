@@ -80,6 +80,13 @@ results, validity, and accountability-role availability. It exposes no evidence 
 mutation control, trust badge, aggregate score, certification, or action-authority result and inherits the
 console's strict self-only CSP, `frame-ancestors 'none'`, no third-party code, no cookies, and no CORS.
 
+**Proposed amendment (M5.7 headless selection protocol, 2026-08-05):** authorization adds one fixed current
+selection read, one boot-bound single-use card-evidence check, and one append-only case selection transition for
+`proc:orchestrator`. All are Origin-guarded, access-recorded, and non-authorizing; the writes are strict-body.
+The select operation can consume only an exact current check, cannot change the mandate's approved set, and
+returns no ruling, nonce, reservation, token, or output. Browser selection and native provider ingress remain
+closed.
+
 ## Context
 
 Three OS processes make "the model proposes, a component outside the model decides, the executing service
@@ -172,6 +179,9 @@ Authorization service, all data routes under `/w/{world_id}/…`:
 | `POST /model-calls/begin` (durably bind one attempt, then return its authorization-resolved projection) | `proc:orchestrator` only; non-authorizing, Origin-guarded, and access-recorded |
 | `POST /model-outputs/admit` (consume the call reference and classify one bounded model result) | `proc:orchestrator` only; non-authorizing, Origin-guarded, and access-recorded |
 | `POST /model-calls/failures` (consume the call reference with fixed failure metadata) | `proc:orchestrator` only; non-authorizing, Origin-guarded, and access-recorded |
+| `GET /cases/{case_id}/model-selection` (current selection and latest confirmed observation) | `proc:orchestrator` only; non-authorizing, Origin-guarded, and access-recorded |
+| `POST /cases/{case_id}/model-selection-checks` (resolve one exact card-evidence check) | `proc:orchestrator` only; non-authorizing, Origin-guarded, access-recorded, maximum five-minute boot-bound reference |
+| `POST /cases/{case_id}/model-selections` (consume a check and append the current selection) | `proc:orchestrator` only; non-authorizing, Origin-guarded, and access-recorded |
 | `GET /rulings/{id}` (status projection, §7) | `proc:orchestrator` (own submissions), `proc:services_host` |
 | `GET /mandates/{id}/approved-models` (picker and principal card-evidence source, card-verified) | `proc:orchestrator`, `role:principal`, `role:case_officer` |
 | `POST /case-session-handoffs` (mint; adapter `authorityChanging: true`, `originGuarded: true`) | **`role:case_officer` only** |
@@ -226,10 +236,11 @@ Services host: `POST /w/{w}/services/{service}/execute` `proc:orchestrator`;
 `commit-verify`, effect outcomes, and reconciliation probes carry both the current services-host boot id
 and the persistent services-ledger id; only absence under the same ledger id can release a commitment.
 
-**The orchestrator's process credential appears on exactly eight gate/data routes plus the dedicated
-case-session-handoff redemption route.** The eight are proposal submission, model-call begin,
+**The orchestrator's process credential appears on exactly eleven gate/data routes plus the dedicated
+case-session-handoff redemption route.** The eleven are proposal submission, model-call begin,
 model-output admission, model-call failure,
-revised-proposal continuation, ruling read, approved-model read, and the read-only escalation mirror ADR-004
+model-selection read, model-selection check, model selection, revised-proposal continuation, ruling read,
+approved-model read, and the read-only escalation mirror ADR-004
 §7 requires. Redemption
 returns only `{handoff_id, role, world_id, case_id, target_origin, authorization_boot_id, consumed_at}`
 after atomic consumption; it is an
@@ -408,6 +419,13 @@ allowlist projection**, decided per route and per credential:
   access chain before return;
 - model-call failure → the terminal lifecycle binding plus `failed`, the fixed reason, `possible | confirmed`
   provider-disclosure state, and nullable served-model id. It contains no raw response or error detail;
+- model-selection read → the current transition plus its latest confirmed observation, or explicit unselected
+  state. It exposes no check history, raw output, or authority-bearing object;
+- model-selection check → one exact current card-evidence projection plus a boot-bound check reference carrying
+  only case/mandate/target/card-key/system-use bindings, expected predecessor, issue time, and expiry;
+- model selection → the append-only transition projection plus invalidated-ruling and terminalized-open-call
+  counts. It states `authority_effect: "none"` and contains no prompt, model output, ruling, nonce, reservation,
+  commit token, or credential;
 
 - approved models → for the orchestrator, case officer, and principal, the mandate id/version/state and
   acting-role entries only, each carrying its pinned
@@ -484,6 +502,12 @@ case or tag scope is rejected; stale projection or authority evidence fails clos
 and the deterministic feelings/dependency red lines withhold; and raw admitted or rejected text appears in
 neither response nor access record. The case-message route remains `501`, making the not-yet-implemented
 digest-to-release binding unreachable rather than silently optional.
+
+**Required with M5.7 implementation.** Real-listener tests must prove all three selection routes reject every
+non-orchestrator credential and foreign Origin, accept no caller-supplied mandate/card-currentness/system-use or
+served-model fact, consume a check once, enforce exact case/predecessor/expiry bindings, and access-record success
+and refusal without output or credentials. The existing negative-authorization enumeration must include all
+three routes, while the browser message route remains `501`.
 
 **Required with the browser handoff implementation.** Real-listener tests cover exact-origin/exact-window
 message acceptance and wrong/opaque origin or wrong-window refusal; mint-role confinement; absence from URLs,

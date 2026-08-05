@@ -23,6 +23,12 @@ result it derives `U` from every projected item and returns that sorted union as
 cannot supply case, role, items, tags, clearances, or a store operation. This slice persists no derived item and
 opens no model/browser ingress, so later ingestion must consume this server-derived union without narrowing it.
 
+**Proposed amendment (M5.7 governed selection, 2026-08-05):** ADR-009 makes one authorization-owned
+`selection_id` current for the configured case. A fresh model call derives its target and recomputes its projection
+from that selection; callers no longer choose the card tuple on model-call begin. A switch invalidates prior work,
+and every later admission, proposal, ruling, and commitment rejects the stale selection. The headless slice still
+persists no model output and opens no release consumer.
+
 ## Context
 Derived content inherits the **union of the restriction tags** of its inputs — a set over confidentiality, purpose and recipient, not a scalar level. Projection to a provider is a subset check against the mandate ∩ card permissions for that provider's **role** (acting or screening); membership in the approved-model set authorizes acting, not blanket disclosure.
 
@@ -94,6 +100,8 @@ Every projection records a summary in the ruling's evidence refs (no new record 
 ```
 
 A switch additionally invalidates all prior rulings by the §4 binding rule (acting-model id is in the binding tuple).
+ADR-009 strengthens this with a selection id, because an `A → B → A` sequence must not make a ruling from the
+first A current again. The switch transition and invalidation share one world-locked WAL transaction.
 
 M5.1 implements the pure projection core and its fixed output schema: one world, one case, one card slug and
 role, included whole items, and an exact summary of dropped ids and unmet tags. M5.2 wires the acting role
