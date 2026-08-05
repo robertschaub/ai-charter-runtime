@@ -1,7 +1,8 @@
 <!-- SPDX-License-Identifier: CC-BY-4.0 -->
 # ADR-010 — Browser-initiated governed model selection
 
-**Status:** proposed; M5.8 definition candidate pending exact-SHA review (2026-08-05).
+**Status:** definition accepted at `85fef1f` after exact-SHA review returned GO — no findings; implementation not
+started (2026-08-05).
 **Spec:** §3 (case console and demo authentication), §5 (model navigation and **find → check → use**),
 §7 beats 19–21, and §10 M4–M5.
 
