@@ -45,8 +45,9 @@ reloads and verifies the signed card, intersects mandate and card clearances, an
 orchestrator-only acting projection for the configured case. Screening projects only fixture-named suspect
 proposal items under the screening role. Fixtures are keyed by exact proposal hash and gate; absent,
 mismatched, unavailable, or restricted evidence records a skipped check and required screening escalates.
-M5.3, implementation-reviewed at `1cc7fb2`, adds strict authorization-owned output admission. M5.5 makes the
-durable call lifecycle the only process/service path to that admission: an Origin-guarded orchestrator route
+M5.3, implementation-reviewed at `1cc7fb2`, adds strict authorization-owned output admission. M5.5, reviewed at
+`1d992fa`, makes the durable call lifecycle the only process/service path to that admission: an Origin-guarded
+orchestrator route
 atomically records a single-use call binding before returning the current acting projection, and completion
 recomputes that projection before admitting model output. Served-model mismatch or a configured
 lexical match for either output-enforced empathy red line withholds the output; obvious paraphrases can remain
@@ -56,4 +57,8 @@ Timeout, outage, malformed response, tool-call refusal, and authorization invali
 failure classes. Missing, expired, replayed, mismatched, or previous-boot references fail closed; an interrupted
 attempt replays as open and indeterminate and cannot be resumed or replaced for that turn. The native process
 makes no model-provider call and the browser message route remains closed.
+M5.6, reviewed at `b57c01e`, adds the authorization-owned, append-only system-use decision prerequisite. Exact
+configuration, policy, signed-card, role, data-class, validity, and hard-condition bindings are rechecked at case,
+model-call, ruling, commitment, record, and receipt boundaries. A transition invalidates unresolved rulings and
+blocks output admission, but it cannot mint authority or rewrite an already committed effect.
 Run `npm test` and `npm run typecheck` from the repository root.

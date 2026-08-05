@@ -42,13 +42,16 @@ authority/provider/protocol/capacity failure adds no held-buffer entry and halts
 lifetime. Real-listener tests use a synthetic loopback provider. The coordinator has no HTTP, browser,
 conversation-store, proposal, or runtime-process entry point, so this is containment plumbing rather than active
 provider ingress or output release.
-The M5.5 candidate makes the authorization-owned call reference mandatory around that flow. Before the adapter
-can receive projected items, authorization durably records the exact turn, mandate, card, requested model, case,
-and projection digest. Admission or a fixed failure report consumes that boot-bound reference once. Provider
+M5.5, reviewed at `1d992fa`, makes the authorization-owned call reference mandatory around that flow. Before the
+adapter can receive projected items, authorization durably records the exact turn, mandate, card, requested model,
+case, and projection digest. Admission or a fixed failure report consumes that boot-bound reference once. Provider
 timeout, outage, malformed response, tool calls, and post-response authority invalidation record bounded metadata
 only; reporting failure never includes provider text or error detail. If reporting is interrupted, the durable
 attempt stays indeterminate and the lane remains halted. The coordinator is still not mounted by the native
 runtime or exposed to a browser, and the quarantine still has no output-release path.
+M5.6, reviewed at `b57c01e`, adds an authorization-derived `system-use-invalidated` terminal outcome when the
+bound decision changes after provider disclosure. The coordinator retains no output and halts the lane;
+authorization, not the caller, derives confirmed disclosure from the served output-admission request.
 The applicant surface can also submit an extract-bound factual correction directly to authorization. The
 result is an append-only challenge plus a principal routing obligation and withdrawn-reliance marker, not a
 remedy decision or a mutation of the earlier effect record.

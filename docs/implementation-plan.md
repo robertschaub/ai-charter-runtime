@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: CC-BY-4.0 -->
 # Runtime implementation plan
 
-**Status date:** 2026-08-04
+**Status date:** 2026-08-05
 
 **Current milestone:** M4 complete; M5 implementation is in progress.
 
@@ -31,12 +31,14 @@ URLs, commit, paths, and digests above. A later upstream change does not silentl
 ## Reviewed implementation baseline
 
 The latest cross-model adversarially reviewed implementation is
-`1d992fa16c99decd1912c2bf7af60f3dc03ca7a2` (`1d992fa`). It closes the M5.5 custom-adapter robustness
-finding by making malformed-response parsing and evidence derivation total; focused re-review returned
-**GO — finding closed, no new findings**. The reviewed M5.5 tranche reproduced `npm run typecheck`,
-4 Git-safety hook tests, 305 Vitest tests across
-35 files, `git diff --check`, and verification of both unchanged signed cards. The published baseline remains
-M5.2 at `1973515`; later reviewed commits remain local until the maintainer decides to push.
+`b57c01eff9ee82e59ca73e8d82bd645645a54809` (`b57c01e`). The first exact-SHA review of the M5.6
+implementation at `da548b2` returned **NO-GO** on caller-asserted confirmed disclosure, reconstructed
+record-time currentness, and inaccurate README wiring language. The focused correction at `b57c01e`
+derives disclosure and currentness inside authorization and corrects the wiring description; re-review returned
+**GO — all findings closed, no new findings**. Validation reproduced `npm run typecheck`, 4 Git-safety hook
+tests, 319 Vitest tests across 36 files, `git diff --check`, and verification of both unchanged signed cards.
+The published baseline remains M5.2 at `1973515`; subsequent reviewed implementation and status commits remain
+local until the maintainer decides to push.
 
 The final M4 acceptance review at `e326562f6c29fe2fc625a18127517163d5665dcd` returned **GO — M4
 acceptance complete; no findings**. Review of `d25f366` had found one Medium asymmetric
@@ -58,7 +60,7 @@ distinguish an uncommitted latest checkpoint from confirmed remote rollback or m
 | M2 — transactional core | Implemented and fault-tested | Authorization remains the single durable serialization point; authority defects fail closed. |
 | M3 — vertical slice | Implemented | Deterministic authorize → propose → rule → commit-verify → effect → receipt path, adapters, service ledger, and signed cards are present. |
 | M4 — escalation + governance console | **Complete** | Final exact-SHA review of `e326562` returned GO with no findings; the offline acceptance ledger preserves the remaining partial and not-assessed boundaries. |
-| M5 — screening + empathy + switching | **In progress** | M5.1 is reviewed at `c1b5eb0`; M5.2 at `1973515`; M5.3 at `1cc7fb2`, with its Low wording finding closed at `2b7b45a`; M5.4 at `b247d5b`; M5.5 durable call evidence and its correction are reviewed at `1d992fa`. A post-M5.5 M5.6 system-use-decision candidate is implemented but not yet exact-SHA reviewed. Runtime/browser/provider ingress remains closed. |
+| M5 — screening + empathy + switching | **In progress** | M5.1 is reviewed at `c1b5eb0`; M5.2 at `1973515`; M5.3 at `1cc7fb2`, with its Low wording finding closed at `2b7b45a`; M5.4 at `b247d5b`; M5.5 durable call evidence at `1d992fa`; and M5.6 system-use decisions at `b57c01e`. Runtime/browser/provider ingress, output release, empathy triggers, and governed switching remain incomplete. |
 | M6–M7 | Not started | Full capture/publication work follows the implementation milestones. |
 
 These labels describe repository implementation status, not assurance, certification, or independent
@@ -301,7 +303,7 @@ Reviewed validation is `npm run typecheck` clean plus 4 Git-safety hook tests an
 unchanged: M5.4 implements the existing per-provider projection and provider-substitution containment path and
 adds no new governance semantics.
 
-### M5.5 implementation candidate — durable model-call lifecycle evidence
+### M5.5 implemented and reviewed at `1d992fa` — durable model-call lifecycle evidence
 
 - The authorization process removes its raw acting-projection route. `POST /w/{world_id}/model-calls/begin`
   atomically resolves the current mandate/card projection and appends a metadata-only `model_call.open` record
@@ -342,7 +344,7 @@ Reviewed validation is `npm run typecheck` clean plus 4 Git-safety hook tests an
 unchanged: this slice adds runtime provenance for the already specified model-call/disclosure boundary and does
 not change the Charter specification or its governance semantics.
 
-### M5.6 implementation candidate — system-use decision prerequisite
+### M5.6 implemented and reviewed at `b57c01e` — system-use decision prerequisite
 
 - Authorization owns a versioned, digest-bound, append-only system-use decision lineage. Startup loads one
   checked-in synthetic fixture through a `proc:authz`-only seam; no HTTP or browser mutation route exists.
@@ -354,7 +356,7 @@ not change the Charter specification or its governance semantics.
   transition eagerly invalidates issued rulings and releases their reservations; lazy reads and
   `commit-verify` remain backstops. A pre-mandate terminal denial records a null reference and creates no use
   or authority; allow/escalate records may not.
-- The M5.5 failure vocabulary adds the substantive review-surface candidate `system-use-invalidated`.
+- The M5.5 failure vocabulary adds the distinct terminal class `system-use-invalidated`.
   Disclosure stays evidence-derived: a post-provider admission refusal records `confirmed`; decision state
   alone never upgrades an indeterminate open call.
 - Model-call/access evidence, action records, commitments, effects, applicant extracts, and local receipts carry
@@ -369,11 +371,15 @@ not change the Charter specification or its governance semantics.
   eager invalidation, pre-commit prevention, post-call invalidation with no quarantine/conversation persistence,
   disclosure honesty, bounded projection privacy, console content, ACL, and access logging.
 
-This is an unreviewed candidate above the reviewed M5.5 baseline. It adds no live provider, native runtime,
-browser-message, output-release, model-switching, or M6 path and does not complete M5.
+The initial exact-SHA review at `da548b2` returned **NO-GO** on three bounded findings: the caller could assert
+confirmed disclosure for system-use invalidation, record-time currentness was reconstructed rather than captured,
+and the README understated native runtime wiring. The correction at `b57c01e` derives confirmed disclosure only
+from a served output-admission request, computes currentness when each record is authored, and states the runtime
+boundary accurately. Focused re-review returned **GO — findings closed, no new findings**.
 
-Candidate validation is `npm run typecheck` clean plus 4 Git-safety hook tests and 319 Vitest tests across
-36 files, `git diff --check` clean, and both unchanged signed cards verified.
+Reviewed validation is `npm run typecheck` clean plus 4 Git-safety hook tests and 319 Vitest tests across
+36 files, `git diff --check` clean, and both unchanged signed cards verified. M5.6 adds no live provider,
+browser-message, output-release, model-switching, or M6 path and does not complete M5.
 
 ## Resolved browser credential-handoff protocol
 
@@ -392,9 +398,12 @@ authorization route. The bounded handoff and session implementation was independ
 
 ## Ordered next slices
 
-1. **Exact-SHA review the bounded M5.6 candidate, then stop.** Do not begin further native process wiring,
-   browser messages, conversation-item persistence, empathy/model switching, or output consumer work. Any
-   future release proposal must treat lexical admission and system-use approval as necessary but not sufficient.
+1. **Review the complete publication range from `origin/main` through this status acknowledgement, then await the
+   maintainer's push decision.** Do not publish, run probes, change keys, or sign cards without explicit approval.
+2. **After publication, define M5.7 as a bounded governed model-selection/switch slice.** Keep it headless first:
+   authorization must resolve the current mandate, signed card, and system-use decision; record an append-only,
+   case-bound transition; invalidate unresolved work from the prior lane; and require fresh model-call and gate
+   checks. Keep browser/provider ingress and every output-release consumer closed. Do not begin M6.
 
 Substantive tranches are committed and reviewed at bounded integration points. A documentation-only status
 acknowledgement does not trigger a recursive review round; changes to ADRs, gates, invariants, ACLs,

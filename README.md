@@ -26,10 +26,10 @@ The exact upstream revision, digest, reviewed runtime baseline, and remaining mi
   authorization-resolved acting projections and deterministic fixture-pinned screening. The M5.3 boundary was
   reviewed at `1cc7fb2`; it adds non-authorizing, access-recorded lexical output admission, but an admitted result
   is not semantic red-line clearance. M5.4 is reviewed at `b247d5b`; it adds a containment-only coordinator
-  exercised against a synthetic loopback provider. The M5.5 candidate adds authorization-owned, durable,
-  metadata-only evidence for each such attempt before disclosure and for its terminal admission or fixed failure.
-  The post-M5.5 M5.6 candidate adds an authorization-owned, replayable system-use decision prerequisite and a
-  principal-only read view; approval is necessary for the synthetic use but never sufficient for an action.
+  exercised against a synthetic loopback provider. M5.5 is reviewed at `1d992fa`; it adds authorization-owned,
+  durable, metadata-only evidence for each attempt before disclosure and for its terminal admission or fixed failure.
+  M5.6 is reviewed at `b57c01e`; it adds an authorization-owned, replayable system-use decision prerequisite and a
+  principal-only read view. Approval is necessary for the synthetic use but never sufficient for an action.
   The authorization gate and principal read view are wired into `runtime:start`; model-turn provider ingress,
   browser mutation/message ingress, and an output-release consumer are not. Empathy triggers and governed
   switching are also inactive.
@@ -112,13 +112,15 @@ narrow lexical checker can miss paraphrases, so admission is not a semantic safe
 connects an authorization projection to a synthetic loopback adapter and returns the response to authorization;
 an admitted result is held behind a process-private metadata/destroy-only quarantine with no release path. This
 coordinator is not constructed by the runtime process, so `runtime:start` still makes no provider call. The M5.5
-candidate replaces the raw projection route with a single-use call lifecycle: authorization durably records the
-turn/mandate/card/model/projection binding before returning the projection, then records admitted, withheld, or a
-fixed failure class without raw output, prompts, provider errors, endpoints, or credentials. Expired, replayed,
+integration point reviewed at `1d992fa` replaces the raw projection route with a single-use call lifecycle:
+authorization durably records the turn/mandate/card/model/projection binding before returning the projection, then
+records admitted, withheld, or a fixed failure class without raw output, prompts, provider errors, endpoints, or
+credentials. Expired, replayed,
 mismatched, and previous-boot references fail closed; an unfinished attempt remains explicitly indeterminate after
 recovery. This evidence does not release output, call a live provider, or complete M5.
-The M5.6 candidate additionally requires one exact, current system-use decision at the case, model-call,
-ruling/commit, and record/receipt boundaries. It binds only decision id/version/digest, bounded status/condition
+M5.6, reviewed at `b57c01e` after its evidence-derivation correction, additionally requires one exact, current
+system-use decision at the case, model-call, ruling/commit, and record/receipt boundaries. It binds only decision
+id/version/digest, bounded status/condition
 facts, and current-at-record results; evidence packs and rationale stay out of runtime records. A transition
 invalidates outstanding rulings and blocks post-provider admission without releasing or persisting the output.
 The principal view is read-only evidence, not a trust score, certification, legal approval, or action authority.
