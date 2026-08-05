@@ -6,6 +6,11 @@
 §4 (mandate, ruling, and model-card bindings), §5 (model navigation and selection), §7 beats 14 and 19–21,
 and §10 M5.
 
+**Proposed amendment (M5.8 browser initiation, 2026-08-05):** ADR-010 binds the existing process protocol to
+an exact dynamic case session, a refreshed two-minute browser preparation, and a separate user selection gesture.
+Authorization check ids remain hidden, and the browser cannot supply the predecessor used for selection;
+case-session provenance is recorded only as a caller claim and never participates in authority.
+
 ## Context
 
 The specification makes selection within the mandate's approved acting-model set a case-level act. It must
@@ -235,7 +240,7 @@ M5.7 makes the selected lane authorization-owned and replayable without activati
 adds protocol state and invalidation work but no new authority and no new Charter semantics; the pinned upstream
 specification already requires this behaviour.
 
-Deferred to separately approved slices: dynamic browser selection, native provider ingress, admitted-output
-release and conversation ingestion, empathy-trigger completion, general multi-case binding, live provider runs,
-and M6 capture. No M5.7 operation runs probes, changes keys, signs cards, or edits generated/append-only production
-records.
+ADR-010 now proposes the separately reviewed dynamic browser-selection boundary; its implementation remains a
+separately approved slice. Also deferred: native provider ingress, admitted-output release and conversation
+ingestion, empathy-trigger completion, general multi-case binding, live provider runs, and M6 capture. No M5.7
+operation runs probes, changes keys, signs cards, or edits generated/append-only production records.

@@ -87,6 +87,13 @@ The select operation can consume only an exact current check and is monotonicall
 invalidate and release unresolved work, but cannot issue authority, change the mandate's approved set, or return
 a ruling, nonce, reservation, token, or output. Browser selection and native provider ingress remain closed.
 
+**Proposed amendment (M5.8 browser-initiated selection, 2026-08-05):** ADR-010 gives the orchestrator origin a
+dynamic-session-only current-selection mirror and two-step preparation/selection protocol. The browser supplies
+only an exact public target and then an unrelated preparation id; authorization check ids, the predecessor used
+for selection, and gate bindings stay server-held. Mutations require a present exact same Origin. Calls to
+authorization keep `proc:orchestrator` as the authenticated actor and record the server-derived case role/session
+only as `claimed_actor`, never as authority. Provider ingress, `/messages`, and output release remain closed.
+
 ## Context
 
 Three OS processes make "the model proposes, a component outside the model decides, the executing service
@@ -223,9 +230,13 @@ no-store origin projection and unauthenticated fixed assets, respectively; the e
 wildcard shell. `POST /w/{w}/case-sessions/redeem`
 accepts only the single-use handoff in a strict same-origin body and is explicitly
 `authorityChanging: false, originGuarded: true`: it creates authentication state but no action authority.
-`POST /w/{w}/cases/{id}/messages`,
-`GET /w/{w}/cases/{id}/state`, `GET /w/{w}/models`, and `POST /w/{w}/case-sessions/close` require the
-dynamic case-session bearer and re-check its exact role/world/case/expiry binding. The bounded headless
+`POST /w/{w}/cases/{id}/messages`, `GET /w/{w}/cases/{id}/state`, `GET /w/{w}/models`,
+`GET /w/{w}/cases/{id}/model-selection`,
+`POST /w/{w}/cases/{id}/model-selection-preparations`,
+`POST /w/{w}/cases/{id}/model-selections`, and `POST /w/{w}/case-sessions/close` require the
+dynamic case-session bearer and re-check its exact role/world/case/expiry binding. ADR-010's two selection
+mutations additionally require a present exact orchestrator Origin; all other browser routes continue to reject a
+present foreign or opaque Origin. The bounded headless
 transport seam `POST /w/{w}/actions/execute` continues to accept only the derived
 `ORCHESTRATOR_TOKEN_CASE_OFFICER`; browser sessions are denied there, and the static derived credential is
 denied on every browser case route.
@@ -509,6 +520,14 @@ served-model fact, consume a check once, enforce exact case/predecessor/expiry b
 and refusal without output or credentials. The existing negative-authorization enumeration must include all
 three routes; the caller-facing model-call failure route must reject the authorization-owned
 `selection-invalidated` reason, while the browser message route remains `501`.
+
+**Required with the proposed M5.8 implementation.** Real-listener tests must prove the three orchestrator-origin
+selection routes accept only an exact active dynamic case session; both mutations reject absent, foreign, and
+opaque Origin; static, role, process, handoff, expired, closed, wrong-world, and wrong-case credentials fail; strict
+bodies cannot assert check/predecessor/session/actor/authority facts; and browser responses omit hidden
+authorization bindings. The orchestrator must derive on-behalf-of headers from its session record, burn local
+preparations on replay/expiry/restart or dependency ambiguity, recover current selection from authorization, and
+leave provider ingress, conversation ingestion, output release, and `/messages` closed.
 
 **Required with the browser handoff implementation.** Real-listener tests cover exact-origin/exact-window
 message acceptance and wrong/opaque origin or wrong-window refusal; mint-role confinement; absence from URLs,
