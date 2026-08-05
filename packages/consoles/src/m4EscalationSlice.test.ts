@@ -11,6 +11,7 @@ import {
   AuthorizationHttpAdapter,
   bindMandate,
   CardRegistry,
+  ConversationProjectionService,
   digestFor,
   effectIntent,
   freezeProposal,
@@ -58,11 +59,12 @@ describe('M4 headless escalation slice', () => {
       now: () => now,
     });
     stores.push(store);
+    const systemUse = syntheticSystemUseForTests(store);
     const authorization = new AuthorizationCore({
       store,
       keyring,
       policy,
-      systemUse: syntheticSystemUseForTests(store),
+      systemUse,
       resolveAuthorizedAgent: (actor) => (actor.credential === 'proc:orchestrator' ? 'agent_demo' : undefined),
       resolveScreening: (proposal) => ({
         performed: true,
@@ -113,6 +115,26 @@ describe('M4 headless escalation slice', () => {
       },
     );
     expect(granted.status).toBe(201);
+    const projections = new ConversationProjectionService({
+      store,
+      cards: registry,
+      keyring,
+      caseId: 'case_beat_3',
+      authorizationBootId: 'authz_boot_m4',
+      screeningFixtures: [],
+      systemUse,
+      now: () => now,
+    });
+    const checked = await projections.checkSelection({
+      expected_current_selection_id: null,
+      target: boundMandate.default_acting_model,
+      actor: { credential: 'proc:orchestrator', claimed_role: null },
+    });
+    const selected = await projections.selectModel({
+      check_id: checked.check.check_id,
+      expected_current_selection_id: null,
+      actor: { credential: 'proc:orchestrator', claimed_role: null },
+    });
 
     const first = freezeProposal({
       world_id: 'w-demo',
@@ -131,6 +153,7 @@ describe('M4 headless escalation slice', () => {
       material_consequences: ['Synthetic public-funds assessment.'],
       reversibility_class: 'partially-reversible',
       commercial_influence: { applicable: false, note: 'Not applicable.' },
+      selection_id: selected.selection.selection_id,
       acting_model: {
         requested_id: 'swiss-ai/apertus-v1.5-70b',
         served_id: 'swiss-ai/apertus-v1.5-70b',

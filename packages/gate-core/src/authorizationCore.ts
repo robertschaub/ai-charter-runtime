@@ -38,6 +38,7 @@ import {
   type InterventionContract,
   type Mandate,
   type ModelCallAccessEvidence,
+  type ModelSelectionAccessEvidence,
   type PatternEvent,
   type RecordEntry,
   type ScreeningSignal,
@@ -279,7 +280,7 @@ export interface RecordAccessInput {
   readonly httpStatus: number;
   readonly recorder: TransactionActor;
   readonly readLengths?: Readonly<Record<string, number>>;
-  readonly operationEvidence?: ModelCallAccessEvidence;
+  readonly operationEvidence?: ModelCallAccessEvidence | ModelSelectionAccessEvidence;
   readonly suppressedCount?: number;
   readonly suppressionWindowMs?: number;
   readonly suppressionFinal?: boolean;
@@ -390,19 +391,6 @@ export type ReconcileCommitmentResult =
   | { readonly resolution: 'unknown'; readonly result: MarkUnknownResult }
   | { readonly resolution: 'already-terminal' };
 
-export interface RecordModelSelectionInput {
-  readonly caseId: string;
-  readonly proposal: FrozenProposal;
-  readonly actor: TransactionActor;
-}
-
-export type RecordModelSelectionResult =
-  | { readonly accepted: true; readonly selectionId: string }
-  | {
-      readonly accepted: false;
-      readonly defect: 'unauthorized-reporter' | 'model-quarantined' | 'model-not-approved';
-    };
-
 export type FrozenProposalBody = Omit<FrozenProposal, 'proposal_hash'>;
 
 export function freezeProposal(body: FrozenProposalBody): FrozenProposal {
@@ -510,6 +498,23 @@ function authorityDefects(
       entry.requested_id === input.proposal.acting_model.requested_id &&
       entry.roles.includes('acting'),
   );
+  const selection = state.modelSelections.get(input.proposal.selection_id);
+  if (
+    selection === undefined ||
+    state.currentModelSelectionByCase.get(selection.case_id) !== selection.selection_id ||
+    (input.caseId !== undefined && selection.case_id !== input.caseId) ||
+    selection.mandate_id !== input.proposal.mandate_ref.mandate_id ||
+    selection.mandate_version !== input.proposal.mandate_ref.version ||
+    selection.target.card_id !== input.proposal.acting_model.card_id ||
+    selection.target.card_version !== input.proposal.acting_model.card_version ||
+    selection.target.requested_id !== input.proposal.acting_model.requested_id ||
+    selection.target.card_digest !== approved?.card_digest ||
+    (modelEvidence.cardStatus === 'current' &&
+      (selection.target.card_digest !== modelEvidence.cardDigest ||
+        selection.target.verifying_key_id !== modelEvidence.cardKeyId))
+  ) {
+    defects.push('stale-selection');
+  }
   if (approved === undefined || !modelEvidence.servedModelAccepted) defects.push('substituted-model');
   if (
     modelEvidence.cardStatus === 'withdrawn' ||
@@ -1073,70 +1078,6 @@ export class AuthorizationCore {
     });
   }
 
-  async recordModelSelection(input: RecordModelSelectionInput): Promise<RecordModelSelectionResult> {
-    if (input.actor.credential !== 'proc:orchestrator') {
-      return { accepted: false, defect: 'unauthorized-reporter' };
-    }
-    const caseId = id.parse(input.caseId);
-    const proposal = frozenProposal.parse(input.proposal);
-    verifyProposalHash(proposal);
-    const evidence = this.#resolveModelEvidenceFailClosed(proposal);
-    if (!evidence.servedModelAccepted || evidence.cardStatus === 'withdrawn') {
-      return { accepted: false, defect: 'model-quarantined' };
-    }
-    const selectionId = this.#ids.next('sel');
-    const completed = await this.#store.transactWithState<RecordModelSelectionResult>(
-      'model_select',
-      input.actor,
-      (state, at) => {
-        const currentEvidence = this.#resolveModelEvidenceFailClosed(proposal);
-        if (!currentEvidence.servedModelAccepted || currentEvidence.cardStatus === 'withdrawn') {
-          return { ops: [], result: { accepted: false, defect: 'model-quarantined' } as const };
-        }
-        const status = state.mandateStatus.get(proposal.mandate_ref.mandate_id);
-        const mandateValue = state.mandates.get(
-          mandateVersionKey(proposal.mandate_ref.mandate_id, proposal.mandate_ref.version),
-        );
-        const approved = mandateValue?.approved_models.find(
-          (entry) =>
-            entry.requested_id === proposal.acting_model.requested_id &&
-            entry.card_id === proposal.acting_model.card_id &&
-            entry.card_version === proposal.acting_model.card_version &&
-            entry.roles.includes('acting'),
-        );
-        if (
-          status?.state !== 'active' ||
-          status.version !== proposal.mandate_ref.version ||
-          approved === undefined ||
-          (currentEvidence.cardStatus === 'current' && approved.card_digest !== currentEvidence.cardDigest)
-        ) {
-          return { ops: [], result: { accepted: false, defect: 'model-not-approved' } as const };
-        }
-        return {
-          ops: [
-            ...proposalRevisionInvalidations(state, proposal),
-            {
-              op: 'model.select',
-              selection: {
-                world_id: proposal.world_id,
-                selection_id: selectionId,
-                case_id: caseId,
-                requested_id: proposal.acting_model.requested_id,
-                served_id: proposal.acting_model.served_id,
-                card_id: proposal.acting_model.card_id,
-                card_version: proposal.acting_model.card_version,
-                card_digest: approved.card_digest,
-                selected_at: at,
-              },
-            },
-          ],
-          result: { accepted: true, selectionId } as const,
-        };
-      },
-    );
-    return completed.result;
-  }
-
   async amendMandate(value: Mandate, actor: TransactionActor): Promise<void> {
     requireMandateActor(actor, false);
     const parsed = mandate.parse(value);
@@ -1285,6 +1226,15 @@ export class AuthorizationCore {
           throw error;
         }
       }
+      const currentSelection = state.modelSelections.get(proposal.selection_id);
+      if (
+        systemUseDecision !== null &&
+        (currentSelection === undefined ||
+          canonicalize(currentSelection.system_use_decision) !== canonicalize(systemUseDecision)) &&
+        !defects.defects.includes('stale-selection')
+      ) {
+        defects.defects.push('stale-selection');
+      }
 
       const deltas = requestedDeltas({ ...input, proposal });
       const counters = Object.fromEntries(
@@ -1358,6 +1308,7 @@ export class AuthorizationCore {
           mandate_id: proposal.mandate_ref.mandate_id,
           mandate_version: proposal.mandate_ref.version,
           acting_model_id: proposal.acting_model.requested_id,
+          selection_id: proposal.selection_id,
           card_digest: defects.cardDigest,
           card_key_id: defects.cardKeyId,
           system_use_decision: systemUseDecision,
@@ -2485,50 +2436,73 @@ export class AuthorizationCore {
       const mandateValue = state.mandates.get(
         mandateVersionKey(ruling.binding.mandate_id, ruling.binding.mandate_version),
       );
+      const selection = state.modelSelections.get(ruling.binding.selection_id);
       let defect: CommitDefect | undefined;
-      if (mandateStatus === undefined || mandateValue === undefined) defect = 'missing-mandate';
-      else if (mandateStatus.version !== ruling.binding.mandate_version) defect = 'invalid-mandate-binding';
-      else if (mandateStatus.state === 'revoked') defect = 'revoked-mandate';
-      else if (mandateStatus.state === 'suspended') defect = 'suspended-mandate';
-      else if (
-        mandateStatus.state === 'expired' ||
-        at > mandateValue.expires_at ||
-        at > mandateValue.limits.time_window.not_after
+      if (
+        proposal.selection_id !== ruling.binding.selection_id ||
+        selection === undefined ||
+        state.currentModelSelectionByCase.get(selection.case_id) !== selection.selection_id ||
+        selection.mandate_id !== ruling.binding.mandate_id ||
+        selection.mandate_version !== ruling.binding.mandate_version ||
+        selection.target.requested_id !== proposal.acting_model.requested_id ||
+        selection.target.card_id !== proposal.acting_model.card_id ||
+        selection.target.card_version !== proposal.acting_model.card_version ||
+        selection.target.card_digest !== ruling.binding.card_digest ||
+        selection.target.verifying_key_id !== ruling.binding.card_key_id
       ) {
-        defect = 'expired-mandate';
-      } else if (
-        verifyEmbeddedMac(
-          this.#keyring,
-          'mandate-binding',
-          mandateValue as unknown as Record<string, unknown>,
-          'binding',
-        ) !== 'valid'
-      ) {
-        defect = 'invalid-mandate-binding';
-      } else if (
-        mandateValue.connected_service !== ruling.binding.service ||
-        mandateValue.action_class !== ruling.binding.action_class
-      ) {
-        defect = 'substituted-service';
-      } else {
-        const approved = mandateValue.approved_models.find(
-          (entry) =>
-            entry.requested_id === proposal.acting_model.requested_id &&
-            entry.card_id === proposal.acting_model.card_id &&
-            entry.card_version === proposal.acting_model.card_version &&
-            entry.roles.includes('acting'),
-        );
-        if (approved === undefined || approved.card_digest !== ruling.binding.card_digest) defect = 'substituted-model';
-        else if (approved.re_confirmation_required === true) defect = 'stale-card';
-        else {
-          const currentEvidence = this.#resolveModelEvidenceFailClosed(proposal);
-          if (
-            !currentEvidence.servedModelAccepted ||
-            currentEvidence.cardStatus !== 'current' ||
-            currentEvidence.cardDigest !== ruling.binding.card_digest ||
-            currentEvidence.cardKeyId !== ruling.binding.card_key_id
-          ) {
+        defect = 'stale-selection';
+      }
+      if (defect === undefined) {
+        if (mandateStatus === undefined || mandateValue === undefined) {
+          defect = 'missing-mandate';
+        } else if (mandateStatus.version !== ruling.binding.mandate_version) {
+          defect = 'invalid-mandate-binding';
+        } else if (mandateStatus.state === 'revoked') {
+          defect = 'revoked-mandate';
+        } else if (mandateStatus.state === 'suspended') {
+          defect = 'suspended-mandate';
+        } else if (
+          mandateStatus.state === 'expired' ||
+          at > mandateValue.expires_at ||
+          at > mandateValue.limits.time_window.not_after
+        ) {
+          defect = 'expired-mandate';
+        } else if (
+          verifyEmbeddedMac(
+            this.#keyring,
+            'mandate-binding',
+            mandateValue as unknown as Record<string, unknown>,
+            'binding',
+          ) !== 'valid'
+        ) {
+          defect = 'invalid-mandate-binding';
+        } else if (
+          mandateValue.connected_service !== ruling.binding.service ||
+          mandateValue.action_class !== ruling.binding.action_class
+        ) {
+          defect = 'substituted-service';
+        } else {
+          const approved = mandateValue.approved_models.find(
+            (entry) =>
+              entry.requested_id === proposal.acting_model.requested_id &&
+              entry.card_id === proposal.acting_model.card_id &&
+              entry.card_version === proposal.acting_model.card_version &&
+              entry.roles.includes('acting'),
+          );
+          if (approved === undefined || approved.card_digest !== ruling.binding.card_digest) {
+            defect = 'substituted-model';
+          } else if (approved.re_confirmation_required === true) {
             defect = 'stale-card';
+          } else {
+            const currentEvidence = this.#resolveModelEvidenceFailClosed(proposal);
+            if (
+              !currentEvidence.servedModelAccepted ||
+              currentEvidence.cardStatus !== 'current' ||
+              currentEvidence.cardDigest !== ruling.binding.card_digest ||
+              currentEvidence.cardKeyId !== ruling.binding.card_key_id
+            ) {
+              defect = 'stale-card';
+            }
           }
         }
       }

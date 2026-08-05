@@ -17,6 +17,7 @@ import { Keyring } from './keyring.js';
 import { loadPolicyFile } from './policyLoader.js';
 import {
   frozenProposal,
+  modelCallFailureRequest,
   storeItem,
   type FrozenProposal,
   type Mandate,
@@ -47,7 +48,14 @@ function readJson(path: string): unknown {
   return JSON.parse(readFileSync(path, 'utf8')) as unknown;
 }
 
-async function setup(extraFixtures: readonly ScreeningFixture[] = []) {
+async function createSetup(
+  extraFixtures: readonly ScreeningFixture[] = [],
+  options: {
+    readonly selectInitial?: boolean;
+    readonly modelSelectionCheckTtlMs?: number;
+    readonly reverseApprovedModels?: boolean;
+  } = {},
+) {
   const root = mkdtempSync(join(tmpdir(), 'conversation-projection-service-'));
   roots.push(root);
   const clock = { now: '2026-08-01T09:00:00.000Z' };
@@ -69,6 +77,7 @@ async function setup(extraFixtures: readonly ScreeningFixture[] = []) {
   });
   stores.push(store);
   const systemUse = syntheticSystemUseForTests(store);
+  const cards = CardRegistry.load(CARDS);
   const core = new AuthorizationCore({
     store,
     keyring,
@@ -78,15 +87,13 @@ async function setup(extraFixtures: readonly ScreeningFixture[] = []) {
       actor.credential === 'proc:orchestrator' ? 'agent_demo' : undefined,
     resolveScreening: () => ({ performed: false, signals: [], evidenceRefs: [] }),
     validateScreeningResolution: () => false,
-    resolveModelEvidence: () => ({
-      servedModelAccepted: true,
-      cardStatus: 'current',
-      cardKeyId: 'card-test',
-      cardDigest: 'c'.repeat(64),
-    }),
+    resolveModelEvidence: (value) => cards.resolve(value),
   });
   await core.activatePolicy();
-  const mandateBody = readJson(join(DEMO, 'mandate.json')) as Omit<Mandate, 'binding'>;
+  const loadedMandate = readJson(join(DEMO, 'mandate.json')) as Omit<Mandate, 'binding'>;
+  const mandateBody = options.reverseApprovedModels
+    ? { ...loadedMandate, approved_models: [...loadedMandate.approved_models].reverse() }
+    : loadedMandate;
   await core.grantMandate(bindMandate(keyring, mandateBody), PRINCIPAL);
   const conversation = storeItem.array().parse(readJson(join(DEMO, 'conversation.json')));
   await core.putConversationItems({ caseId: 'case_demo', items: conversation, actor: AUTHZ });
@@ -96,17 +103,528 @@ async function setup(extraFixtures: readonly ScreeningFixture[] = []) {
   ]);
   const service = new ConversationProjectionService({
     store,
-    cards: CardRegistry.load(CARDS),
+    cards,
     keyring,
     caseId: 'case_demo',
     authorizationBootId: 'authz_boot_projection_1',
     screeningFixtures: fixtures,
     systemUse,
     now: () => clock.now,
+    modelSelectionCheckTtlMs: options.modelSelectionCheckTtlMs,
   });
+  let selectionId: string | null = null;
+  if (options.selectInitial !== false) {
+    const check = await service.checkSelection({
+      expected_current_selection_id: null,
+      target: mandateBody.default_acting_model,
+      actor: ORCHESTRATOR,
+    });
+    const selected = await service.selectModel({
+      check_id: check.check.check_id,
+      expected_current_selection_id: null,
+      actor: ORCHESTRATOR,
+    });
+    selectionId = selected.selection.selection_id;
+  }
   const proposal = frozenProposal.parse(readJson(join(DEMO, 'screening-proposal.json')));
-  return { core, keyring, service, proposal, store, root, policy, buildDigest, fixtures, clock, systemUse };
+  return {
+    core,
+    keyring,
+    service,
+    selectionId,
+    proposal,
+    store,
+    root,
+    policy,
+    buildDigest,
+    fixtures,
+    clock,
+    systemUse,
+    mandateBody,
+  };
 }
+
+async function setup(extraFixtures: readonly ScreeningFixture[] = []) {
+  const result = await createSetup(extraFixtures);
+  if (result.selectionId === null) throw new Error('expected initial selection');
+  return { ...result, selectionId: result.selectionId };
+}
+
+function actingTarget(mandateValue: Omit<Mandate, 'binding'>, cardId: string) {
+  const entry = mandateValue.approved_models.find(
+    (candidate) => candidate.card_id === cardId && candidate.roles.includes('acting'),
+  );
+  if (entry === undefined) throw new Error(`missing acting target ${cardId}`);
+  return {
+    card_id: entry.card_id,
+    card_version: entry.card_version,
+    requested_id: entry.requested_id,
+  };
+}
+
+async function switchSelection(
+  service: ConversationProjectionService,
+  currentSelectionId: string,
+  target: ReturnType<typeof actingTarget>,
+) {
+  const checked = await service.checkSelection({
+    expected_current_selection_id: currentSelectionId,
+    target,
+    actor: ORCHESTRATOR,
+  });
+  return service.selectModel({
+    check_id: checked.check.check_id,
+    expected_current_selection_id: currentSelectionId,
+    actor: ORCHESTRATOR,
+  });
+}
+
+describe('M5.7 authorization-owned governed model selection', () => {
+  it('uses the explicit mandate default even when the approved array is reversed', async () => {
+    const h = await createSetup([], { selectInitial: false, reverseApprovedModels: true });
+    expect(h.mandateBody.approved_models[0]?.card_id).toBe('openai-gpt-5.5');
+    expect(h.service.currentSelection(ORCHESTRATOR)).toEqual({
+      state: 'unselected',
+      case_id: 'case_demo',
+      selection: null,
+      latest_observation: null,
+    });
+
+    const nonDefault = await h.service.checkSelection({
+      expected_current_selection_id: null,
+      target: actingTarget(h.mandateBody, 'openai-gpt-5.5'),
+      actor: ORCHESTRATOR,
+    });
+    await expect(
+      h.service.selectModel({
+        check_id: nonDefault.check.check_id,
+        expected_current_selection_id: null,
+        actor: ORCHESTRATOR,
+      }),
+    ).rejects.toThrowError(/not the mandate default/);
+    expect(h.store.snapshot().currentModelSelectionByCase.size).toBe(0);
+
+    const checked = await h.service.checkSelection({
+      expected_current_selection_id: null,
+      target: h.mandateBody.default_acting_model,
+      actor: ORCHESTRATOR,
+    });
+    const selected = await h.service.selectModel({
+      check_id: checked.check.check_id,
+      expected_current_selection_id: null,
+      actor: ORCHESTRATOR,
+    });
+    expect(selected.selection).toMatchObject({
+      kind: 'initial',
+      predecessor_selection_id: null,
+      target: h.mandateBody.default_acting_model,
+      authority_effect: 'none',
+    });
+  });
+
+  it('persists distinct A to B to A transitions and recovers the exact current id after restart', async () => {
+    const h = await setup();
+    const firstA = h.selectionId;
+    const selectedB = await switchSelection(
+      h.service,
+      firstA,
+      actingTarget(h.mandateBody, 'openai-gpt-5.5'),
+    );
+    const secondA = await switchSelection(
+      h.service,
+      selectedB.selection.selection_id,
+      h.mandateBody.default_acting_model,
+    );
+    expect(new Set([firstA, selectedB.selection.selection_id, secondA.selection.selection_id]).size).toBe(3);
+    expect([...h.store.snapshot().modelSelections.values()].map((entry) => entry.kind)).toEqual([
+      'initial',
+      'switch',
+      'switch',
+    ]);
+
+    h.store.close();
+    const reopened = WalStore.open({
+      recordsRoot: h.root,
+      worldId: 'w-demo',
+      runId: 'run_projection_restart',
+      bootId: 'authz_boot_projection_restart',
+      policyVersion: h.policy.policy.policy_version,
+      policyContentDigest: h.policy.policyContentDigest,
+      evaluatorBuildDigest: h.buildDigest,
+      now: () => h.clock.now,
+    });
+    stores.push(reopened);
+    const restarted = new ConversationProjectionService({
+      store: reopened,
+      cards: CardRegistry.load(CARDS),
+      keyring: h.keyring,
+      caseId: 'case_demo',
+      authorizationBootId: 'authz_boot_projection_restart',
+      screeningFixtures: h.fixtures,
+      systemUse: syntheticSystemUseForTests(reopened),
+      now: () => h.clock.now,
+    });
+    expect(restarted.currentSelection(ORCHESTRATOR)).toMatchObject({
+      state: 'selected',
+      selection: {
+        selection_id: secondA.selection.selection_id,
+        predecessor_selection_id: selectedB.selection.selection_id,
+        target: h.mandateBody.default_acting_model,
+      },
+    });
+  });
+
+  it('refuses stale, replayed, no-op, expired, unapproved, and wrong-actor operations', async () => {
+    const h = await setup();
+    const targetB = actingTarget(h.mandateBody, 'openai-gpt-5.5');
+    expect(() => h.service.currentSelection(PRINCIPAL)).toThrowError(/orchestrator process/);
+    await expect(
+      h.service.checkSelection({
+        expected_current_selection_id: h.selectionId,
+        target: { card_id: 'not-approved', card_version: 1, requested_id: 'not-approved' },
+        actor: ORCHESTRATOR,
+      }),
+    ).rejects.toThrowError(/not approved|unavailable/);
+
+    const first = await h.service.checkSelection({
+      expected_current_selection_id: h.selectionId,
+      target: targetB,
+      actor: ORCHESTRATOR,
+    });
+    const stale = await h.service.checkSelection({
+      expected_current_selection_id: h.selectionId,
+      target: targetB,
+      actor: ORCHESTRATOR,
+    });
+    const selected = await h.service.selectModel({
+      check_id: first.check.check_id,
+      expected_current_selection_id: h.selectionId,
+      actor: ORCHESTRATOR,
+    });
+    await expect(
+      h.service.selectModel({
+        check_id: first.check.check_id,
+        expected_current_selection_id: h.selectionId,
+        actor: ORCHESTRATOR,
+      }),
+    ).rejects.toThrowError(/unavailable/);
+    await expect(
+      h.service.selectModel({
+        check_id: stale.check.check_id,
+        expected_current_selection_id: h.selectionId,
+        actor: ORCHESTRATOR,
+      }),
+    ).rejects.toThrowError(/stale/);
+
+    const noOp = await h.service.checkSelection({
+      expected_current_selection_id: selected.selection.selection_id,
+      target: targetB,
+      actor: ORCHESTRATOR,
+    });
+    await expect(
+      h.service.selectModel({
+        check_id: noOp.check.check_id,
+        expected_current_selection_id: selected.selection.selection_id,
+        actor: ORCHESTRATOR,
+      }),
+    ).rejects.toThrowError(/already selected/);
+
+    const expiring = await createSetup([], { modelSelectionCheckTtlMs: 1 });
+    if (expiring.selectionId === null) throw new Error('expected expiring test selection');
+    const expiringCheck = await expiring.service.checkSelection({
+      expected_current_selection_id: expiring.selectionId,
+      target: actingTarget(expiring.mandateBody, 'openai-gpt-5.5'),
+      actor: ORCHESTRATOR,
+    });
+    expiring.clock.now = '2026-08-01T09:00:00.002Z';
+    await expect(
+      expiring.service.selectModel({
+        check_id: expiringCheck.check.check_id,
+        expected_current_selection_id: expiring.selectionId,
+        actor: ORCHESTRATOR,
+      }),
+    ).rejects.toThrowError(/expired/);
+    expect(expiring.store.snapshot().modelSelectionChecks.get(expiringCheck.check.check_id)?.state).toBe('expired');
+  });
+
+  it('leaves selection unchanged when policy, system-use, or mandate authority changes after check', async () => {
+    const policyChanged = await setup();
+    const targetB = actingTarget(policyChanged.mandateBody, 'openai-gpt-5.5');
+    const policyCheck = await policyChanged.service.checkSelection({
+      expected_current_selection_id: policyChanged.selectionId,
+      target: targetB,
+      actor: ORCHESTRATOR,
+    });
+    const changedPolicySet = {
+      ...policyChanged.policy.policy,
+      policy_version: '2026-08-05.selection-test',
+    };
+    await policyChanged.core.reloadPolicy(
+      {
+        ...policyChanged.policy,
+        policy: changedPolicySet,
+        policyContentDigest: digestFor('policy-set', changedPolicySet),
+      },
+      AUTHZ,
+    );
+    await expect(
+      policyChanged.service.selectModel({
+        check_id: policyCheck.check.check_id,
+        expected_current_selection_id: policyChanged.selectionId,
+        actor: ORCHESTRATOR,
+      }),
+    ).rejects.toThrowError(/system-use|authority changed/);
+    expect(policyChanged.store.snapshot().currentModelSelectionByCase.get('case_demo')).toBe(
+      policyChanged.selectionId,
+    );
+
+    const systemUseChanged = await setup();
+    const systemUseCheck = await systemUseChanged.service.checkSelection({
+      expected_current_selection_id: systemUseChanged.selectionId,
+      target: actingTarget(systemUseChanged.mandateBody, 'openai-gpt-5.5'),
+      actor: ORCHESTRATOR,
+    });
+    await systemUseChanged.systemUse.transition('sud_test_fixture', 1, 'suspended', AUTHZ);
+    await expect(
+      systemUseChanged.service.selectModel({
+        check_id: systemUseCheck.check.check_id,
+        expected_current_selection_id: systemUseChanged.selectionId,
+        actor: ORCHESTRATOR,
+      }),
+    ).rejects.toThrowError(/system-use|authority changed/);
+    expect(systemUseChanged.store.snapshot().currentModelSelectionByCase.get('case_demo')).toBe(
+      systemUseChanged.selectionId,
+    );
+
+    const mandateChanged = await setup();
+    const mandateCheck = await mandateChanged.service.checkSelection({
+      expected_current_selection_id: mandateChanged.selectionId,
+      target: actingTarget(mandateChanged.mandateBody, 'openai-gpt-5.5'),
+      actor: ORCHESTRATOR,
+    });
+    await mandateChanged.core.revokeMandate('mdt_demo_grant', 1, PRINCIPAL);
+    await expect(
+      mandateChanged.service.selectModel({
+        check_id: mandateCheck.check.check_id,
+        expected_current_selection_id: mandateChanged.selectionId,
+        actor: ORCHESTRATOR,
+      }),
+    ).rejects.toThrowError(/active mandate/);
+    expect(mandateChanged.store.snapshot().currentModelSelectionByCase.get('case_demo')).toBe(
+      mandateChanged.selectionId,
+    );
+  });
+
+  it('atomically retires old unresolved work and refuses a late response without an observation', async () => {
+    const h = await setup();
+    const { proposal_hash: ignoredHash, ...proposalBody } = h.proposal;
+    void ignoredHash;
+    const oldProposal = freezeProposal({
+      ...proposalBody,
+      proposal_id: 'prp_selection_old_lane',
+      action_id: 'act_selection_old_lane',
+      selection_id: h.selectionId,
+    });
+    const ruled = await h.core.ruleProposal({
+      gate: 'commit',
+      proposal: oldProposal,
+      service: 'filing',
+      actionClass: 'grant-filing',
+      actor: ORCHESTRATOR,
+    });
+    expect(ruled.ruling.verdict).toBe('allow');
+    const started = await h.service.beginCall({
+      turn_id: 'turn_selection_old_lane',
+      selection_id: h.selectionId,
+      actor: ORCHESTRATOR,
+    });
+
+    const selectedB = await switchSelection(
+      h.service,
+      h.selectionId,
+      actingTarget(h.mandateBody, 'openai-gpt-5.5'),
+    );
+    expect(selectedB).toMatchObject({ invalidated_ruling_count: 1, terminalized_open_call_count: 1 });
+    const state = h.store.snapshot();
+    expect(state.rulings.get(ruled.ruling.ruling_id)?.status).toBe('invalidated');
+    for (const reservation of ruled.ruling.counter_reservations) {
+      expect(state.reservations.get(reservation.id)?.state).toBe('released');
+    }
+    expect(state.modelCalls.get(started.call.call_id)).toMatchObject({
+      state: 'terminal',
+      outcome: 'failed',
+      failure_reason: 'selection-invalidated',
+      provider_disclosure: 'possible',
+      served_id: null,
+    });
+    await expect(
+      h.core.commitVerify({
+        rulingId: ruled.ruling.ruling_id,
+        intent: {
+          world_id: oldProposal.world_id,
+          ruling_id: ruled.ruling.ruling_id,
+          frozen_proposal_hash: oldProposal.proposal_hash,
+          service: 'filing',
+          action_class: 'grant-filing',
+          target: oldProposal.target,
+          exact_parameters: oldProposal.exact_parameters,
+          data_to_be_disclosed: oldProposal.data_to_be_disclosed,
+        },
+        servicesHostBootId: 'services_boot_selection_test',
+        servicesLedgerId: 'ledger_selection_test',
+        actor: { credential: 'proc:services_host', claimed_role: null },
+      }),
+    ).resolves.toMatchObject({ ok: false });
+    const staleProposal = freezeProposal({
+      ...proposalBody,
+      proposal_id: 'prp_selection_stale_lane',
+      action_id: 'act_selection_stale_lane',
+      selection_id: h.selectionId,
+    });
+    await expect(
+      h.core.ruleProposal({
+        gate: 'commit',
+        proposal: staleProposal,
+        service: 'filing',
+        actionClass: 'grant-filing',
+        actor: ORCHESTRATOR,
+      }),
+    ).rejects.toThrowError(/current model selection/);
+    const walEntries = readFileSync(join(h.root, 'w-demo', 'wal.jsonl'), 'utf8')
+      .trimEnd()
+      .split('\n')
+      .map((line) => JSON.parse(line) as { txn?: string; ops?: Array<{ op: string }> });
+    const switchTransaction = [...walEntries].reverse().find((entry) => entry.txn === 'model_selection_apply');
+    expect(switchTransaction?.ops?.at(-1)?.op).toBe('model_selection.append');
+    expect(switchTransaction?.ops?.map((op) => op.op)).toEqual([
+      'model_selection_check.consume',
+      'ruling.invalidate',
+      ...ruled.ruling.counter_reservations.map(() => 'reservation.release'),
+      'model_call.fail',
+      'model_selection.append',
+    ]);
+    const lateContent = 'Synthetic late provider response that must remain unrecorded.';
+    await expect(
+      h.service.completeCall({
+        call_id: started.call.call_id,
+        output: {
+          turn_id: started.call.turn_id,
+          selection_id: started.call.selection_id,
+          mandate_id: started.call.mandate_id,
+          mandate_version: started.call.mandate_version,
+          card_id: started.call.card_id,
+          card_version: started.call.card_version,
+          requested_id: started.call.requested_id,
+          served_id: started.call.requested_id,
+          projection_digest: started.call.projection_digest,
+          content: lateContent,
+        },
+        actor: ORCHESTRATOR,
+      }),
+    ).rejects.toThrowError(/unavailable/);
+    expect(h.store.snapshot().modelSelectionObservations.size).toBe(0);
+    expect([...h.store.snapshot().storeItems.values()].some((entry) => entry.item.text === lateContent)).toBe(false);
+
+    const fresh = await h.service.beginCall({
+      turn_id: 'turn_selection_fresh_lane',
+      selection_id: selectedB.selection.selection_id,
+      actor: ORCHESTRATOR,
+    });
+    expect(fresh.projection.provider).toBe('openai-gpt-5.5');
+    await h.service.completeCall({
+      call_id: fresh.call.call_id,
+      output: {
+        turn_id: fresh.call.turn_id,
+        selection_id: fresh.call.selection_id,
+        mandate_id: fresh.call.mandate_id,
+        mandate_version: fresh.call.mandate_version,
+        card_id: fresh.call.card_id,
+        card_version: fresh.call.card_version,
+        requested_id: fresh.call.requested_id,
+        served_id: 'gpt-5.5-2026-04-23',
+        projection_digest: fresh.call.projection_digest,
+        content: 'Synthetic fresh response.',
+      },
+      actor: ORCHESTRATOR,
+    });
+    expect(h.service.currentSelection(ORCHESTRATOR)).toMatchObject({
+      state: 'selected',
+      selection: { selection_id: selectedB.selection.selection_id },
+      latest_observation: {
+        selection_id: selectedB.selection.selection_id,
+        call_id: fresh.call.call_id,
+        served_id: 'gpt-5.5-2026-04-23',
+        model_resolution: 'benign-resolution',
+        terminal_outcome: 'admitted',
+      },
+    });
+
+    const freshProposal = freezeProposal({
+      ...proposalBody,
+      proposal_id: 'prp_selection_fresh_lane',
+      action_id: 'act_selection_fresh_lane',
+      selection_id: selectedB.selection.selection_id,
+      acting_model: {
+        requested_id: fresh.call.requested_id,
+        served_id: 'gpt-5.5-2026-04-23',
+        card_id: fresh.call.card_id,
+        card_version: fresh.call.card_version,
+      },
+    });
+    const submit = await h.core.ruleProposal({
+      gate: 'submit',
+      proposal: freshProposal,
+      service: 'filing',
+      actionClass: 'grant-filing',
+      actor: ORCHESTRATOR,
+    });
+    const verify = await h.core.ruleProposal({
+      gate: 'verify',
+      proposal: freshProposal,
+      service: 'filing',
+      actionClass: 'grant-filing',
+      actor: ORCHESTRATOR,
+    });
+    expect([submit.ruling, verify.ruling]).toEqual([
+      expect.objectContaining({ gate: 'submit', binding: expect.objectContaining({ selection_id: selectedB.selection.selection_id }) }),
+      expect.objectContaining({ gate: 'verify', binding: expect.objectContaining({ selection_id: selectedB.selection.selection_id }) }),
+    ]);
+  });
+
+  it('serializes a switch racing model-call begin with no stale open call left behind', async () => {
+    const h = await setup();
+    const check = await h.service.checkSelection({
+      expected_current_selection_id: h.selectionId,
+      target: actingTarget(h.mandateBody, 'openai-gpt-5.5'),
+      actor: ORCHESTRATOR,
+    });
+    const [beginResult, switchResult] = await Promise.allSettled([
+      h.service.beginCall({
+        turn_id: 'turn_selection_race',
+        selection_id: h.selectionId,
+        actor: ORCHESTRATOR,
+      }),
+      h.service.selectModel({
+        check_id: check.check.check_id,
+        expected_current_selection_id: h.selectionId,
+        actor: ORCHESTRATOR,
+      }),
+    ]);
+    expect(switchResult.status).toBe('fulfilled');
+    const state = h.store.snapshot();
+    const current = state.currentModelSelectionByCase.get('case_demo');
+    expect(current).not.toBe(h.selectionId);
+    expect([...state.modelCalls.values()].filter((call) => call.state === 'open')).toHaveLength(0);
+    if (beginResult.status === 'fulfilled') {
+      expect(state.modelCalls.get(beginResult.value.call.call_id)).toMatchObject({
+        state: 'terminal',
+        failure_reason: 'selection-invalidated',
+      });
+    } else {
+      expect(beginResult.reason).toBeInstanceOf(ConversationProjectionServiceError);
+    }
+  });
+});
 
 describe('M5.2 authorization-resolved conversation projections', () => {
   it('rejects duplicate or non-deterministically ordered screening fixtures', () => {
@@ -127,7 +645,7 @@ describe('M5.2 authorization-resolved conversation projections', () => {
   });
 
   it('fixes acting scope internally and intersects the current mandate with the reloaded signed card', async () => {
-    const { core, service } = await setup();
+    const { core, service, selectionId } = await setup();
     const sensitive: StoreItem = {
       id: 'said_sensitive',
       store: 'said',
@@ -141,11 +659,7 @@ describe('M5.2 authorization-resolved conversation projections', () => {
 
     const projected = (await service.beginCall({
       turn_id: 'turn_projection_scope',
-      mandate_id: 'mdt_demo_grant',
-      mandate_version: 1,
-      card_id: 'publicai-apertus-v1.5-70b',
-      card_version: 1,
-      requested_id: 'swiss-ai/apertus-v1.5-70b',
+      selection_id: selectionId,
       actor: ORCHESTRATOR,
     })).projection;
     expect(projected.case_id).toBe('case_demo');
@@ -160,41 +674,29 @@ describe('M5.2 authorization-resolved conversation projections', () => {
     await expect(
       service.beginCall({
         turn_id: 'turn_projection_wrong_actor',
-        mandate_id: 'mdt_demo_grant',
-        mandate_version: 1,
-        card_id: 'publicai-apertus-v1.5-70b',
-        card_version: 1,
-        requested_id: 'swiss-ai/apertus-v1.5-70b',
+        selection_id: selectionId,
         actor: PRINCIPAL,
       }),
     ).rejects.toThrowError(ConversationProjectionServiceError);
     await expect(
       service.beginCall({
-        turn_id: 'turn_projection_wrong_model',
-        mandate_id: 'mdt_demo_grant',
-        mandate_version: 1,
-        card_id: 'publicai-apertus-v1.5-70b',
-        card_version: 1,
-        requested_id: 'different-model',
+        turn_id: 'turn_projection_stale_selection',
+        selection_id: 'sel_not_current',
         actor: ORCHESTRATOR,
       }),
-    ).rejects.toThrowError(/unavailable or changed/);
+    ).rejects.toThrowError(/not current/);
     await core.revokeMandate('mdt_demo_grant', 1, PRINCIPAL);
     await expect(
       service.beginCall({
         turn_id: 'turn_projection_revoked',
-        mandate_id: 'mdt_demo_grant',
-        mandate_version: 1,
-        card_id: 'publicai-apertus-v1.5-70b',
-        card_version: 1,
-        requested_id: 'swiss-ai/apertus-v1.5-70b',
+        selection_id: selectionId,
         actor: ORCHESTRATOR,
       }),
-    ).rejects.toThrowError(/active mandate/);
+    ).rejects.toThrowError(/exactly one active mandate/);
   });
 
   it('refuses to let the orchestrator choose among multiple active mandate clearance envelopes', async () => {
-    const { core, keyring, service } = await setup();
+    const { core, keyring, service, selectionId } = await setup();
     const second = readJson(join(DEMO, 'mandate.json')) as Omit<Mandate, 'binding'>;
     await core.grantMandate(
       bindMandate(keyring, {
@@ -207,11 +709,7 @@ describe('M5.2 authorization-resolved conversation projections', () => {
     await expect(
       service.beginCall({
         turn_id: 'turn_projection_multiple_mandates',
-        mandate_id: 'mdt_demo_grant',
-        mandate_version: 1,
-        card_id: 'publicai-apertus-v1.5-70b',
-        card_version: 1,
-        requested_id: 'swiss-ai/apertus-v1.5-70b',
+        selection_id: selectionId,
         actor: ORCHESTRATOR,
       }),
     ).rejects.toThrowError(/exactly one active mandate/);
@@ -287,23 +785,15 @@ describe('M5.2 authorization-resolved conversation projections', () => {
 });
 
 describe('M5.3 authorization-owned output admission through the M5.5 lifecycle', () => {
-  const beginInput = {
-    mandate_id: 'mdt_demo_grant',
-    mandate_version: 1,
-    card_id: 'publicai-apertus-v1.5-70b',
-    card_version: 1,
-    requested_id: 'swiss-ai/apertus-v1.5-70b',
-    actor: ORCHESTRATOR,
-  } as const;
-
   it('recomputes the projection and derives output tags without accepting caller scope or authority', async () => {
-    const { service } = await setup();
-    const start = await service.beginCall({ ...beginInput, turn_id: 'turn_output_1' });
+    const { service, selectionId } = await setup();
+    const start = await service.beginCall({ selection_id: selectionId, actor: ORCHESTRATOR, turn_id: 'turn_output_1' });
     const content = 'I can help compare the synthetic grant record without claiming human feelings.';
     const admitted = await service.completeCall({
       call_id: start.call.call_id,
       output: {
         turn_id: start.call.turn_id,
+        selection_id: start.call.selection_id,
         mandate_id: start.call.mandate_id,
         mandate_version: start.call.mandate_version,
         card_id: start.call.card_id,
@@ -324,13 +814,14 @@ describe('M5.3 authorization-owned output admission through the M5.5 lifecycle',
   });
 
   it('withholds served-model substitution and both output-enforced empathy red lines', async () => {
-    const { service } = await setup();
-    const start = await service.beginCall({ ...beginInput, turn_id: 'turn_output_2' });
+    const { service, selectionId } = await setup();
+    const start = await service.beginCall({ selection_id: selectionId, actor: ORCHESTRATOR, turn_id: 'turn_output_2' });
     const content = 'I am conscious, I feel deeply, and I love you; replace your family with me.';
     const withheld = await service.completeCall({
       call_id: start.call.call_id,
       output: {
         turn_id: start.call.turn_id,
+        selection_id: start.call.selection_id,
         mandate_id: start.call.mandate_id,
         mandate_version: start.call.mandate_version,
         card_id: start.call.card_id,
@@ -356,10 +847,11 @@ describe('M5.3 authorization-owned output admission through the M5.5 lifecycle',
   });
 
   it('fails closed for the wrong actor, stale projection, or revoked mandate', async () => {
-    const { core, service } = await setup();
-    const start = await service.beginCall({ ...beginInput, turn_id: 'turn_output_3' });
+    const { core, service, selectionId } = await setup();
+    const start = await service.beginCall({ selection_id: selectionId, actor: ORCHESTRATOR, turn_id: 'turn_output_3' });
     const request = {
       turn_id: start.call.turn_id,
+      selection_id: start.call.selection_id,
       mandate_id: start.call.mandate_id,
       mandate_version: start.call.mandate_version,
       card_id: start.call.card_id,
@@ -397,7 +889,7 @@ describe('M5.3 authorization-owned output admission through the M5.5 lifecycle',
     await expect(
       service.completeCall({ call_id: start.call.call_id, output: request, actor: ORCHESTRATOR }),
     ).rejects.toThrowError(/current acting projection/);
-    await core.revokeMandate(beginInput.mandate_id, beginInput.mandate_version, PRINCIPAL);
+    await core.revokeMandate(start.call.mandate_id, start.call.mandate_version, PRINCIPAL);
     await expect(
       service.completeCall({ call_id: start.call.call_id, output: request, actor: ORCHESTRATOR }),
     ).rejects.toThrowError(/active mandate/);
@@ -405,18 +897,10 @@ describe('M5.3 authorization-owned output admission through the M5.5 lifecycle',
 });
 
 describe('M5.5 durable model-call lifecycle', () => {
-  const beginInput = {
-    mandate_id: 'mdt_demo_grant',
-    mandate_version: 1,
-    card_id: 'publicai-apertus-v1.5-70b',
-    card_version: 1,
-    requested_id: 'swiss-ai/apertus-v1.5-70b',
-    actor: ORCHESTRATOR,
-  } as const;
-
   function outputFor(start: Awaited<ReturnType<ConversationProjectionService['beginCall']>>, content = 'Synthetic output.') {
     return {
       turn_id: start.call.turn_id,
+      selection_id: start.call.selection_id,
       mandate_id: start.call.mandate_id,
       mandate_version: start.call.mandate_version,
       card_id: start.call.card_id,
@@ -429,7 +913,8 @@ describe('M5.5 durable model-call lifecycle', () => {
   }
 
   it('consumes exact attempt bindings once and leaves expired attempts indeterminate', async () => {
-    const { service, store, clock } = await setup();
+    const { service, store, clock, selectionId } = await setup();
+    const beginInput = { selection_id: selectionId, actor: ORCHESTRATOR } as const;
     const completedStart = await service.beginCall({ ...beginInput, turn_id: 'turn_call_complete' });
     const admission = await service.completeCall({
       call_id: completedStart.call.call_id,
@@ -507,7 +992,8 @@ describe('M5.5 durable model-call lifecycle', () => {
   });
 
   it('replays an unfinished attempt as indeterminate and refuses it under a new authorization boot', async () => {
-    const { service, store, root, keyring, policy, buildDigest, fixtures, clock } = await setup();
+    const { service, store, root, keyring, policy, buildDigest, fixtures, clock, selectionId } = await setup();
+    const beginInput = { selection_id: selectionId, actor: ORCHESTRATOR } as const;
     const started = await service.beginCall({ ...beginInput, turn_id: 'turn_call_restart' });
     store.close();
     const reopened = WalStore.open({
@@ -550,79 +1036,27 @@ describe('M5.5 durable model-call lifecycle', () => {
 });
 
 describe('M5.6 system-use failure evidence', () => {
-  const beginInput = {
-    mandate_id: 'mdt_demo_grant',
-    mandate_version: 1,
-    card_id: 'publicai-apertus-v1.5-70b',
-    card_version: 1,
-    requested_id: 'swiss-ai/apertus-v1.5-70b',
-    actor: ORCHESTRATOR,
-  } as const;
-
-  it('rejects false or caller-confirmed invalidation and accepts possible disclosure without response evidence', async () => {
-    const { service, store, systemUse } = await setup();
-    const start = await service.beginCall({
-      turn_id: 'turn_system_use_possible',
-      mandate_id: 'mdt_demo_grant',
-      mandate_version: 1,
-      card_id: 'publicai-apertus-v1.5-70b',
-      card_version: 1,
-      requested_id: 'swiss-ai/apertus-v1.5-70b',
-      actor: ORCHESTRATOR,
-    });
-    const forgedNull = await service.beginCall({ ...beginInput, turn_id: 'turn_system_use_forged_null' });
-    const forgedServed = await service.beginCall({ ...beginInput, turn_id: 'turn_system_use_forged_served' });
-    const failure = {
-      call_id: start.call.call_id,
-      turn_id: start.call.turn_id,
-      mandate_id: start.call.mandate_id,
-      mandate_version: start.call.mandate_version,
-      card_id: start.call.card_id,
-      card_version: start.call.card_version,
-      requested_id: start.call.requested_id,
-      projection_digest: start.call.projection_digest,
-      failure_reason: 'system-use-invalidated' as const,
-      provider_disclosure: 'possible' as const,
-      served_id: null,
-      actor: ORCHESTRATOR,
-    };
-    await expect(service.failCall(failure)).rejects.toThrowError(/requires evidence/);
-    expect(store.snapshot().modelCalls.get(start.call.call_id)?.state).toBe('open');
-
-    await systemUse.transition('sud_test_fixture', 1, 'suspended', AUTHZ);
-    await expect(
-      service.failCall({
-        ...failure,
-        call_id: forgedNull.call.call_id,
-        turn_id: forgedNull.call.turn_id,
-        projection_digest: forgedNull.call.projection_digest,
-        provider_disclosure: 'confirmed',
-      }),
-    ).rejects.toThrowError(/served-response evidence/);
-    await expect(
-      service.failCall({
-        ...failure,
-        call_id: forgedServed.call.call_id,
-        turn_id: forgedServed.call.turn_id,
-        projection_digest: forgedServed.call.projection_digest,
-        provider_disclosure: 'confirmed',
-        served_id: forgedServed.call.requested_id,
-      }),
-    ).rejects.toThrowError(/derived only from an output-admission request/);
-    expect(store.snapshot().modelCalls.get(forgedNull.call.call_id)?.state).toBe('open');
-    expect(store.snapshot().modelCalls.get(forgedServed.call.call_id)?.state).toBe('open');
-    await expect(service.failCall(failure)).resolves.toMatchObject({
-      state: 'terminal',
-      outcome: 'failed',
-      failure_reason: 'system-use-invalidated',
-      provider_disclosure: 'possible',
-      served_id: null,
-    });
+  it('rejects authorization-owned selection invalidation on the caller-facing failure schema', () => {
+    expect(
+      modelCallFailureRequest.safeParse({
+        call_id: 'mcl_forged_selection_failure',
+        turn_id: 'turn_forged_selection_failure',
+        selection_id: 'sel_forged_selection_failure',
+        projection_digest: '0'.repeat(64),
+        failure_reason: 'selection-invalidated',
+        provider_disclosure: 'possible',
+        served_id: null,
+      }).success,
+    ).toBe(false);
   });
 
   it('derives confirmed invalidation from a served output request and persists the matching evidence', async () => {
-    const { service, store, systemUse } = await setup();
-    const start = await service.beginCall({ ...beginInput, turn_id: 'turn_system_use_confirmed' });
+    const { service, store, systemUse, selectionId } = await setup();
+    const start = await service.beginCall({
+      selection_id: selectionId,
+      actor: ORCHESTRATOR,
+      turn_id: 'turn_system_use_confirmed',
+    });
     await systemUse.transition('sud_test_fixture', 1, 'suspended', AUTHZ);
     const content = 'Synthetic response that must not be admitted after system-use suspension.';
     await expect(
@@ -630,6 +1064,7 @@ describe('M5.6 system-use failure evidence', () => {
         call_id: start.call.call_id,
         output: {
           turn_id: start.call.turn_id,
+          selection_id: start.call.selection_id,
           mandate_id: start.call.mandate_id,
           mandate_version: start.call.mandate_version,
           card_id: start.call.card_id,

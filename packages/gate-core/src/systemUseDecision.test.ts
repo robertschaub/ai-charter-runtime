@@ -185,8 +185,11 @@ describe('ADR-008 authorization-owned system-use decision', () => {
         bindChanged((body) => {
           body.approved_models[0] = {
             ...body.approved_models[0]!,
-            roles: ['screening'],
-            data_classes: { screening: ['conf:public', 'purpose:grant-assessment'] },
+            roles: ['acting', 'screening'],
+            data_classes: {
+              acting: body.approved_models[0]!.data_classes.acting!,
+              screening: ['conf:public', 'purpose:grant-assessment'],
+            },
           };
         }),
         POLICY_VERSION,

@@ -10,11 +10,15 @@ import { accessChainEntry, recordEntry } from './record.js';
 import { gateRuling } from './ruling.js';
 import { modelCallFailureReason, modelCallOpenRecord } from './modelCall.js';
 import {
+  modelSelectionCheckRecord,
+  modelSelectionObservation,
+  modelSelectionTransition,
+} from './modelSelection.js';
+import {
   caseSessionHandoffRecord,
   commitmentRecord,
   effectRecord,
   escalationRecord,
-  modelSelectionRecord,
   nonceRecord,
   patternEvent,
   policyActivation,
@@ -120,7 +124,13 @@ export const walOp = z.discriminatedUnion('op', [
   z.object({ op: z.literal('store.put'), entry: conversationStoreEntry }).strict(),
   z.object({ op: z.literal('store.remove'), case_id: id, item_id: id, reason: transitionReason }).strict(),
   z.object({ op: z.literal('pattern.record'), event: patternEvent }).strict(),
-  z.object({ op: z.literal('model.select'), selection: modelSelectionRecord }).strict(),
+  z.object({ op: z.literal('model_selection_check.issue'), check: modelSelectionCheckRecord }).strict(),
+  z
+    .object({ op: z.literal('model_selection_check.consume'), check_id: id, consumed_at: timestamp })
+    .strict(),
+  z.object({ op: z.literal('model_selection_check.expire'), check_id: id }).strict(),
+  z.object({ op: z.literal('model_selection.append'), selection: modelSelectionTransition }).strict(),
+  z.object({ op: z.literal('model_selection.observe'), observation: modelSelectionObservation }).strict(),
   z.object({ op: z.literal('model_call.open'), call: modelCallOpenRecord }).strict(),
   z
     .object({
@@ -161,7 +171,7 @@ export type WalOp = z.infer<typeof walOp>;
 export const walGenesisHeader = z
   .object({
     kind: z.literal('genesis'),
-    wal_version: z.literal(2),
+    wal_version: z.literal(3),
     world_id: worldId,
     created_at: timestamp,
   })

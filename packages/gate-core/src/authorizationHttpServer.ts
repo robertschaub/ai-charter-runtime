@@ -48,6 +48,8 @@ import {
   modelCallAdmissionRequest,
   modelCallBeginRequest,
   modelCallFailureRequest,
+  modelSelectionCheckRequest,
+  modelSelectionRequest,
   timestamp,
   worldId,
   type Mandate,
@@ -374,6 +376,44 @@ export class AuthorizationHttpServer {
             escalation_id: result.escalationId,
           }),
         };
+      },
+      'model-selection.read': async (_request, context) => {
+        if (context.params['case_id'] !== configuredCaseId) {
+          return { status: 403, body: { error: 'forbidden' } };
+        }
+        const projection = options.conversationProjections.currentSelection(requireActor(context));
+        return {
+          status: 200,
+          body: projection,
+          accessEvidence: {
+            kind: 'model_selection_read',
+            case_id: configuredCaseId,
+            current_selection_id: projection.selection?.selection_id ?? null,
+            latest_observation_id: projection.latest_observation?.observation_id ?? null,
+          },
+        };
+      },
+      'model-selection.check': async (request, context) => {
+        if (context.params['case_id'] !== configuredCaseId) {
+          return { status: 403, body: { error: 'forbidden' } };
+        }
+        const parsed = modelSelectionCheckRequest.parse(await body(request));
+        const projection = await options.conversationProjections.checkSelection({
+          ...parsed,
+          actor: requireActor(context),
+        });
+        return { status: 200, body: projection, accessEvidence: projection.check };
+      },
+      'model-selection.apply': async (request, context) => {
+        if (context.params['case_id'] !== configuredCaseId) {
+          return { status: 403, body: { error: 'forbidden' } };
+        }
+        const parsed = modelSelectionRequest.parse(await body(request));
+        const projection = await options.conversationProjections.selectModel({
+          ...parsed,
+          actor: requireActor(context),
+        });
+        return { status: 200, body: projection, accessEvidence: projection };
       },
       'model-call.begin': async (request, context) => {
         const parsed = modelCallBeginRequest.parse(await body(request));

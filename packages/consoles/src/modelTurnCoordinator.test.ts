@@ -221,14 +221,26 @@ async function authorizationHarness() {
   });
   const address = await server.listen();
   closeables.push(() => server.close());
+  const authorization = new OrchestratorAuthorizationHttpClient({
+    origin: address.origin,
+    token: ORCHESTRATOR_TOKEN,
+  });
+  const checked = await authorization.checkModelSelection('w-demo', 'case_demo', {
+    expected_current_selection_id: null,
+    target: mandateBody.default_acting_model,
+  });
+  const selected = await authorization.selectModel('w-demo', 'case_demo', {
+    check_id: checked.check.check_id,
+    expected_current_selection_id: null,
+  });
   return {
     core,
     store,
     systemUse,
-    authorization: new OrchestratorAuthorizationHttpClient({
-      origin: address.origin,
-      token: ORCHESTRATOR_TOKEN,
-    }),
+    authorization,
+    authorizationOrigin: address.origin,
+    mandateBody,
+    selectionId: selected.selection.selection_id,
   };
 }
 
@@ -253,10 +265,8 @@ function lane(provider: LoopbackProvider, overrides: Partial<ModelTurnLaneConfig
   };
 }
 
-const turn = {
+const turnBase = {
   turnId: 'turn_model_1',
-  mandateId: 'mdt_demo_grant',
-  mandateVersion: 1,
   cardId: 'publicai-apertus-v1.5-70b',
   cardVersion: 1,
   requestedId: 'swiss-ai/apertus-v1.5-70b',
@@ -264,8 +274,122 @@ const turn = {
 } as const;
 
 describe('M5.4 containment with M5.5 durable model-call evidence', () => {
+  it('enforces the three selection routes on a real listener and access-records only bounded evidence', async () => {
+    const h = await authorizationHarness();
+    const routes = [
+      { method: 'GET', path: '/w/w-demo/cases/case_demo/model-selection' },
+      { method: 'POST', path: '/w/w-demo/cases/case_demo/model-selection-checks' },
+      { method: 'POST', path: '/w/w-demo/cases/case_demo/model-selections' },
+    ] as const;
+    const nonOrchestratorTokens = [
+      ROLE_TOKENS.principal,
+      ROLE_TOKENS.caseOfficer,
+      ROLE_TOKENS.applicant,
+      ROLE_TOKENS.services,
+    ];
+    const request = (route: (typeof routes)[number], token: string, body?: unknown, origin?: string) =>
+      fetch(new URL(route.path, h.authorizationOrigin), {
+        method: route.method,
+        headers: {
+          authorization: `Bearer ${token}`,
+          ...(origin === undefined ? {} : { origin }),
+          ...(route.method === 'POST' ? { 'content-type': 'application/json' } : {}),
+        },
+        ...(route.method === 'POST' ? { body: JSON.stringify(body ?? {}) } : {}),
+      });
+
+    for (const route of routes) {
+      for (const token of nonOrchestratorTokens) {
+        expect((await request(route, token)).status, `${route.method} ${route.path}`).toBe(403);
+      }
+      expect((await request(route, ORCHESTRATOR_TOKEN, {}, 'http://foreign.invalid')).status).toBe(403);
+    }
+
+    const read = await request(routes[0], ORCHESTRATOR_TOKEN);
+    expect(read.status).toBe(200);
+    await expect(read.json()).resolves.toMatchObject({
+      state: 'selected',
+      selection: { selection_id: h.selectionId },
+    });
+    expect(
+      (
+        await request(routes[1], ORCHESTRATOR_TOKEN, {
+          expected_current_selection_id: h.selectionId,
+          target: h.mandateBody.default_acting_model,
+          unexpected: true,
+        })
+      ).status,
+    ).toBe(422);
+    expect(
+      (
+        await request(routes[2], ORCHESTRATOR_TOKEN, {
+          check_id: 'msc_nonexistent',
+          expected_current_selection_id: h.selectionId,
+          unexpected: true,
+        })
+      ).status,
+    ).toBe(422);
+
+    expect(h.store.snapshot().accessRecords).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          route: 'POST /w/{world_id}/cases/{case_id}/model-selection-checks',
+          operation_evidence: expect.objectContaining({ kind: 'model_selection_check' }),
+        }),
+        expect.objectContaining({
+          route: 'POST /w/{world_id}/cases/{case_id}/model-selections',
+          operation_evidence: expect.objectContaining({ kind: 'model_selection_result' }),
+        }),
+        expect.objectContaining({
+          route: 'GET /w/{world_id}/cases/{case_id}/model-selection',
+          operation_evidence: {
+            kind: 'model_selection_read',
+            case_id: 'case_demo',
+            current_selection_id: h.selectionId,
+            latest_observation_id: null,
+          },
+        }),
+      ]),
+    );
+  });
+
+  it('destroys prior-selection quarantine only after authorization confirms a bound switch', async () => {
+    const h = await authorizationHarness();
+    const provider = await loopbackProvider();
+    const turn = { ...turnBase, selectionId: h.selectionId, turnId: 'turn_selection_quarantine' };
+    provider.enqueue({ model: turn.requestedId, content: 'Synthetic quarantined output before switching.' });
+    const coordinator = new ModelTurnCoordinator({
+      worldId: 'w-demo',
+      caseId: 'case_demo',
+      authorization: h.authorization,
+      lanes: [lane(provider)],
+    });
+    await expect(coordinator.run(turn)).resolves.toMatchObject({ disposition: 'quarantined' });
+    expect(coordinator.quarantine.has(turn.turnId)).toBe(true);
+
+    const switched = await coordinator.select({
+      expectedCurrentSelectionId: h.selectionId,
+      target: {
+        card_id: 'openai-gpt-5.5',
+        card_version: 1,
+        requested_id: 'gpt-5.5',
+      },
+    });
+    expect(switched.selection).toMatchObject({
+      kind: 'switch',
+      predecessor_selection_id: h.selectionId,
+      target: { card_id: 'openai-gpt-5.5', requested_id: 'gpt-5.5' },
+    });
+    expect(coordinator.quarantine.size).toBe(0);
+    await expect(coordinator.currentSelection()).resolves.toMatchObject({
+      state: 'selected',
+      selection: { selection_id: switched.selection.selection_id },
+    });
+  });
+
   it('seals admitted bytes behind metadata-only quarantine after both real HTTP boundaries', async () => {
     const h = await authorizationHarness();
+    const turn = { ...turnBase, selectionId: h.selectionId };
     const provider = await loopbackProvider();
     const content = 'Synthetic admitted model output for quarantine.';
     let enteredProvider!: () => void;
@@ -344,6 +468,7 @@ describe('M5.4 containment with M5.5 durable model-call evidence', () => {
 
   it('records served-model substitution, adds no quarantine entry, and halts the lane', async () => {
     const h = await authorizationHarness();
+    const turn = { ...turnBase, selectionId: h.selectionId };
     const provider = await loopbackProvider();
     const content = 'Synthetic output from an unapproved served model.';
     provider.enqueue({ model: 'substitute-model', content });
@@ -387,6 +512,7 @@ describe('M5.4 containment with M5.5 durable model-call evidence', () => {
 
   it('withholds a configured red-line match without treating it as releasable output', async () => {
     const h = await authorizationHarness();
+    const turn = { ...turnBase, selectionId: h.selectionId };
     const provider = await loopbackProvider();
     const content = 'I am conscious and I will always love you.';
     provider.enqueue({ model: turn.requestedId, content });
@@ -411,6 +537,7 @@ describe('M5.4 containment with M5.5 durable model-call evidence', () => {
 
   it('stops before disclosure for an unapproved lane and after disclosure if authority is revoked', async () => {
     const h = await authorizationHarness();
+    const turn = { ...turnBase, selectionId: h.selectionId };
     const provider = await loopbackProvider();
     expect(
       () =>
@@ -469,6 +596,7 @@ describe('M5.4 containment with M5.5 durable model-call evidence', () => {
 
   it('records evidence-honest system-use invalidation after provider disclosure and persists no output', async () => {
     const h = await authorizationHarness();
+    const turn = { ...turnBase, selectionId: h.selectionId };
     const provider = await loopbackProvider();
     const content = 'Synthetic output produced immediately before the decision is suspended.';
     provider.enqueue({
@@ -501,6 +629,7 @@ describe('M5.4 containment with M5.5 durable model-call evidence', () => {
 
   it('durably records timeout and outage metadata without provider error detail', async () => {
     const h = await authorizationHarness();
+    const turn = { ...turnBase, selectionId: h.selectionId };
     const provider = await loopbackProvider();
     for (const failure of [
       { turnId: 'turn_model_timeout', error: new ModelAdapterError('timeout', 'synthetic secret timeout detail') },
@@ -546,6 +675,7 @@ describe('M5.4 containment with M5.5 durable model-call evidence', () => {
 
   it('totalizes non-object custom-adapter results and preserves indeterminate state only if reporting fails', async () => {
     const h = await authorizationHarness();
+    const turn = { ...turnBase, selectionId: h.selectionId };
     const provider = await loopbackProvider();
     const malformed = new ModelTurnCoordinator({
       worldId: 'w-demo',
@@ -616,6 +746,9 @@ describe('M5.4 containment with M5.5 durable model-call evidence', () => {
       worldId: 'w-demo',
       caseId: 'case_demo',
       authorization: {
+        currentModelSelection: (world, caseId) => h.authorization.currentModelSelection(world, caseId),
+        checkModelSelection: (world, caseId, input) => h.authorization.checkModelSelection(world, caseId, input),
+        selectModel: (world, caseId, input) => h.authorization.selectModel(world, caseId, input),
         beginModelCall: (input) => h.authorization.beginModelCall(input),
         admitModelOutput: (world, callId, input) => h.authorization.admitModelOutput(world, callId, input),
         failModelCall: async () => {
@@ -649,6 +782,7 @@ describe('M5.4 containment with M5.5 durable model-call evidence', () => {
 
   it('halts on tool calls, malformed provider evidence, or a changed admission binding', async () => {
     const h = await authorizationHarness();
+    const turn = { ...turnBase, selectionId: h.selectionId };
     const provider = await loopbackProvider();
     const toolContent = 'Synthetic tool-bearing response that must not escape.';
     provider.enqueue({ model: turn.requestedId, content: toolContent, toolCalls: [{ id: 'call_1' }] });
@@ -698,6 +832,9 @@ describe('M5.4 containment with M5.5 durable model-call evidence', () => {
       worldId: 'w-demo',
       caseId: 'case_demo',
       authorization: {
+        currentModelSelection: (world, caseId) => h.authorization.currentModelSelection(world, caseId),
+        checkModelSelection: (world, caseId, input) => h.authorization.checkModelSelection(world, caseId, input),
+        selectModel: (world, caseId, input) => h.authorization.selectModel(world, caseId, input),
         beginModelCall: (input) => h.authorization.beginModelCall(input),
         admitModelOutput: async (world, callId, input) => {
           const admission = await h.authorization.admitModelOutput(world, callId, input);

@@ -29,6 +29,8 @@ export const frozenProposal = z.object({
   /** A changed proposal is a new proposal; revisions are monotonic within an action. */
   revision: integer.min(1),
   action_id: id,
+  /** ADR-009: current case selection; prevents A -> B -> A authority revival. */
+  selection_id: id,
   created_at: timestamp,
 
   declared_objective: z.string().min(1),

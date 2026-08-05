@@ -2,6 +2,7 @@
 /** Deterministic replay state and the sole mutation path for WAL operations. */
 import type { z } from 'zod';
 
+import { canonicalize } from './canonicalize.js';
 import { digestFor, verifyDigest } from './hash.js';
 import type {
   CaseSessionHandoffRecord,
@@ -13,7 +14,9 @@ import type {
   GateRuling,
   Mandate,
   ModelCallRecord,
-  ModelSelectionRecord,
+  ModelSelectionCheckRecord,
+  ModelSelectionObservation,
+  ModelSelectionTransition,
   NonceRecord,
   PatternEvent,
   PolicyActivation,
@@ -71,7 +74,10 @@ export interface WorldState {
   readonly escalations: Map<string, EscalationRecord>;
   readonly storeItems: Map<string, ConversationStoreEntry>;
   readonly patternEvents: PatternEvent[];
-  readonly modelSelections: ModelSelectionRecord[];
+  readonly modelSelectionChecks: Map<string, ModelSelectionCheckRecord>;
+  readonly modelSelections: Map<string, ModelSelectionTransition>;
+  readonly currentModelSelectionByCase: Map<string, string>;
+  readonly modelSelectionObservations: Map<string, ModelSelectionObservation>;
   readonly modelCalls: Map<string, ModelCallRecord>;
   readonly reviews: Map<string, ReviewObligation>;
   readonly actionRecords: RecordEntry[];
@@ -107,7 +113,10 @@ export function createWorldState(worldId: string): WorldState {
     escalations: new Map(),
     storeItems: new Map(),
     patternEvents: [],
-    modelSelections: [],
+    modelSelectionChecks: new Map(),
+    modelSelections: new Map(),
+    currentModelSelectionByCase: new Map(),
+    modelSelectionObservations: new Map(),
     modelCalls: new Map(),
     reviews: new Map(),
     actionRecords: [],
@@ -136,7 +145,10 @@ export function cloneWorldState(state: WorldState): WorldState {
     escalations: new Map(state.escalations),
     storeItems: new Map(state.storeItems),
     patternEvents: [...state.patternEvents],
-    modelSelections: [...state.modelSelections],
+    modelSelectionChecks: new Map(state.modelSelectionChecks),
+    modelSelections: new Map(state.modelSelections),
+    currentModelSelectionByCase: new Map(state.currentModelSelectionByCase),
+    modelSelectionObservations: new Map(state.modelSelectionObservations),
     modelCalls: new Map(state.modelCalls),
     reviews: new Map(state.reviews),
     actionRecords: [...state.actionRecords],
@@ -268,6 +280,21 @@ export function applyWorldOp(state: WorldState, op: WalOp, transactionTimestamp:
     case 'proposal.freeze': {
       requireWorld(state, op.proposal, 'proposal');
       requireUnique(state.proposals, op.proposal.proposal_id, `proposal ${op.proposal.proposal_id}`);
+      const selection = requireValue(
+        state.modelSelections,
+        op.proposal.selection_id,
+        `model selection ${op.proposal.selection_id}`,
+      );
+      if (
+        state.currentModelSelectionByCase.get(selection.case_id) !== selection.selection_id ||
+        selection.mandate_id !== op.proposal.mandate_ref.mandate_id ||
+        selection.mandate_version !== op.proposal.mandate_ref.version ||
+        selection.target.card_id !== op.proposal.acting_model.card_id ||
+        selection.target.card_version !== op.proposal.acting_model.card_version ||
+        selection.target.requested_id !== op.proposal.acting_model.requested_id
+      ) {
+        fail('binding-mismatch', `proposal ${op.proposal.proposal_id} is not bound to the current model selection`);
+      }
       if (!verifyDigest(op.proposal.proposal_hash, proposalDigest(op.proposal))) {
         fail('proposal-hash', `proposal ${op.proposal.proposal_id} has the wrong frozen hash`);
       }
@@ -386,8 +413,26 @@ export function applyWorldOp(state: WorldState, op: WalOp, transactionTimestamp:
         fail('missing-state', `ruling ${op.ruling.ruling_id} refers to an unknown proposal hash`);
       }
       const proposal = requireValue(state.proposals, proposalId, `proposal ${proposalId}`);
-      if (proposal.acting_model.requested_id !== op.ruling.binding.acting_model_id) {
+      if (
+        proposal.acting_model.requested_id !== op.ruling.binding.acting_model_id ||
+        proposal.selection_id !== op.ruling.binding.selection_id
+      ) {
         fail('binding-mismatch', `ruling ${op.ruling.ruling_id} differs from its proposal model`);
+      }
+      const currentSelection = state.modelSelections.get(op.ruling.binding.selection_id);
+      if (
+        currentSelection === undefined ||
+        state.currentModelSelectionByCase.get(currentSelection.case_id) !== currentSelection.selection_id
+      ) {
+        fail('binding-mismatch', `ruling ${op.ruling.ruling_id} is not bound to the current model selection`);
+      }
+      if (
+        op.ruling.verdict !== 'deny' &&
+        (currentSelection.target.card_digest !== op.ruling.binding.card_digest ||
+          currentSelection.target.verifying_key_id !== op.ruling.binding.card_key_id ||
+          canonicalize(currentSelection.system_use_decision) !== canonicalize(op.ruling.binding.system_use_decision))
+      ) {
+        fail('binding-mismatch', `ruling ${op.ruling.ruling_id} differs from the current model selection evidence`);
       }
       if (op.ruling.verdict !== 'deny') {
         const mandate = requireValue(
@@ -706,19 +751,129 @@ export function applyWorldOp(state: WorldState, op: WalOp, transactionTimestamp:
       }
       state.patternEvents.push(op.event);
       break;
-    case 'model.select':
-      requireWorld(state, op.selection, 'model selection');
-      if (state.modelSelections.some((selection) => selection.selection_id === op.selection.selection_id)) {
-        fail('duplicate-state', `model selection ${op.selection.selection_id} exists`);
+    case 'model_selection_check.issue':
+      requireWorld(state, op.check, 'model selection check');
+      if (
+        op.check.state !== 'issued' ||
+        op.check.consumed_at !== null ||
+        op.check.authenticated_actor !== 'proc:orchestrator' ||
+        op.check.issued_at !== transactionTimestamp ||
+        Date.parse(op.check.expires_at) - Date.parse(op.check.issued_at) > 300_000
+      ) {
+        fail(
+          'illegal-initial-state',
+          'a model selection check must be issued now to the orchestrator for at most five minutes',
+        );
       }
-      state.modelSelections.push(op.selection);
+      requireUnique(state.modelSelectionChecks, op.check.check_id, `model selection check ${op.check.check_id}`);
+      state.modelSelectionChecks.set(op.check.check_id, op.check);
       break;
+    case 'model_selection_check.consume': {
+      const current = requireValue(
+        state.modelSelectionChecks,
+        op.check_id,
+        `model selection check ${op.check_id}`,
+      );
+      if (current.state !== 'issued') {
+        fail('illegal-transition', `model selection check ${op.check_id}: ${current.state} -> consumed`);
+      }
+      if (op.consumed_at !== transactionTimestamp) {
+        fail('binding-mismatch', 'selection check consumption must use the transaction timestamp');
+      }
+      state.modelSelectionChecks.set(op.check_id, { ...current, state: 'consumed', consumed_at: op.consumed_at });
+      break;
+    }
+    case 'model_selection_check.expire': {
+      const current = requireValue(
+        state.modelSelectionChecks,
+        op.check_id,
+        `model selection check ${op.check_id}`,
+      );
+      if (current.state !== 'issued') {
+        fail('illegal-transition', `model selection check ${op.check_id}: ${current.state} -> expired`);
+      }
+      state.modelSelectionChecks.set(op.check_id, { ...current, state: 'expired' });
+      break;
+    }
+    case 'model_selection.append': {
+      requireWorld(state, op.selection, 'model selection');
+      requireUnique(state.modelSelections, op.selection.selection_id, `model selection ${op.selection.selection_id}`);
+      const check = requireValue(
+        state.modelSelectionChecks,
+        op.selection.check_id,
+        `model selection check ${op.selection.check_id}`,
+      );
+      const currentId = state.currentModelSelectionByCase.get(op.selection.case_id) ?? null;
+      if (
+        check.state !== 'consumed' ||
+        check.case_id !== op.selection.case_id ||
+        check.expected_current_selection_id !== op.selection.predecessor_selection_id ||
+        currentId !== op.selection.predecessor_selection_id ||
+        check.mandate_id !== op.selection.mandate_id ||
+        check.mandate_version !== op.selection.mandate_version ||
+        canonicalize(check.target) !== canonicalize(op.selection.target) ||
+        canonicalize(check.system_use_decision) !== canonicalize(op.selection.system_use_decision) ||
+        state.policy === undefined ||
+        state.policy.policy_version !== check.policy_version ||
+        state.policy.policy_content_digest !== check.policy_content_digest ||
+        state.policy.evaluator_build_id !== check.evaluator_build_id ||
+        op.selection.selected_at !== transactionTimestamp
+      ) {
+        fail('binding-mismatch', `model selection ${op.selection.selection_id} differs from its consumed check`);
+      }
+      state.modelSelections.set(op.selection.selection_id, op.selection);
+      state.currentModelSelectionByCase.set(op.selection.case_id, op.selection.selection_id);
+      break;
+    }
+    case 'model_selection.observe': {
+      requireWorld(state, op.observation, 'model selection observation');
+      requireUnique(
+        state.modelSelectionObservations,
+        op.observation.observation_id,
+        `model selection observation ${op.observation.observation_id}`,
+      );
+      if ([...state.modelSelectionObservations.values()].some((value) => value.call_id === op.observation.call_id)) {
+        fail('duplicate-state', `model call ${op.observation.call_id} already has a selection observation`);
+      }
+      requireValue(state.modelSelections, op.observation.selection_id, `model selection ${op.observation.selection_id}`);
+      const call = requireValue(state.modelCalls, op.observation.call_id, `model call ${op.observation.call_id}`);
+      if (
+        call.state !== 'terminal' ||
+        call.selection_id !== op.observation.selection_id ||
+        call.served_id !== op.observation.served_id ||
+        call.outcome !== op.observation.terminal_outcome ||
+        op.observation.observed_at !== transactionTimestamp
+      ) {
+        fail('binding-mismatch', `selection observation ${op.observation.observation_id} differs from its call`);
+      }
+      state.modelSelectionObservations.set(op.observation.observation_id, op.observation);
+      break;
+    }
     case 'model_call.open':
       requireWorld(state, op.call, 'model call');
       if (op.call.state !== 'open' || op.call.outcome !== 'indeterminate') {
         fail('illegal-initial-state', 'a new model call must be open and indeterminate');
       }
       requireUnique(state.modelCalls, op.call.call_id, `model call ${op.call.call_id}`);
+      {
+        const selection = requireValue(
+          state.modelSelections,
+          op.call.selection_id,
+          `model selection ${op.call.selection_id}`,
+        );
+        if (
+          state.currentModelSelectionByCase.get(op.call.case_id) !== selection.selection_id ||
+          selection.case_id !== op.call.case_id ||
+          selection.mandate_id !== op.call.mandate_id ||
+          selection.mandate_version !== op.call.mandate_version ||
+          selection.target.card_id !== op.call.card_id ||
+          selection.target.card_version !== op.call.card_version ||
+          selection.target.requested_id !== op.call.requested_id ||
+          canonicalize(selection.system_use_decision) !== canonicalize(op.call.system_use_decision)
+        ) {
+          fail('binding-mismatch', `model call ${op.call.call_id} differs from its current selection`);
+        }
+      }
       if ([...state.modelCalls.values()].some((call) => call.case_id === op.call.case_id && call.turn_id === op.call.turn_id)) {
         fail('duplicate-state', `model turn ${op.call.turn_id} already has a call`);
       }
@@ -727,6 +882,9 @@ export function applyWorldOp(state: WorldState, op: WalOp, transactionTimestamp:
     case 'model_call.complete': {
       const current = requireValue(state.modelCalls, op.call_id, `model call ${op.call_id}`);
       if (current.state !== 'open') fail('illegal-transition', `model call ${op.call_id} is ${current.state}`);
+      if (state.currentModelSelectionByCase.get(current.case_id) !== current.selection_id) {
+        fail('stale-selection', `model call ${op.call_id} is bound to a stale selection`);
+      }
       if (op.completed_at < current.opened_at) fail('clock-regression', 'model call completed before it opened');
       if (op.completed_at > current.expires_at) fail('expired-state', `model call ${op.call_id} is expired`);
       state.modelCalls.set(
@@ -747,8 +905,13 @@ export function applyWorldOp(state: WorldState, op: WalOp, transactionTimestamp:
     case 'model_call.fail': {
       const current = requireValue(state.modelCalls, op.call_id, `model call ${op.call_id}`);
       if (current.state !== 'open') fail('illegal-transition', `model call ${op.call_id} is ${current.state}`);
+      if (state.currentModelSelectionByCase.get(current.case_id) !== current.selection_id) {
+        fail('stale-selection', `model call ${op.call_id} is bound to a stale selection`);
+      }
       if (op.completed_at < current.opened_at) fail('clock-regression', 'model call failed before it opened');
-      if (op.completed_at > current.expires_at) fail('expired-state', `model call ${op.call_id} is expired`);
+      if (op.completed_at > current.expires_at && op.failure_reason !== 'selection-invalidated') {
+        fail('expired-state', `model call ${op.call_id} is expired`);
+      }
       state.modelCalls.set(
         op.call_id,
         modelCallRecord.parse({
@@ -844,10 +1007,66 @@ export function applyWorldOp(state: WorldState, op: WalOp, transactionTimestamp:
   }
 }
 
+function validateTransactionShape(state: WorldState, ops: readonly WalOp[], timestamp: string): void {
+  const selections = ops.filter((op): op is Extract<WalOp, { op: 'model_selection.append' }> =>
+    op.op === 'model_selection.append',
+  );
+  if (selections.length > 1 || (selections.length === 1 && ops.at(-1) !== selections[0])) {
+    fail('transaction-shape', 'a transaction may append at most one model selection, and it must be last');
+  }
+  for (const selectionOp of selections) {
+    const consumes = ops.filter(
+      (op): op is Extract<WalOp, { op: 'model_selection_check.consume' }> =>
+        op.op === 'model_selection_check.consume' && op.check_id === selectionOp.selection.check_id,
+    );
+    if (consumes.length !== 1 || consumes[0]?.consumed_at !== timestamp) {
+      fail('transaction-shape', 'a model selection must consume its check in the same transaction');
+    }
+  }
+  for (const op of ops) {
+    if (
+      op.op === 'model_selection_check.consume' &&
+      !selections.some((selection) => selection.selection.check_id === op.check_id)
+    ) {
+      fail('transaction-shape', 'a model selection check may be consumed only by its selection transaction');
+    }
+  }
+  for (const op of ops) {
+    if (op.op === 'model_call.fail' && op.failure_reason === 'selection-invalidated') {
+      const call = state.modelCalls.get(op.call_id);
+      const matchingSelection = selections.find(
+        (candidate) =>
+          candidate.selection.predecessor_selection_id === call?.selection_id &&
+          candidate.selection.case_id === call?.case_id,
+      );
+      if (
+        call === undefined ||
+        matchingSelection === undefined ||
+        op.provider_disclosure !== 'possible' ||
+        op.served_id !== null ||
+        op.completed_at !== timestamp
+      ) {
+        fail('transaction-shape', 'selection invalidation may occur only inside its successor switch transaction');
+      }
+    }
+    if (op.op === 'model_selection.observe') {
+      const terminal = ops.find(
+        (candidate) =>
+          (candidate.op === 'model_call.complete' || candidate.op === 'model_call.fail') &&
+          candidate.call_id === op.observation.call_id,
+      );
+      if (terminal === undefined) {
+        fail('transaction-shape', 'a selection observation must accompany its terminal model-call operation');
+      }
+    }
+  }
+}
+
 export function applyWorldTransaction(state: WorldState, ops: readonly WalOp[], timestamp: string): void {
   if (state.lastTimestamp !== undefined && timestamp < state.lastTimestamp) {
     fail('clock-regression', `transaction timestamp ${timestamp} precedes ${state.lastTimestamp}`);
   }
+  validateTransactionShape(state, ops, timestamp);
   for (const op of ops) applyWorldOp(state, op, timestamp);
   state.lastTimestamp = timestamp;
   validateWorldState(state);
@@ -856,6 +1075,17 @@ export function applyWorldTransaction(state: WorldState, ops: readonly WalOp[], 
 export function validateWorldState(state: WorldState): void {
   if (state.policy !== undefined && state.policy.world_id !== state.worldId) {
     fail('world-mismatch', `policy activation belongs to ${state.policy.world_id}, not ${state.worldId}`);
+  }
+  for (const [caseId, selectionId] of state.currentModelSelectionByCase) {
+    const selection = state.modelSelections.get(selectionId);
+    if (selection === undefined || selection.case_id !== caseId) {
+      fail('orphan-state', `case ${caseId} has no matching current model selection`);
+    }
+  }
+  for (const call of state.modelCalls.values()) {
+    if (call.state === 'open' && state.currentModelSelectionByCase.get(call.case_id) !== call.selection_id) {
+      fail('stale-open-call', `open model call ${call.call_id} is bound to a stale selection`);
+    }
   }
   for (const nonce of state.nonces.values()) {
     const ruling = state.rulings.get(nonce.ruling_id);
@@ -904,6 +1134,13 @@ export function validateWorldState(state: WorldState): void {
       }
     }
     if (ruling.status !== 'issued') continue;
+    const selection = state.modelSelections.get(ruling.binding.selection_id);
+    if (
+      selection === undefined ||
+      state.currentModelSelectionByCase.get(selection.case_id) !== selection.selection_id
+    ) {
+      fail('stale-issued-ruling', `issued ruling ${ruling.ruling_id} is bound to a stale selection`);
+    }
     if (
       state.policy === undefined ||
       ruling.policy_version !== state.policy.policy_version ||

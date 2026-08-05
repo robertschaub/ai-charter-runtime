@@ -2,7 +2,7 @@
 /** Replay-complete transactional state artifacts. */
 import { z } from 'zod';
 
-import { classToken, hexDigest, id, integer, modelId, role, timestamp, worldId } from './common.js';
+import { classToken, hexDigest, id, integer, role, timestamp, worldId } from './common.js';
 import { disposition, interventionContract } from './intervention.js';
 import { counterName, gateRuling } from './ruling.js';
 import { systemUseDecisionReference } from './systemUseDecision.js';
@@ -194,21 +194,6 @@ export const patternEvent = z
   })
   .strict();
 export type PatternEvent = z.infer<typeof patternEvent>;
-
-export const modelSelectionRecord = z
-  .object({
-    world_id: worldId,
-    selection_id: id,
-    case_id: id,
-    requested_id: modelId,
-    served_id: modelId,
-    card_id: z.string().min(1),
-    card_version: integer.min(1),
-    card_digest: hexDigest,
-    selected_at: timestamp,
-  })
-  .strict();
-export type ModelSelectionRecord = z.infer<typeof modelSelectionRecord>;
 
 export const REVIEW_STATES = ['open', 'resolved', 'cancelled'] as const;
 export const reviewObligation = z

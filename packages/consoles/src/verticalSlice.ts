@@ -6,6 +6,7 @@ import {
   AuthorizationCore,
   bindMandate,
   checkpointReceiptReference,
+  ConversationProjectionService,
   digestFor,
   effectIntent,
   freezeProposal,
@@ -141,11 +142,12 @@ export async function runVerticalSlice(options: VerticalSliceOptions): Promise<L
     now: () => now,
   });
   try {
+    const systemUse = syntheticSystemUseForTests(store);
     const authorization = new AuthorizationCore({
       store,
       keyring: options.keyring,
       policy,
-      systemUse: syntheticSystemUseForTests(store),
+      systemUse,
       resolveAuthorizedAgent: (actor) => (actor.credential === 'proc:orchestrator' ? 'agent_demo' : undefined),
       resolveScreening: () => ({
         performed: false,
@@ -168,6 +170,53 @@ export async function runVerticalSlice(options: VerticalSliceOptions): Promise<L
     // Startup-only synthetic seed. No orchestrator route exposes this authorization-owned operation.
     await authorization.grantMandate(boundMandate, AUTHZ_BOOTSTRAP);
 
+    const projections = new ConversationProjectionService({
+      store,
+      cards: options.cardRegistry,
+      keyring: options.keyring,
+      caseId,
+      authorizationBootId: 'authz_boot_m3',
+      screeningFixtures: [],
+      now: () => now,
+      systemUse,
+    });
+    const checked = await projections.checkSelection({
+      expected_current_selection_id: null,
+      target: boundMandate.default_acting_model,
+      actor: ORCHESTRATOR,
+    });
+    const initial = await projections.selectModel({
+      check_id: checked.check.check_id,
+      expected_current_selection_id: null,
+      actor: ORCHESTRATOR,
+    });
+    let selected = initial;
+    if (
+      options.cardId !== initial.selection.target.card_id ||
+      options.cardVersion !== initial.selection.target.card_version ||
+      options.adapter.requestedId !== initial.selection.target.requested_id
+    ) {
+      const switchCheck = await projections.checkSelection({
+        expected_current_selection_id: initial.selection.selection_id,
+        target: {
+          card_id: options.cardId,
+          card_version: options.cardVersion,
+          requested_id: options.adapter.requestedId,
+        },
+        actor: ORCHESTRATOR,
+      });
+      selected = await projections.selectModel({
+        check_id: switchCheck.check.check_id,
+        expected_current_selection_id: initial.selection.selection_id,
+        actor: ORCHESTRATOR,
+      });
+    }
+    const started = await projections.beginCall({
+      turn_id: 'turn_m3_vertical',
+      selection_id: selected.selection.selection_id,
+      actor: ORCHESTRATOR,
+    });
+
     const modelResponse = await options.adapter.act({
       messages: [
         {
@@ -183,6 +232,25 @@ export async function runVerticalSlice(options: VerticalSliceOptions): Promise<L
       },
     });
     if (modelResponse.content === null) throw new VerticalSliceError('proposal', 'acting model returned no proposal');
+    const admitted = await projections.completeCall({
+      call_id: started.call.call_id,
+      output: {
+        turn_id: started.call.turn_id,
+        selection_id: started.call.selection_id,
+        mandate_id: started.call.mandate_id,
+        mandate_version: started.call.mandate_version,
+        card_id: started.call.card_id,
+        card_version: started.call.card_version,
+        requested_id: started.call.requested_id,
+        served_id: modelResponse.servedId,
+        projection_digest: started.call.projection_digest,
+        content: modelResponse.content,
+      },
+      actor: ORCHESTRATOR,
+    });
+    if (admitted.decision.disposition !== 'admitted') {
+      throw new VerticalSliceError('proposal', 'acting model output was withheld by admission');
+    }
     let rawDraft: unknown;
     try {
       rawDraft = JSON.parse(modelResponse.content);
@@ -200,6 +268,7 @@ export async function runVerticalSlice(options: VerticalSliceOptions): Promise<L
       material_inputs: [],
       derived_claims: [],
       commercial_influence: { applicable: false, note: 'Not applicable in the synthetic grant scenario.' },
+      selection_id: selected.selection.selection_id,
       acting_model: {
         requested_id: modelResponse.requestedId,
         served_id: modelResponse.servedId,
@@ -209,8 +278,6 @@ export async function runVerticalSlice(options: VerticalSliceOptions): Promise<L
       mandate_ref: { mandate_id: boundMandate.mandate_id, version: boundMandate.version },
     });
 
-    const selected = await authorization.recordModelSelection({ caseId, proposal, actor: ORCHESTRATOR });
-    if (!selected.accepted) throw new VerticalSliceError('model-selection', selected.defect);
     const ruled = await authorization.ruleProposal({
       gate: 'commit',
       proposal,
@@ -262,7 +329,7 @@ export async function runVerticalSlice(options: VerticalSliceOptions): Promise<L
       kind: 'local-record-receipt',
       world_id: boundMandate.world_id,
       case_id: caseId,
-      selection_id: selected.selectionId,
+      selection_id: selected.selection.selection_id,
       requested_model_id: modelResponse.requestedId,
       served_model_id: modelResponse.servedId,
       ruling_id: ruled.ruling.ruling_id,

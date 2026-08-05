@@ -5,7 +5,8 @@ A runnable proof of concept of the [Our AI Charter runtime reference model](http
 at an AI prompt, the action path **plan → prepare → check → decide → review** executes with five gates
 (**Authorize → Submit → Verify → Commit → Rely**) enforced *outside* the acting model — machine verdicts
 **allow / deny / escalate**, automatic escalation to a human console carrying a six-field intervention
-contract, two selectable acting-model evidence entries (with governed switching still an M5 task), and hash-chained action records
+contract, two principal-approved acting-model evidence entries, a headless authorization-owned selection/switch
+protocol (without browser initiation or native provider wiring), and hash-chained action records
 sealed before effect.
 
 The authoritative build specification lives in the documentation repository:
@@ -31,8 +32,9 @@ The exact upstream revision, digest, reviewed runtime baseline, and remaining mi
   M5.6 is reviewed at `b57c01e`; it adds an authorization-owned, replayable system-use decision prerequisite and a
   principal-only read view. Approval is necessary for the synthetic use but never sufficient for an action.
   The authorization gate and principal read view are wired into `runtime:start`; model-turn provider ingress,
-  browser mutation/message ingress, and an output-release consumer are not. Empathy triggers and governed
-  switching are also inactive.
+  browser mutation/message ingress, and an output-release consumer are not. The M5.7 implementation candidate
+  adds replayable headless selection and switching through orchestrator-authenticated authorization routes, but
+  `runtime:start` has no caller for them and the browser path remains closed. Empathy triggers are also inactive.
 - **A deterministic gate proves declared rules were applied** — not that the rules are lawful, fair, or legitimate.
 - **Commit-token window (interpretive choice).** Commitment binds at `commit-verify`; a revocation landing in the
   token's short TTL is too late for that action by definition. On the stricter reading of "authority in flight",
@@ -124,6 +126,12 @@ id/version/digest, bounded status/condition
 facts, and current-at-record results; evidence packs and rationale stay out of runtime records. A transition
 invalidates outstanding rulings and blocks post-provider admission without releasing or persisting the output.
 The principal view is read-only evidence, not a trust score, certification, legal approval, or action authority.
+The M5.7 implementation candidate replaces the legacy proposal-time selection marker with one append-only,
+authorization-owned current selection per configured case. Boot-bound single-use checks precede initial selection
+or switching; selection identity binds calls, admission, proposals, rulings, and commitment verification. A switch
+atomically retires unresolved prior-lane rulings and calls, while served identity is appended only from confirmed
+terminal call evidence. This candidate remains pending exact-SHA adversarial review and adds no browser selection,
+native provider ingress, conversation ingestion, output release, live probe, or M6 path.
 
 Offline and deterministic verification uses synthetic records and skips only the remote-presence step:
 

@@ -293,6 +293,7 @@ export class AuthorizationReadSide {
       mandate_id: mandateValue.mandate_id,
       mandate_version: mandateValue.version,
       mandate_state: mandateValue.state,
+      default_acting_model: mandateValue.default_acting_model,
       models: mandateValue.approved_models
         .filter((approval) => approval.roles.includes('acting'))
         .map((approval) => {

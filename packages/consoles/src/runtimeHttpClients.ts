@@ -2,18 +2,20 @@
 /** Narrow HTTP clients held by the orchestrator process. */
 import {
   classToken,
-  cardSlug,
   effectIntent,
   frozenProposal,
   id,
-  integer,
-  modelId,
   modelCallAdmission,
   modelCallAdmissionRequest,
   modelCallBeginRequest,
   modelCallFailedRecord,
   modelCallFailureRequest,
   modelCallStart,
+  modelSelectionCheckProjection,
+  modelSelectionCheckRequest,
+  modelSelectionProjection,
+  modelSelectionRequest,
+  currentModelSelectionProjection,
   approvedModelsProjection,
   proposalRulingProjection,
   rulingProjection,
@@ -29,6 +31,11 @@ import {
   type ModelCallFailedRecord,
   type ModelCallFailureRequest,
   type ModelCallStart,
+  type CurrentModelSelectionProjection,
+  type ModelSelectionCheckProjection,
+  type ModelSelectionCheckRequest,
+  type ModelSelectionProjection,
+  type ModelSelectionRequest,
   type ModelOutputAdmissionRequest,
 } from 'gate-core';
 import type { ServicesHostExecution } from 'services-mock';
@@ -152,23 +159,49 @@ abstract class JsonHttpClient {
 }
 
 export class OrchestratorAuthorizationHttpClient extends JsonHttpClient {
+  async currentModelSelection(worldIdInput: string, caseIdInput: string): Promise<CurrentModelSelectionProjection> {
+    const world = worldId.parse(worldIdInput);
+    const caseId = id.parse(caseIdInput);
+    return currentModelSelectionProjection.parse(
+      await this.get(`/w/${world}/cases/${caseId}/model-selection`),
+    );
+  }
+
+  async checkModelSelection(
+    worldIdInput: string,
+    caseIdInput: string,
+    input: ModelSelectionCheckRequest,
+  ): Promise<ModelSelectionCheckProjection> {
+    const world = worldId.parse(worldIdInput);
+    const caseId = id.parse(caseIdInput);
+    const request = modelSelectionCheckRequest.parse(input);
+    return modelSelectionCheckProjection.parse(
+      await this.post(`/w/${world}/cases/${caseId}/model-selection-checks`, request),
+    );
+  }
+
+  async selectModel(
+    worldIdInput: string,
+    caseIdInput: string,
+    input: ModelSelectionRequest,
+  ): Promise<ModelSelectionProjection> {
+    const world = worldId.parse(worldIdInput);
+    const caseId = id.parse(caseIdInput);
+    const request = modelSelectionRequest.parse(input);
+    return modelSelectionProjection.parse(
+      await this.post(`/w/${world}/cases/${caseId}/model-selections`, request),
+    );
+  }
+
   async beginModelCall(input: {
     readonly worldId: string;
     readonly turnId: string;
-    readonly mandateId: string;
-    readonly mandateVersion: number;
-    readonly cardId: string;
-    readonly cardVersion: number;
-    readonly requestedId: string;
+    readonly selectionId: string;
   }): Promise<ModelCallStart> {
     const world = worldId.parse(input.worldId);
     const request = modelCallBeginRequest.parse({
       turn_id: input.turnId,
-      mandate_id: id.parse(input.mandateId),
-      mandate_version: integer.min(1).parse(input.mandateVersion),
-      card_id: cardSlug.parse(input.cardId),
-      card_version: integer.min(1).parse(input.cardVersion),
-      requested_id: modelId.parse(input.requestedId),
+      selection_id: id.parse(input.selectionId),
     });
     return modelCallStart.parse(await this.post(`/w/${world}/model-calls/begin`, request));
   }

@@ -24,6 +24,7 @@ export const AUTHORITY_DEFECTS = [
   'substituted-service',
   'stale-policy',
   'stale-card',
+  'stale-selection',
   'replayed-ruling',
   'proposal-mismatch',
 ] as const;

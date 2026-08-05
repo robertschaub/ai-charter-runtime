@@ -22,6 +22,7 @@ const projection = conversationProjection.parse({
 function request(overrides: Record<string, unknown> = {}) {
   return {
     turn_id: 'turn_one',
+    selection_id: 'sel_one',
     mandate_id: 'mandate_one',
     mandate_version: 1,
     card_id: 'openai-gpt-5.5',

@@ -1,6 +1,6 @@
 [
   {
-    "proposal_hash": "7f416cafebfb8a251df701f4ad9d79c35255c2b4f1659e790284a26b66f135a2",
+    "proposal_hash": "7e0bf05ee258b675b0e7296611773b2b12ac06fc4c7f5be7dc9dc3a4ff2a16c0",
     "gate": "submit",
     "provider": "openai-gpt-5.5",
     "suspect_item_ids": [
@@ -18,7 +18,7 @@
     ]
   },
   {
-    "proposal_hash": "7f416cafebfb8a251df701f4ad9d79c35255c2b4f1659e790284a26b66f135a2",
+    "proposal_hash": "7e0bf05ee258b675b0e7296611773b2b12ac06fc4c7f5be7dc9dc3a4ff2a16c0",
     "gate": "verify",
     "provider": "openai-gpt-5.5",
     "suspect_item_ids": [

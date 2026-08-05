@@ -116,7 +116,7 @@ async function startHealthyServices(): Promise<number> {
 }
 
 describe('authorization process fail-stop lifecycle', () => {
-  it('runs exact fixture-pinned screening and fails a changed proposal closed on the native listener', async () => {
+  it('binds native proposals to the selected lane and fails stale fixture hashes closed', async () => {
     const recordsRoot = mkdtempSync(join(tmpdir(), 'authorization-screening-fixture-'));
     roots.push(recordsRoot);
     const checkpointsRoot = join(recordsRoot, 'checkpoints');
@@ -162,9 +162,40 @@ describe('authorization process fail-stop lifecycle', () => {
       const grant = await post('/w/w-demo/mandates', CREDENTIALS.AUTHZ_TOKEN_PRINCIPAL, mandate);
       expect(grant.status).toBe(201);
 
-      const proposal = frozenProposal.parse(
+      const selectionCheckResponse = await post(
+        '/w/w-demo/cases/case_demo/model-selection-checks',
+        CREDENTIALS.AUTHZ_TOKEN_PROC_ORCHESTRATOR,
+        {
+          expected_current_selection_id: null,
+          target: mandate['default_acting_model'],
+        },
+      );
+      expect(selectionCheckResponse.status).toBe(200);
+      const selectionCheck = (await selectionCheckResponse.json()) as {
+        check: { check_id: string };
+      };
+      const selectionResponse = await post(
+        '/w/w-demo/cases/case_demo/model-selections',
+        CREDENTIALS.AUTHZ_TOKEN_PROC_ORCHESTRATOR,
+        {
+          check_id: selectionCheck.check.check_id,
+          expected_current_selection_id: null,
+        },
+      );
+      expect(selectionResponse.status).toBe(200);
+      const selected = (await selectionResponse.json()) as {
+        selection: { selection_id: string };
+      };
+
+      const fixtureProposal = frozenProposal.parse(
         JSON.parse(readFileSync(join(ROOT, 'fixtures', 'demo', 'screening-proposal.json'), 'utf8')),
       );
+      const { proposal_hash: ignoredFixtureHash, ...fixtureBody } = fixtureProposal;
+      void ignoredFixtureHash;
+      const proposal = freezeProposal({
+        ...fixtureBody,
+        selection_id: selected.selection.selection_id,
+      });
       const exact = await post('/w/w-demo/proposals', CREDENTIALS.AUTHZ_TOKEN_PROC_ORCHESTRATOR, {
         gate: 'submit',
         proposal,
@@ -173,7 +204,7 @@ describe('authorization process fail-stop lifecycle', () => {
       });
       expect(exact.status).toBe(200);
       await expect(exact.json()).resolves.toMatchObject({
-        ruling: { verdict: 'escalate', reason: 'A screening signal requires human review.' },
+        ruling: { verdict: 'escalate', reason: 'A required screening check is unavailable.' },
         escalation_id: expect.any(String),
       });
 
@@ -197,8 +228,8 @@ describe('authorization process fail-stop lifecycle', () => {
       });
 
       const wal = readFileSync(join(recordsRoot, 'w-demo', 'wal.jsonl'), 'utf8');
-      expect(wal).toContain('"kind":"submit_projection"');
-      expect(wal).toContain('"kind":"screening_signal"');
+      expect(wal).not.toContain('"kind":"submit_projection"');
+      expect(wal).not.toContain('"kind":"screening_signal"');
       expect(wal).toContain('"kind":"screening_skipped"');
       expect(wal).toContain('"reason":"fixture-unavailable"');
     } finally {

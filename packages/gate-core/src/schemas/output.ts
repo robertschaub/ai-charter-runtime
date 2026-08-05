@@ -43,6 +43,7 @@ function isWellFormedUnicode(value: string): boolean {
 export const modelOutputAdmissionRequest = z
   .object({
     turn_id: id,
+    selection_id: id,
     mandate_id: id,
     mandate_version: integer.min(1),
     card_id: cardSlug,
@@ -71,6 +72,7 @@ const outputControlBase = z
     kind: z.literal('model_output_control'),
     case_id: id,
     turn_id: id,
+    selection_id: id,
     mandate_id: id,
     mandate_version: integer.min(1),
     card_id: cardSlug,

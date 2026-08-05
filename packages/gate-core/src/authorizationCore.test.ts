@@ -254,6 +254,7 @@ function mandateBody(
         data_classes: { acting: ['conf:case', 'purpose:grant-assessment'] },
       },
     ],
+    default_acting_model: { card_id: 'model-demo', card_version: 1, requested_id: 'model-demo-v1' },
     ...overrides,
   };
 }
@@ -279,6 +280,7 @@ function proposal(
     material_consequences: ['Synthetic public-funds commitment.'],
     reversibility_class: 'partially-reversible',
     commercial_influence: { applicable: false, note: 'n/a' },
+    selection_id: 'sel_test_current',
     acting_model: {
       requested_id: 'model-demo-v1',
       served_id: 'model-demo-v1',
@@ -314,10 +316,94 @@ function intentFor(value: FrozenProposal, rulingId: string, service = 'filing', 
   };
 }
 
-async function initialize(value: Harness, body = mandateBody()): Promise<Mandate> {
+async function installTestSelection(
+  value: Harness,
+  bound: Mandate,
+  caseId = 'case_1',
+  selectionId = 'sel_test_current',
+): Promise<string> {
+  const at = '2026-08-01T09:00:00.000Z';
+  const policy = value.store.snapshot().policy;
+  if (policy === undefined) throw new Error('test policy was not activated');
+  const systemUse = value.systemUse.resolve(value.store.snapshot(), bound, policy.policy_version, at);
+  const predecessorSelectionId = value.store.snapshot().currentModelSelectionByCase.get(caseId) ?? null;
+  const checkId = `msc_${selectionId}`;
+  const target = {
+    ...bound.default_acting_model,
+    card_digest: bound.approved_models.find(
+      (entry) =>
+        entry.card_id === bound.default_acting_model.card_id &&
+        entry.card_version === bound.default_acting_model.card_version &&
+        entry.requested_id === bound.default_acting_model.requested_id,
+    )?.card_digest ?? CARD_DIGEST,
+    verifying_key_id: 'card-test',
+  };
+  await value.store.transact(
+    'test_model_selection_check',
+    ORCHESTRATOR,
+    [{
+      op: 'model_selection_check.issue',
+      check: {
+        kind: 'model_selection_check',
+        world_id: bound.world_id,
+        check_id: checkId,
+        authorization_boot_id: 'authz_boot_1',
+        case_id: caseId,
+        authenticated_actor: 'proc:orchestrator',
+        expected_current_selection_id: predecessorSelectionId,
+        mandate_id: bound.mandate_id,
+        mandate_version: bound.version,
+        target,
+        system_use_decision: systemUse,
+        policy_version: policy.policy_version,
+        policy_content_digest: policy.policy_content_digest,
+        evaluator_build_id: policy.evaluator_build_id,
+        issued_at: at,
+        expires_at: '2026-08-01T09:05:00.000Z',
+        state: 'issued',
+        consumed_at: null,
+      },
+    }],
+    at,
+  );
+  await value.store.transact(
+    'test_model_selection_apply',
+    ORCHESTRATOR,
+    [
+      { op: 'model_selection_check.consume', check_id: checkId, consumed_at: at },
+      {
+        op: 'model_selection.append',
+        selection: {
+          world_id: bound.world_id,
+          selection_id: selectionId,
+          case_id: caseId,
+          kind: predecessorSelectionId === null ? 'initial' : 'switch',
+          predecessor_selection_id: predecessorSelectionId,
+          mandate_id: bound.mandate_id,
+          mandate_version: bound.version,
+          target,
+          system_use_decision: systemUse,
+          check_id: checkId,
+          selected_at: at,
+          authority_effect: 'none',
+        },
+      },
+    ],
+    at,
+  );
+  return selectionId;
+}
+
+async function initialize(
+  value: Harness,
+  body = mandateBody(),
+  caseId = 'case_1',
+  selectionId = 'sel_test_current',
+): Promise<Mandate> {
   await value.core.activatePolicy();
   const bound = bindMandate(value.keyring, body);
   await value.core.grantMandate(bound, PRINCIPAL);
+  await installTestSelection(value, bound, caseId, selectionId);
   return bound;
 }
 
@@ -454,7 +540,7 @@ describe('M2 authorization transactions', () => {
 
   it('uses restarted condition configuration for current-at-record evidence without minting fresh authority', async () => {
     const h = harness();
-    await initialize(h);
+    const mandateValue = await initialize(h);
     const prior = [...h.store.snapshot().systemUseDecisions.values()][0];
     if (prior === undefined) throw new Error('expected system-use fixture');
     const unsignedSuccessor = systemUseDecisionRecord.parse({
@@ -481,7 +567,11 @@ describe('M2 authorization transactions', () => {
       }),
       AUTHZ,
     );
-    const frozen = proposal(66, { action_id: 'act_system_use_condition_drift' });
+    const selectionId = await installTestSelection(h, mandateValue, 'case_1', 'sel_condition_current');
+    const frozen = proposal(66, {
+      action_id: 'act_system_use_condition_drift',
+      selection_id: selectionId,
+    });
     const ruled = await h.core.ruleProposal(ruleInput(frozen));
     const committed = await h.core.commitVerify({
       rulingId: ruled.ruling.ruling_id,
@@ -623,7 +713,9 @@ describe('M2 authorization transactions', () => {
     await expect(h.core.activatePolicy(ORCHESTRATOR)).rejects.toMatchObject({ code: 'unauthorized-actor' });
     await h.core.activatePolicy();
     await expect(h.core.reloadPolicy(h.policy, ORCHESTRATOR)).rejects.toMatchObject({ code: 'unauthorized-actor' });
-    await h.core.grantMandate(bindMandate(h.keyring, mandateBody()), PRINCIPAL);
+    const bound = bindMandate(h.keyring, mandateBody());
+    await h.core.grantMandate(bound, PRINCIPAL);
+    await installTestSelection(h, bound);
     const frozen = proposal(49);
     await expect(
       h.core.ruleProposal(ruleInput(frozen, { actor: SERVICES_HOST })),
@@ -1041,13 +1133,16 @@ describe('M2 authorization transactions', () => {
     }
   });
 
-  it('denies missing, expired, revoked, broadened, and substituted authority', async () => {
+  it('fails closed for missing authority and denies expired, revoked, broadened, and substituted authority', async () => {
     const missing = harness();
     await missing.core.activatePolicy();
-    expect((await missing.core.ruleProposal(ruleInput(proposal(1)))).ruling.reason).toContain('missing-mandate');
+    await expect(missing.core.ruleProposal(ruleInput(proposal(1)))).rejects.toThrowError(
+      /model selection sel_test_current does not exist/,
+    );
 
-    const expired = harness('2026-08-03T09:00:00.000Z');
+    const expired = harness();
     await initialize(expired);
+    expired.setNow('2026-08-03T09:00:00.000Z');
     expect((await expired.core.ruleProposal(ruleInput(proposal(2)))).ruling.reason).toContain('expired-mandate');
 
     const revoked = harness();
@@ -1080,119 +1175,6 @@ describe('M2 authorization transactions', () => {
     });
     const result = await mismatchedCore.ruleProposal(ruleInput(proposal(5)));
     expect(result.ruling.reason).toContain('substituted-model');
-  });
-
-  it('records requested and served ids only for an acting model pinned in the active mandate', async () => {
-    const h = harness();
-    await initialize(h);
-    const approved = proposal(5, {
-      acting_model: {
-        requested_id: 'model-demo-v1',
-        served_id: 'model-demo-v1-2026-08-01',
-        card_id: 'model-demo',
-        card_version: 1,
-      },
-    });
-    expect(await h.core.recordModelSelection({ caseId: 'case_1', proposal: approved, actor: ORCHESTRATOR })).toMatchObject({
-      accepted: true,
-    });
-    expect(h.store.snapshot().modelSelections[0]).toMatchObject({
-      case_id: 'case_1',
-      requested_id: 'model-demo-v1',
-      served_id: 'model-demo-v1-2026-08-01',
-      card_digest: CARD_DIGEST,
-    });
-
-    const unapproved = proposal(6, {
-      acting_model: {
-        requested_id: 'other-model',
-        served_id: 'other-model',
-        card_id: 'other-card',
-        card_version: 1,
-      },
-    });
-    expect(
-      await h.core.recordModelSelection({ caseId: 'case_1', proposal: unapproved, actor: ORCHESTRATOR }),
-    ).toEqual({ accepted: false, defect: 'model-not-approved' });
-    expect(
-      await h.core.recordModelSelection({ caseId: 'case_1', proposal: approved, actor: PRINCIPAL }),
-    ).toEqual({ accepted: false, defect: 'unauthorized-reporter' });
-  });
-
-  it('invalidates the old issued path as soon as an approved mid-case model switch is recorded', async () => {
-    const h = harness();
-    await initialize(
-      h,
-      mandateBody({
-        approved_models: [
-          {
-            card_id: 'model-demo',
-            card_version: 1,
-            card_digest: CARD_DIGEST,
-            requested_id: 'model-demo-v1',
-            roles: ['acting'],
-            data_classes: { acting: ['conf:case', 'purpose:grant-assessment'] },
-          },
-          {
-            card_id: 'model-other',
-            card_version: 1,
-            card_digest: CARD_DIGEST,
-            requested_id: 'model-other-v1',
-            roles: ['acting'],
-            data_classes: { acting: ['conf:case', 'purpose:grant-assessment'] },
-          },
-        ],
-      }),
-    );
-    const first = proposal(7, { action_id: 'act_switch', revision: 1 });
-    expect(await h.core.recordModelSelection({ caseId: 'case_switch', proposal: first, actor: ORCHESTRATOR })).toMatchObject({
-      accepted: true,
-    });
-    const firstRuling = await h.core.ruleProposal(ruleInput(first));
-    expect(firstRuling.ruling.verdict).toBe('allow');
-
-    const second = proposal(8, {
-      action_id: 'act_switch',
-      revision: 2,
-      acting_model: {
-        requested_id: 'model-other-v1',
-        served_id: 'model-other-v1',
-        card_id: 'model-other',
-        card_version: 1,
-      },
-    });
-    expect(await h.core.recordModelSelection({ caseId: 'case_switch', proposal: second, actor: ORCHESTRATOR })).toMatchObject({
-      accepted: true,
-    });
-    const afterSwitch = h.store.snapshot();
-    expect(afterSwitch.rulings.get(firstRuling.ruling.ruling_id)?.status).toBe('invalidated');
-    for (const reservation of firstRuling.ruling.counter_reservations) {
-      expect(afterSwitch.reservations.get(reservation.id)?.state).toBe('released');
-    }
-    expect(
-      await h.core.commitVerify({
-        rulingId: firstRuling.ruling.ruling_id,
-        intent: intentFor(first, firstRuling.ruling.ruling_id),
-        servicesHostBootId: 'services_boot_1',
-        servicesLedgerId: SERVICES_LEDGER_ID,
-        actor: SERVICES_HOST,
-      }),
-    ).toEqual({ ok: false, defect: 'replayed-ruling' });
-
-    const secondRuling = await h.core.ruleProposal(ruleInput(second));
-    expect(secondRuling.ruling.verdict).toBe('allow');
-    expect(
-      (
-        await h.core.commitVerify({
-          rulingId: secondRuling.ruling.ruling_id,
-          intent: intentFor(second, secondRuling.ruling.ruling_id),
-          servicesHostBootId: 'services_boot_1',
-          servicesLedgerId: SERVICES_LEDGER_ID,
-          actor: SERVICES_HOST,
-        })
-      ).ok,
-    ).toBe(true);
-    expect(h.store.snapshot().modelSelections).toHaveLength(2);
   });
 
   it('routes ordinary card supersession to re-confirmation but fails a withdrawal closed', async () => {
@@ -1669,12 +1651,7 @@ describe('M2 authorization transactions', () => {
     const deniedRevision = proposal(86, {
       action_id: original.action_id,
       revision: 2,
-      acting_model: {
-        requested_id: 'unapproved-model',
-        served_id: 'unapproved-model',
-        card_id: 'unapproved-card',
-        card_version: 1,
-      },
+      target: { recipient: 'synthetic-other-recipient', resource: 'grant-decision' },
     });
     const denied = await h.core.continueEscalationRevision({
       escalationId: escalated.escalationId,
@@ -1683,7 +1660,7 @@ describe('M2 authorization transactions', () => {
     });
     expect(denied).toMatchObject({
       accepted: true,
-      stages: [{ ruling: { gate: 'authorize', verdict: 'deny', matched_rule_id: 'authority:substituted-model' } }],
+      stages: [{ ruling: { gate: 'authorize', verdict: 'deny', matched_rule_id: 'authority:broadened-request' } }],
     });
     expect(h.store.snapshot().escalations.get(escalated.escalationId)?.successor_ruling_id).toBeNull();
 
@@ -2279,7 +2256,7 @@ describe('M2 authorization transactions', () => {
           : null;
       },
     });
-    await initialize(h);
+    await initialize(h, mandateBody(), 'case_dialogue');
     const inference = {
       id: 'inf_7',
       store: 'inferred' as const,
@@ -2439,7 +2416,8 @@ describe('M2 authorization transactions', () => {
     'commits the $disposition conversation transition once and rejects its replay',
     async ({ disposition, sourceStore, removesSource }) => {
       const h = harness('2026-08-01T09:00:00.000Z', { dialogue: true });
-      await initialize(h);
+      const caseId = `case_${disposition}`;
+      await initialize(h, mandateBody(), caseId);
       const source = {
         id: `source_${disposition}`,
         store: sourceStore,
@@ -2449,7 +2427,6 @@ describe('M2 authorization transactions', () => {
         tags: ['conf:case', 'purpose:grant-assessment'],
         ...(sourceStore === 'inferred' ? {} : { origin_actor: 'applicant' as const }),
       };
-      const caseId = `case_${disposition}`;
       await h.core.putConversationItems({ caseId, items: [source], actor: AUTHZ });
       const ruled = await h.core.ruleProposal(
         ruleInput(
@@ -2502,7 +2479,7 @@ describe('M2 authorization transactions', () => {
 
   it('reopens a historical scope-less dialogue record without changing its materialized projection', async () => {
     const h = harness('2026-08-01T09:00:00.000Z', { dialogue: true });
-    await initialize(h);
+    await initialize(h, mandateBody(), 'case_legacy');
     const inference = {
       id: 'inf_legacy',
       store: 'inferred' as const,
@@ -2577,7 +2554,7 @@ describe('M2 authorization transactions', () => {
             }
           : null,
     });
-    await initialize(h);
+    await initialize(h, mandateBody(), 'case_dialogue_http');
     const inference = {
       id: 'inf_7',
       store: 'inferred' as const,

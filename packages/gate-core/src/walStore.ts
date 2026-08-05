@@ -292,7 +292,7 @@ export class WalStore {
         this.#walWriter.append(
           walGenesisHeader.parse({
             kind: 'genesis',
-            wal_version: 2,
+            wal_version: 3,
             world_id: this.#options.worldId,
             created_at: this.#genesisTimestamp,
           }),

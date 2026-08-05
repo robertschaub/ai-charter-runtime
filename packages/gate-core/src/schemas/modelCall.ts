@@ -6,7 +6,7 @@ import { cardSlug, hexDigest, id, integer, modelId, timestamp, worldId } from '.
 import { modelOutputAdmission, modelOutputAdmissionRequest } from './output.js';
 import { systemUseDecisionReference } from './systemUseDecision.js';
 
-export const MODEL_CALL_FAILURE_REASONS = [
+export const MODEL_CALL_REPORTABLE_FAILURE_REASONS = [
   'provider-timeout',
   'provider-unavailable',
   'malformed-response',
@@ -14,17 +14,16 @@ export const MODEL_CALL_FAILURE_REASONS = [
   'authorization-invalidated',
   'system-use-invalidated',
 ] as const;
+export const modelCallReportableFailureReason = z.enum(MODEL_CALL_REPORTABLE_FAILURE_REASONS);
+export const MODEL_CALL_FAILURE_REASONS = [...MODEL_CALL_REPORTABLE_FAILURE_REASONS, 'selection-invalidated'] as const;
 export const modelCallFailureReason = z.enum(MODEL_CALL_FAILURE_REASONS);
 export type ModelCallFailureReason = z.infer<typeof modelCallFailureReason>;
+export type ModelCallReportableFailureReason = z.infer<typeof modelCallReportableFailureReason>;
 
 export const modelCallBeginRequest = z
   .object({
     turn_id: id,
-    mandate_id: id,
-    mandate_version: integer.min(1),
-    card_id: cardSlug,
-    card_version: integer.min(1),
-    requested_id: modelId,
+    selection_id: id,
   })
   .strict();
 export type ModelCallBeginRequest = z.infer<typeof modelCallBeginRequest>;
@@ -36,6 +35,7 @@ const modelCallBinding = z.object({
   authorization_boot_id: id,
   case_id: id,
   turn_id: id,
+  selection_id: id,
   mandate_id: id,
   mandate_version: integer.min(1),
   card_id: cardSlug,
@@ -91,7 +91,10 @@ export const modelCallFailedRecord = modelCallBinding
   })
   .strict()
   .superRefine((record, ctx) => {
-    if (record.completed_at < record.opened_at || record.completed_at > record.expires_at) {
+    if (
+      record.completed_at < record.opened_at ||
+      (record.completed_at > record.expires_at && record.failure_reason !== 'selection-invalidated')
+    ) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ['completed_at'],
@@ -133,6 +136,16 @@ export const modelCallFailedRecord = modelCallBinding
         message: 'confirmed system-use invalidation requires served-response evidence',
       });
     }
+    if (
+      record.failure_reason === 'selection-invalidated' &&
+      (record.provider_disclosure !== 'possible' || record.served_id !== null)
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['failure_reason'],
+        message: 'selection invalidation requires possible disclosure and no served-model evidence',
+      });
+    }
   });
 
 export const modelCallRecord = z.union([
@@ -162,11 +175,13 @@ export const modelCallAdmission = z
   .strict();
 export type ModelCallAdmission = z.infer<typeof modelCallAdmission>;
 
-export const modelCallFailureRequest = modelCallBeginRequest
-  .extend({
+export const modelCallFailureRequest = z
+  .object({
     call_id: id,
+    turn_id: id,
+    selection_id: id,
     projection_digest: hexDigest,
-    failure_reason: modelCallFailureReason,
+    failure_reason: modelCallReportableFailureReason,
     provider_disclosure: z.enum(['possible', 'confirmed']),
     served_id: modelId.nullable(),
   })

@@ -2,7 +2,14 @@
 /** ADR-002's deny-by-default authenticated authorization-service boundary. */
 import { timingSafeEqual } from 'node:crypto';
 
-import { id, role, worldId, type CredentialLabel, type ModelCallAccessEvidence } from './schemas/index.js';
+import {
+  id,
+  role,
+  worldId,
+  type CredentialLabel,
+  type ModelCallAccessEvidence,
+  type ModelSelectionAccessEvidence,
+} from './schemas/index.js';
 import { type AuthorizationCore } from './authorizationCore.js';
 import type { TransactionActor } from './walStore.js';
 
@@ -68,6 +75,33 @@ export const AUTHORIZATION_ROUTES = [
     template: '/w/{world_id}/proposals',
     allowed: ['proc:orchestrator'],
     authorityChanging: true,
+  },
+  {
+    id: 'model-selection.read',
+    method: 'GET',
+    template: '/w/{world_id}/cases/{case_id}/model-selection',
+    allowed: ['proc:orchestrator'],
+    authorityChanging: false,
+    originGuarded: true,
+    accessLoggedOnServe: true,
+  },
+  {
+    id: 'model-selection.check',
+    method: 'POST',
+    template: '/w/{world_id}/cases/{case_id}/model-selection-checks',
+    allowed: ['proc:orchestrator'],
+    authorityChanging: false,
+    originGuarded: true,
+    accessLoggedOnServe: true,
+  },
+  {
+    id: 'model-selection.apply',
+    method: 'POST',
+    template: '/w/{world_id}/cases/{case_id}/model-selections',
+    allowed: ['proc:orchestrator'],
+    authorityChanging: false,
+    originGuarded: true,
+    accessLoggedOnServe: true,
   },
   {
     id: 'model-call.begin',
@@ -257,7 +291,7 @@ export interface AuthorizationOperationResult<T> {
   readonly status: number;
   readonly body: T;
   readonly readLengths?: Readonly<Record<string, number>>;
-  readonly accessEvidence?: ModelCallAccessEvidence;
+  readonly accessEvidence?: ModelCallAccessEvidence | ModelSelectionAccessEvidence;
 }
 
 export interface AuthorizationAdapterResponse<T> {
@@ -280,7 +314,7 @@ export interface AuthorizationHttpAdapterOptions {
 interface CompiledRoute {
   readonly definition: RouteDefinition;
   readonly pattern: RegExp;
-  readonly captures: readonly { readonly name: 'world_id' | 'id'; readonly index: number }[];
+  readonly captures: readonly { readonly name: 'world_id' | 'case_id' | 'id'; readonly index: number }[];
 }
 
 function escapeRegex(value: string): string {
@@ -292,7 +326,7 @@ function compileRoute(definition: RouteDefinition): CompiledRoute {
   const wildcard = segments.at(-1) === '*';
   const matchedSegments = wildcard ? segments.slice(0, -1) : segments;
   let capture = 0;
-  const captures: { name: 'world_id' | 'id'; index: number }[] = [];
+  const captures: { name: 'world_id' | 'case_id' | 'id'; index: number }[] = [];
   const parts = matchedSegments.map((segment) => {
     if (segment === '{world_id}') {
       capture += 1;
@@ -302,6 +336,11 @@ function compileRoute(definition: RouteDefinition): CompiledRoute {
     if (segment === '{id}') {
       capture += 1;
       captures.push({ name: 'id', index: capture });
+      return '([^/]+)';
+    }
+    if (segment === '{case_id}') {
+      capture += 1;
+      captures.push({ name: 'case_id', index: capture });
       return '([^/]+)';
     }
     return escapeRegex(segment);

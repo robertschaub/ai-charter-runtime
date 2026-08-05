@@ -18,6 +18,11 @@ import {
   mandateState,
   modelCard,
   modelCallOpenRecord,
+  modelId,
+  modelSelectionCheckRecord,
+  modelSelectionObservation,
+  modelSelectionResult,
+  modelSelectionTransition,
   modelRole,
   recordEntry,
   restrictionTagSet,
@@ -83,6 +88,9 @@ export const mandateProjection = z
     reversibility_class: classToken,
     substitution_rules: substitutionRules,
     approved_models: z.array(approvedModelEntry),
+    default_acting_model: z
+      .object({ card_id: cardSlug, card_version: integer.min(1), requested_id: modelId })
+      .strict(),
   })
   .strict();
 
@@ -109,6 +117,9 @@ export const approvedModelsProjection = z
     mandate_id: id,
     mandate_version: integer.min(1),
     mandate_state: mandateState,
+    default_acting_model: z
+      .object({ card_id: cardSlug, card_version: integer.min(1), requested_id: modelId })
+      .strict(),
     models: z.array(approvedModelProjection),
   })
   .strict();
@@ -139,6 +150,31 @@ export const modelCallStart = z
     projection: conversationProjection,
   })
   .strict();
+
+export const modelSelectionCheckProjection = z
+  .object({ check: modelSelectionCheckRecord, evidence: approvedModelProjection })
+  .strict();
+
+export const currentModelSelectionProjection = z.discriminatedUnion('state', [
+  z
+    .object({
+      state: z.literal('unselected'),
+      case_id: id,
+      selection: z.null(),
+      latest_observation: z.null(),
+    })
+    .strict(),
+  z
+    .object({
+      state: z.literal('selected'),
+      case_id: id,
+      selection: modelSelectionTransition,
+      latest_observation: modelSelectionObservation.nullable(),
+    })
+    .strict(),
+]);
+
+export const modelSelectionProjection = modelSelectionResult;
 
 export const proposalRevisionRefProjection = z
   .object({
@@ -342,6 +378,9 @@ export type MandateProjection = z.infer<typeof mandateProjection>;
 export type ApprovedModelsProjection = z.infer<typeof approvedModelsProjection>;
 export type ConversationProjection = z.infer<typeof conversationProjection>;
 export type ModelCallStart = z.infer<typeof modelCallStart>;
+export type ModelSelectionCheckProjection = z.infer<typeof modelSelectionCheckProjection>;
+export type CurrentModelSelectionProjection = z.infer<typeof currentModelSelectionProjection>;
+export type ModelSelectionProjection = z.infer<typeof modelSelectionProjection>;
 export type EscalationDetailProjection = z.infer<typeof escalationDetailProjection>;
 export type EscalationStatusProjection = z.infer<typeof escalationStatusProjection>;
 export type RecordViewProjection = z.infer<typeof recordViewProjection>;

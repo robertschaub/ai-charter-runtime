@@ -61,7 +61,7 @@ distinguish an uncommitted latest checkpoint from confirmed remote rollback or m
 | M2 — transactional core | Implemented and fault-tested | Authorization remains the single durable serialization point; authority defects fail closed. |
 | M3 — vertical slice | Implemented | Deterministic authorize → propose → rule → commit-verify → effect → receipt path, adapters, service ledger, and signed cards are present. |
 | M4 — escalation + governance console | **Complete** | Final exact-SHA review of `e326562` returned GO with no findings; the offline acceptance ledger preserves the remaining partial and not-assessed boundaries. |
-| M5 — screening + empathy + switching | **In progress** | M5.1 is reviewed at `c1b5eb0`; M5.2 at `1973515`; M5.3 at `1cc7fb2`, with its Low wording finding closed at `2b7b45a`; M5.4 at `b247d5b`; M5.5 durable call evidence at `1d992fa`; and M5.6 system-use decisions at `b57c01e`. ADR-009 defines the proposed M5.7 headless governed-selection tranche pending exact-SHA review. Runtime/browser/provider ingress, output release, empathy triggers, and governed switching implementation remain incomplete. |
+| M5 — screening + empathy + switching | **In progress** | M5.1 is reviewed at `c1b5eb0`; M5.2 at `1973515`; M5.3 at `1cc7fb2`, with its Low wording finding closed at `2b7b45a`; M5.4 at `b247d5b`; M5.5 durable call evidence at `1d992fa`; and M5.6 system-use decisions at `b57c01e`. The M5.7 definition was accepted at `4611843`; its headless governed-selection implementation candidate is present in this tranche and awaits exact-SHA review. Browser initiation, native provider ingress, output release, empathy-trigger completion, and M6 remain incomplete. |
 | M6–M7 | Not started | Full capture/publication work follows the implementation milestones. |
 
 These labels describe repository implementation status, not assurance, certification, or independent
@@ -382,9 +382,11 @@ Reviewed validation is `npm run typecheck` clean plus 4 Git-safety hook tests an
 36 files, `git diff --check` clean, and both unchanged signed cards verified. M5.6 adds no live provider,
 browser-message, output-release, model-switching, or M6 path and does not complete M5.
 
-### M5.7 definition candidate — headless governed model selection and switching
+### M5.7 implementation candidate — headless governed model selection and switching
 
-ADR-009 freezes the next implementation boundary against the already pinned specification:
+Exact-SHA review of the definition correction at `4611843` returned **GO — both findings closed, no new
+findings**. ADR-009 therefore freezes this implementation boundary against the already pinned specification.
+The current tranche implements it as an exact-SHA review candidate:
 
 - The mandate gains one explicit default acting-model reference; array order and software configuration cannot
   select a default.
@@ -408,9 +410,10 @@ ADR-009 freezes the next implementation boundary against the already pinned spec
   WAL/state meaning. It rewires the exported M3 deterministic harness through check/select before provider use;
   the reviewed baseline contains no durable legacy history requiring replay migration.
 
-This definition adds no upstream governance semantics: runtime specification §5 and beats 14 and 19–21 already
-require it, so the Charter provenance pin stays unchanged. The definition tranche changes documentation only.
-Implementation remains pending exact-SHA adversarial review and separate maintainer continuation.
+This implementation adds no upstream governance semantics: runtime specification §5 and beats 14 and 19–21
+already require it, so the Charter provenance pin stays unchanged. The implementation candidate adds no browser
+selection, native provider ingress, output release, conversation ingestion, live probe, or M6 path. Its exact
+committed SHA remains pending adversarial review.
 
 ## Resolved browser credential-handoff protocol
 
@@ -429,15 +432,13 @@ authorization route. The bounded handoff and session implementation was independ
 
 ## Ordered next slices
 
-1. **Obtain an exact-SHA adversarial review of the M5.7 definition tranche.** Review ADR-009 together with its
-   ADR-001/002/005/006 amendments and this plan. A GO freezes the implementation contract; a finding is corrected
-   before code begins.
-2. **After definition GO, implement only the headless M5.7 boundary.** Add the authorization-owned read/check/
-   selection lifecycle, WAL/replay, invalidation, selection-bound calls/gates, authenticated process routes, and
-   deterministic/real-listener tests. Remove or migrate the legacy proposal-time selection helper. Keep
-   `runtime:start`, browser messages, native provider ingress, conversation ingestion, and every output-release
-   consumer closed.
-3. **Review the exact M5.7 implementation SHA before any publication or later M5 slice.** Do not begin M6.
+1. **Commit and obtain an exact-SHA adversarial review of the bounded M5.7 implementation candidate.** Review the
+   authorization-owned read/check/selection lifecycle, WAL/replay, invalidation transaction, selection-bound
+   calls/gates, authenticated routes, M3 harness rewire, legacy deletion, and deterministic/real-listener tests.
+2. **Close any substantive review finding in a focused correction before publication or another M5 slice.** A
+   documentation-only review acknowledgement does not create another review loop.
+3. **Do not begin M6.** Browser selection, native provider ingress, output release, conversation ingestion, and
+   empathy-trigger completion require separately approved bounded slices.
 
 Substantive tranches are committed and reviewed at bounded integration points. A documentation-only status
 acknowledgement does not trigger a recursive review round; changes to ADRs, gates, invariants, ACLs,

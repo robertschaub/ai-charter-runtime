@@ -10,6 +10,8 @@ import {
   AUTHORIZATION_ROUTES,
   modelCallAdmission,
   modelCallStart,
+  modelSelectionCheckProjection,
+  modelSelectionProjection,
   deriveAudienceToken,
   digestFor,
   effectIntent,
@@ -396,13 +398,32 @@ describe('M4 native three-process boundary', () => {
       const grant = await postJson(authorizationOrigin, '/w/w-demo/mandates', tokens.principal, mandate);
       expect(grant.status).toBe(201);
 
+      const selectionCheckResponse = await postJson(
+        authorizationOrigin,
+        '/w/w-demo/cases/case_demo/model-selection-checks',
+        tokens.orchestratorAtAuthz,
+        {
+          expected_current_selection_id: null,
+          target: mandate['default_acting_model'],
+        },
+      );
+      expect(selectionCheckResponse.status).toBe(200);
+      const selectionCheck = modelSelectionCheckProjection.parse(await selectionCheckResponse.json());
+      const selectionResponse = await postJson(
+        authorizationOrigin,
+        '/w/w-demo/cases/case_demo/model-selections',
+        tokens.orchestratorAtAuthz,
+        {
+          check_id: selectionCheck.check.check_id,
+          expected_current_selection_id: null,
+        },
+      );
+      expect(selectionResponse.status).toBe(200);
+      const selected = modelSelectionProjection.parse(await selectionResponse.json());
+
       const actingProjectionRequest = {
         turn_id: 'turn_process_output_1',
-        mandate_id: 'mdt_demo_grant',
-        mandate_version: 1,
-        card_id: 'publicai-apertus-v1.5-70b',
-        card_version: 1,
-        requested_id: 'swiss-ai/apertus-v1.5-70b',
+        selection_id: selected.selection.selection_id,
       };
       const actingProjection = await postJson(
         authorizationOrigin,
@@ -423,6 +444,7 @@ describe('M4 native three-process boundary', () => {
       const outputContent = 'A synthetic bounded response for the grant case.';
       const outputAdmissionRequest = {
         turn_id: 'turn_process_output_1',
+        selection_id: selected.selection.selection_id,
         mandate_id: 'mdt_demo_grant',
         mandate_version: 1,
         card_id: 'publicai-apertus-v1.5-70b',
@@ -490,11 +512,7 @@ describe('M4 native three-process boundary', () => {
         {
           call_id: failedCall.call.call_id,
           turn_id: failedCall.call.turn_id,
-          mandate_id: failedCall.call.mandate_id,
-          mandate_version: failedCall.call.mandate_version,
-          card_id: failedCall.call.card_id,
-          card_version: failedCall.call.card_version,
-          requested_id: failedCall.call.requested_id,
+          selection_id: failedCall.call.selection_id,
           projection_digest: failedCall.call.projection_digest,
           failure_reason: 'provider-timeout',
           provider_disclosure: 'possible',
@@ -577,6 +595,7 @@ describe('M4 native three-process boundary', () => {
         material_consequences: ['Creates a synthetic public-funds commitment.'],
         reversibility_class: 'partially-reversible',
         commercial_influence: { applicable: false, note: 'Not applicable.' },
+        selection_id: selected.selection.selection_id,
         acting_model: {
           requested_id: 'swiss-ai/apertus-v1.5-70b',
           served_id: 'swiss-ai/apertus-v1.5-70b',

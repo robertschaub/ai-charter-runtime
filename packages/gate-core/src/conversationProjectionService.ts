@@ -3,9 +3,19 @@
 import { randomUUID } from 'node:crypto';
 
 import { canonicalize } from './canonicalize.js';
-import { modelCallStart, type ModelCallStart } from './authorizationProjection.js';
+import {
+  approvedModelProjection,
+  currentModelSelectionProjection,
+  modelCallStart,
+  modelSelectionCheckProjection,
+  modelSelectionProjection,
+  type CurrentModelSelectionProjection,
+  type ModelCallStart,
+  type ModelSelectionCheckProjection,
+  type ModelSelectionProjection,
+} from './authorizationProjection.js';
 import { CardRegistry, type CardInspection } from './cardRegistry.js';
-import { projectConversation, type ProjectConversationInput } from './conversationProjection.js';
+import { intersectClearances, projectConversation, type ProjectConversationInput } from './conversationProjection.js';
 import { evaluateModelOutput, ModelOutputAdmissionError } from './modelOutputAdmission.js';
 import { digestFor, verifyDigest } from './hash.js';
 import { verifyEmbeddedMac, type Keyring } from './keyring.js';
@@ -21,6 +31,11 @@ import {
   modelCallFailedRecord,
   modelCallFailureRequest,
   modelCallOpenRecord,
+  modelSelectionCheckRecord,
+  modelSelectionCheckRequest,
+  modelSelectionRequest,
+  modelSelectionResult,
+  modelSelectionTransition,
   timestamp,
   type EvidenceRef,
   type FrozenProposal,
@@ -34,29 +49,32 @@ import {
   type ModelCallFailedRecord,
   type ModelCallFailureRequest,
   type ModelCallOpenRecord,
+  type ModelSelectionCheckRequest,
+  type BoundModelSelectionTarget,
+  type ModelSelectionRequest,
+  type ModelSelectionTransition,
+  type WalOp,
 } from './schemas/index.js';
 import { screeningFixtureSet, type ScreeningFixture } from './screeningFixture.js';
 import { mandateVersionKey, type WorldState } from './state.js';
 import type { TransactionActor, WalStore } from './walStore.js';
 import { SystemUseDecisionError, SystemUseDecisionService } from './systemUseDecision.js';
+import { compareServedId } from './servedModel.js';
 
 export class ConversationProjectionServiceError extends Error {
   constructor(
-    readonly code: 'forbidden' | 'invalid-scope' | 'mandate-unavailable' | 'model-unavailable' | 'system-use-unavailable',
+    readonly code:
+      | 'forbidden'
+      | 'invalid-scope'
+      | 'mandate-unavailable'
+      | 'model-unavailable'
+      | 'selection-unavailable'
+      | 'system-use-unavailable',
     message: string,
   ) {
     super(message);
     this.name = 'ConversationProjectionServiceError';
   }
-}
-
-export interface ActingProjectionInput {
-  readonly mandateId: string;
-  readonly mandateVersion: number;
-  readonly cardId: string;
-  readonly cardVersion: number;
-  readonly requestedId: string;
-  readonly actor: TransactionActor;
 }
 
 export interface ScreeningProjectionInput {
@@ -82,6 +100,7 @@ export interface ConversationProjectionServiceOptions {
   readonly screeningFixtures: readonly ScreeningFixture[];
   readonly now?: () => string;
   readonly modelCallTtlMs?: number;
+  readonly modelSelectionCheckTtlMs?: number;
   readonly systemUse: SystemUseDecisionService;
 }
 
@@ -140,6 +159,7 @@ export class ConversationProjectionService {
   readonly #fixtures: readonly ScreeningFixture[];
   readonly #now: () => string;
   readonly #modelCallTtlMs: number;
+  readonly #modelSelectionCheckTtlMs: number;
   readonly #systemUse: SystemUseDecisionService;
 
   constructor(options: ConversationProjectionServiceOptions) {
@@ -151,7 +171,287 @@ export class ConversationProjectionService {
     this.#fixtures = screeningFixtureSet.parse(options.screeningFixtures);
     this.#now = options.now ?? (() => new Date().toISOString());
     this.#modelCallTtlMs = integer.min(1).max(300_000).parse(options.modelCallTtlMs ?? 60_000);
+    this.#modelSelectionCheckTtlMs = integer
+      .min(1)
+      .max(300_000)
+      .parse(options.modelSelectionCheckTtlMs ?? 300_000);
     this.#systemUse = options.systemUse;
+  }
+
+  #requireOrchestrator(actor: TransactionActor): void {
+    if (actor.credential !== 'proc:orchestrator') {
+      throw new ConversationProjectionServiceError('forbidden', 'only the orchestrator process may use model selection');
+    }
+  }
+
+  #currentSelection(state: WorldState): ModelSelectionTransition | null {
+    const selectionId = state.currentModelSelectionByCase.get(this.#caseId);
+    if (selectionId === undefined) return null;
+    const selection = state.modelSelections.get(selectionId);
+    if (selection === undefined || selection.case_id !== this.#caseId) {
+      throw new ConversationProjectionServiceError('selection-unavailable', 'current model selection is inconsistent');
+    }
+    return selection;
+  }
+
+  currentSelection(actor: TransactionActor): CurrentModelSelectionProjection {
+    this.#requireOrchestrator(actor);
+    const state = this.#store.snapshot();
+    const selection = this.#currentSelection(state);
+    if (selection === null) {
+      return currentModelSelectionProjection.parse({
+        state: 'unselected',
+        case_id: this.#caseId,
+        selection: null,
+        latest_observation: null,
+      });
+    }
+    const latestObservation = [...state.modelSelectionObservations.values()]
+      .filter((value) => value.selection_id === selection.selection_id)
+      .sort(
+        (left, right) =>
+          right.observed_at.localeCompare(left.observed_at) || right.observation_id.localeCompare(left.observation_id),
+      )[0] ?? null;
+    return currentModelSelectionProjection.parse({
+      state: 'selected',
+      case_id: this.#caseId,
+      selection,
+      latest_observation: latestObservation,
+    });
+  }
+
+  async checkSelection(
+    input: ModelSelectionCheckRequest & { readonly actor: TransactionActor },
+  ): Promise<ModelSelectionCheckProjection> {
+    const { actor, ...requestInput } = input;
+    this.#requireOrchestrator(actor);
+    const request = modelSelectionCheckRequest.parse(requestInput);
+    const checkId = id.parse(`msc_${randomUUID()}`);
+    const completed = await this.#store.transactWithState<ModelSelectionCheckProjection>(
+      'model_selection_check',
+      actor,
+      (state, at) => {
+        const current = this.#currentSelection(state);
+        if ((current?.selection_id ?? null) !== request.expected_current_selection_id) {
+          throw new ConversationProjectionServiceError('selection-unavailable', 'expected selection is not current');
+        }
+        const mandateValue = this.#singleActiveMandate(state, at);
+        const resolved = this.#resolveProjection(
+          {
+            mandateId: mandateValue.mandate_id,
+            mandateVersion: mandateValue.version,
+            cardId: request.target.card_id,
+            cardVersion: request.target.card_version,
+            requestedId: request.target.requested_id,
+            role: 'acting',
+            caseId: this.#caseId,
+          },
+          state,
+          at,
+        );
+        if (resolved.approval.re_confirmation_required === true || state.policy === undefined) {
+          throw new ConversationProjectionServiceError('model-unavailable', 'target model requires principal re-confirmation');
+        }
+        const check = modelSelectionCheckRecord.parse({
+          kind: 'model_selection_check',
+          world_id: state.worldId,
+          check_id: checkId,
+          authorization_boot_id: this.#authorizationBootId,
+          case_id: this.#caseId,
+          authenticated_actor: actor.credential,
+          expected_current_selection_id: request.expected_current_selection_id,
+          mandate_id: mandateValue.mandate_id,
+          mandate_version: mandateValue.version,
+          target: {
+            ...request.target,
+            card_digest: resolved.approval.card_digest,
+            verifying_key_id: resolved.inspection.keyId,
+          },
+          system_use_decision: resolved.systemUseDecision,
+          policy_version: state.policy.policy_version,
+          policy_content_digest: state.policy.policy_content_digest,
+          evaluator_build_id: state.policy.evaluator_build_id,
+          issued_at: at,
+          expires_at: timestamp.parse(new Date(Date.parse(at) + this.#modelSelectionCheckTtlMs).toISOString()),
+          state: 'issued',
+          consumed_at: null,
+        });
+        const evidence = approvedModelProjection.parse({
+          approval: resolved.approval,
+          effective_data_classes: {
+            acting: intersectClearances(
+              resolved.approval.data_classes.acting ?? [],
+              resolved.inspection.card.declared_data_classes.acting ?? [],
+            ),
+          },
+          card_status: 'current',
+          signature_status: 'valid',
+          integrity_alarm: false,
+          current_card_digest: resolved.inspection.digest,
+          verifying_key_id: resolved.inspection.keyId,
+          current_card: resolved.inspection.card,
+        });
+        return {
+          ops: [{ op: 'model_selection_check.issue', check }],
+          result: modelSelectionCheckProjection.parse({ check, evidence }),
+        };
+      },
+    );
+    return completed.result;
+  }
+
+  async selectModel(
+    input: ModelSelectionRequest & { readonly actor: TransactionActor },
+  ): Promise<ModelSelectionProjection> {
+    const { actor, ...requestInput } = input;
+    this.#requireOrchestrator(actor);
+    const request = modelSelectionRequest.parse(requestInput);
+    const selectionId = id.parse(`sel_${randomUUID()}`);
+    type SelectionBuild =
+      | { readonly accepted: true; readonly projection: ModelSelectionProjection }
+      | { readonly accepted: false; readonly reason: string };
+    const completed = await this.#store.transactWithState<SelectionBuild>(
+      'model_selection_apply',
+      actor,
+      (state, at) => {
+        const check = state.modelSelectionChecks.get(request.check_id);
+        if (check === undefined || check.state !== 'issued') {
+          return { ops: [], result: { accepted: false, reason: 'selection check is unavailable' } };
+        }
+        if (at >= check.expires_at) {
+          return {
+            ops: [{ op: 'model_selection_check.expire', check_id: check.check_id }],
+            result: { accepted: false, reason: 'selection check expired' },
+          };
+        }
+        if (
+          check.authorization_boot_id !== this.#authorizationBootId ||
+          check.case_id !== this.#caseId ||
+          check.authenticated_actor !== actor.credential ||
+          check.expected_current_selection_id !== request.expected_current_selection_id
+        ) {
+          return { ops: [], result: { accepted: false, reason: 'selection check binding changed' } };
+        }
+        const current = this.#currentSelection(state);
+        if ((current?.selection_id ?? null) !== request.expected_current_selection_id) {
+          return { ops: [], result: { accepted: false, reason: 'selection predecessor is stale' } };
+        }
+        const mandateValue = this.#singleActiveMandate(state, at);
+        const resolved = this.#resolveProjection(
+          {
+            mandateId: mandateValue.mandate_id,
+            mandateVersion: mandateValue.version,
+            cardId: check.target.card_id,
+            cardVersion: check.target.card_version,
+            requestedId: check.target.requested_id,
+            role: 'acting',
+            caseId: this.#caseId,
+          },
+          state,
+          at,
+        );
+        const target: BoundModelSelectionTarget = {
+          card_id: resolved.approval.card_id,
+          card_version: resolved.approval.card_version,
+          requested_id: resolved.approval.requested_id,
+          card_digest: resolved.approval.card_digest,
+          verifying_key_id: resolved.inspection.keyId,
+        };
+        if (
+          resolved.approval.re_confirmation_required === true ||
+          mandateValue.mandate_id !== check.mandate_id ||
+          mandateValue.version !== check.mandate_version ||
+          canonicalize(target) !== canonicalize(check.target) ||
+          canonicalize(resolved.systemUseDecision) !== canonicalize(check.system_use_decision) ||
+          state.policy === undefined ||
+          state.policy.policy_version !== check.policy_version ||
+          state.policy.policy_content_digest !== check.policy_content_digest ||
+          state.policy.evaluator_build_id !== check.evaluator_build_id
+        ) {
+          return { ops: [], result: { accepted: false, reason: 'selection authority changed after check' } };
+        }
+        if (current === null) {
+          if (
+            mandateValue.default_acting_model.card_id !== check.target.card_id ||
+            mandateValue.default_acting_model.card_version !== check.target.card_version ||
+            mandateValue.default_acting_model.requested_id !== check.target.requested_id
+          ) {
+            return { ops: [], result: { accepted: false, reason: 'initial selection is not the mandate default' } };
+          }
+        } else if (
+          canonicalize(current.target) === canonicalize(target) &&
+          current.mandate_id === mandateValue.mandate_id &&
+          current.mandate_version === mandateValue.version &&
+          canonicalize(current.system_use_decision) === canonicalize(resolved.systemUseDecision)
+        ) {
+          return { ops: [], result: { accepted: false, reason: 'model is already selected' } };
+        }
+
+        const reason = 'model-selection-switch';
+        const invalidationOps: WalOp[] = [];
+        let invalidatedRulings = 0;
+        if (current !== null) {
+          for (const ruling of state.rulings.values()) {
+            if (ruling.status !== 'issued' || ruling.binding.selection_id !== current.selection_id) continue;
+            invalidatedRulings += 1;
+            invalidationOps.push({ op: 'ruling.invalidate', ruling_id: ruling.ruling_id, reason });
+            for (const reservation of ruling.counter_reservations) {
+              if (state.reservations.get(reservation.id)?.state === 'reserved') {
+                invalidationOps.push({ op: 'reservation.release', reservation_id: reservation.id, reason });
+              }
+            }
+          }
+        }
+        const openCalls =
+          current === null
+            ? []
+            : [...state.modelCalls.values()].filter(
+                (call) => call.state === 'open' && call.selection_id === current.selection_id,
+              );
+        for (const call of openCalls) {
+          invalidationOps.push({
+            op: 'model_call.fail',
+            call_id: call.call_id,
+            provider_disclosure: 'possible',
+            served_id: null,
+            failure_reason: 'selection-invalidated',
+            completed_at: at,
+          });
+        }
+        const selection = modelSelectionTransition.parse({
+          world_id: state.worldId,
+          selection_id: selectionId,
+          case_id: this.#caseId,
+          kind: current === null ? 'initial' : 'switch',
+          predecessor_selection_id: current?.selection_id ?? null,
+          mandate_id: mandateValue.mandate_id,
+          mandate_version: mandateValue.version,
+          target,
+          system_use_decision: resolved.systemUseDecision,
+          check_id: check.check_id,
+          selected_at: at,
+          authority_effect: 'none',
+        });
+        const projection = modelSelectionResult.parse({
+          kind: 'model_selection_result',
+          selection,
+          invalidated_ruling_count: invalidatedRulings,
+          terminalized_open_call_count: openCalls.length,
+        });
+        return {
+          ops: [
+            { op: 'model_selection_check.consume', check_id: check.check_id, consumed_at: at },
+            ...invalidationOps,
+            { op: 'model_selection.append', selection },
+          ],
+          result: { accepted: true, projection },
+        };
+      },
+    );
+    if (!completed.result.accepted) {
+      throw new ConversationProjectionServiceError('selection-unavailable', completed.result.reason);
+    }
+    return completed.result.projection;
   }
 
   async beginCall(input: ModelCallBeginInput): Promise<ModelCallStart> {
@@ -159,18 +459,35 @@ export class ConversationProjectionService {
     const request = modelCallBeginRequest.parse(requestInput);
     const callId = id.parse(`mcl_${randomUUID()}`);
     const completed = await this.#store.transactWithState<ModelCallStart>('model_call_begin', actor, (state, at) => {
-      const resolved = this.#resolveActing(
+      this.#requireOrchestrator(actor);
+      const selection = state.modelSelections.get(request.selection_id);
+      if (
+        selection === undefined ||
+        selection.case_id !== this.#caseId ||
+        state.currentModelSelectionByCase.get(this.#caseId) !== selection.selection_id
+      ) {
+        throw new ConversationProjectionServiceError('selection-unavailable', 'model call selection is not current');
+      }
+      const currentMandate = this.#singleActiveMandate(state, at);
+      if (currentMandate.mandate_id !== selection.mandate_id || currentMandate.version !== selection.mandate_version) {
+        throw new ConversationProjectionServiceError('selection-unavailable', 'model selection mandate is no longer sole and active');
+      }
+      const resolved = this.#resolveProjection(
         {
-          mandateId: request.mandate_id,
-          mandateVersion: request.mandate_version,
-          cardId: request.card_id,
-          cardVersion: request.card_version,
-          requestedId: request.requested_id,
-          actor,
+          mandateId: selection.mandate_id,
+          mandateVersion: selection.mandate_version,
+          cardId: selection.target.card_id,
+          cardVersion: selection.target.card_version,
+          requestedId: selection.target.requested_id,
+          role: 'acting',
+          caseId: this.#caseId,
         },
         state,
         at,
       );
+      if (canonicalize(resolved.systemUseDecision) !== canonicalize(selection.system_use_decision)) {
+        throw new ConversationProjectionServiceError('system-use-unavailable', 'selection system-use decision is stale');
+      }
       if ([...state.modelCalls.values()].some((call) => call.case_id === this.#caseId && call.turn_id === request.turn_id)) {
         throw new ConversationProjectionServiceError('invalid-scope', 'model turn already has a durable call attempt');
       }
@@ -181,11 +498,12 @@ export class ConversationProjectionService {
         authorization_boot_id: this.#authorizationBootId,
         case_id: this.#caseId,
         turn_id: request.turn_id,
-        mandate_id: request.mandate_id,
-        mandate_version: request.mandate_version,
-        card_id: request.card_id,
-        card_version: request.card_version,
-        requested_id: request.requested_id,
+        selection_id: selection.selection_id,
+        mandate_id: selection.mandate_id,
+        mandate_version: selection.mandate_version,
+        card_id: selection.target.card_id,
+        card_version: selection.target.card_version,
+        requested_id: selection.target.requested_id,
         projection_digest: digestFor('conversation-projection', resolved.projection),
         projection_item_count: resolved.projection.items.length,
         system_use_decision: resolved.systemUseDecision,
@@ -209,21 +527,39 @@ export class ConversationProjectionService {
 
   #evaluateOutput(
     request: ModelOutputAdmissionRequest,
-    actor: TransactionActor,
     state?: WorldState,
     nowInput?: string,
     expectedSystemUse?: ModelCallOpenRecord['system_use_decision'],
   ): ModelOutputAdmission {
-    const resolved = this.#resolveActing(
+    const currentState = state ?? this.#store.snapshot();
+    const selection = currentState.modelSelections.get(request.selection_id);
+    if (
+      selection === undefined ||
+      selection.case_id !== this.#caseId ||
+      currentState.currentModelSelectionByCase.get(this.#caseId) !== selection.selection_id ||
+      selection.mandate_id !== request.mandate_id ||
+      selection.mandate_version !== request.mandate_version ||
+      selection.target.card_id !== request.card_id ||
+      selection.target.card_version !== request.card_version ||
+      selection.target.requested_id !== request.requested_id
+    ) {
+      throw new ConversationProjectionServiceError('selection-unavailable', 'model output selection is not current');
+    }
+    const currentMandate = this.#singleActiveMandate(currentState, nowInput);
+    if (currentMandate.mandate_id !== selection.mandate_id || currentMandate.version !== selection.mandate_version) {
+      throw new ConversationProjectionServiceError('selection-unavailable', 'model selection mandate is no longer sole and active');
+    }
+    const resolved = this.#resolveProjection(
       {
-        mandateId: request.mandate_id,
-        mandateVersion: request.mandate_version,
-        cardId: request.card_id,
-        cardVersion: request.card_version,
-        requestedId: request.requested_id,
-        actor,
+        mandateId: selection.mandate_id,
+        mandateVersion: selection.mandate_version,
+        cardId: selection.target.card_id,
+        cardVersion: selection.target.card_version,
+        requestedId: selection.target.requested_id,
+        role: 'acting',
+        caseId: this.#caseId,
       },
-      state,
+      currentState,
       nowInput,
     );
     if (
@@ -255,6 +591,7 @@ export class ConversationProjectionService {
       call === undefined ||
       call.state !== 'open' ||
       call.authorization_boot_id !== this.#authorizationBootId ||
+      state.currentModelSelectionByCase.get(call.case_id) !== call.selection_id ||
       at > call.expires_at
     ) {
       throw new ConversationProjectionServiceError('invalid-scope', 'model call attempt is unavailable');
@@ -266,6 +603,7 @@ export class ConversationProjectionService {
     return (
       call.case_id === this.#caseId &&
       call.turn_id === output.turn_id &&
+      call.selection_id === output.selection_id &&
       call.mandate_id === output.mandate_id &&
       call.mandate_version === output.mandate_version &&
       call.card_id === output.card_id &&
@@ -279,17 +617,48 @@ export class ConversationProjectionService {
     return (
       call.case_id === this.#caseId &&
       call.turn_id === failure.turn_id &&
-      call.mandate_id === failure.mandate_id &&
-      call.mandate_version === failure.mandate_version &&
-      call.card_id === failure.card_id &&
-      call.card_version === failure.card_version &&
-      call.requested_id === failure.requested_id &&
+      call.selection_id === failure.selection_id &&
       verifyDigest(call.projection_digest, failure.projection_digest)
     );
   }
 
+  #selectionObservationOp(
+    state: WorldState,
+    call: ModelCallOpenRecord,
+    servedId: string,
+    terminalOutcome: 'admitted' | 'withheld' | 'failed',
+    observedAt: string,
+    knownResolution?: 'exact' | 'benign-resolution' | 'mismatch',
+  ): WalOp {
+    const selection = state.modelSelections.get(call.selection_id);
+    if (selection === undefined) {
+      throw new ConversationProjectionServiceError('selection-unavailable', 'model call lost its selection');
+    }
+    const inspection = this.#cards.get(selection.target.card_id);
+    const resolution =
+      knownResolution ??
+      (inspection === undefined
+        ? 'mismatch'
+        : compareServedId(selection.target.requested_id, inspection.card.model.resolution.policy, servedId));
+    return {
+      op: 'model_selection.observe',
+      observation: {
+        kind: 'model_selection_observation',
+        world_id: state.worldId,
+        observation_id: id.parse(`mso_${randomUUID()}`),
+        selection_id: selection.selection_id,
+        call_id: call.call_id,
+        served_id: servedId,
+        model_resolution: resolution,
+        terminal_outcome: terminalOutcome,
+        observed_at: observedAt,
+      },
+    };
+  }
+
   async completeCall(input: ModelCallCompletionInput): Promise<ModelCallAdmission> {
     const { actor, ...requestInput } = input;
+    this.#requireOrchestrator(actor);
     const request = modelCallAdmissionRequest.parse(requestInput);
     const completed = await this.#store.transactWithState<ModelCallCompletionTransaction>(
       'model_call_complete',
@@ -301,7 +670,7 @@ export class ConversationProjectionService {
         }
         let decision: ModelCallAdmission['decision'];
         try {
-          decision = this.#evaluateOutput(request.output, actor, state, at, call.system_use_decision);
+          decision = this.#evaluateOutput(request.output, state, at, call.system_use_decision);
         } catch (error) {
           if (!(error instanceof ConversationProjectionServiceError) || error.code !== 'system-use-unavailable') {
             throw error;
@@ -326,6 +695,7 @@ export class ConversationProjectionService {
                 failure_reason: 'system-use-invalidated',
                 completed_at: at,
               },
+              this.#selectionObservationOp(state, call, request.output.served_id, 'failed', at),
             ],
             result: { kind: 'system-use-invalidated', failure },
           };
@@ -341,6 +711,14 @@ export class ConversationProjectionService {
               output_digest: decision.output_digest,
               completed_at: at,
             },
+            this.#selectionObservationOp(
+              state,
+              call,
+              decision.served_id,
+              decision.disposition,
+              at,
+              decision.model_resolution,
+            ),
           ],
           result: { kind: 'admission', admission },
         };
@@ -401,55 +779,25 @@ export class ConversationProjectionService {
         output_digest: null,
         failure_reason: request.failure_reason,
       });
-      return {
-        ops: [
-          {
+      const ops: WalOp[] = [
+        {
             op: 'model_call.fail',
             call_id: call.call_id,
             provider_disclosure: request.provider_disclosure,
             served_id: request.served_id,
             failure_reason: request.failure_reason,
             completed_at: at,
-          },
-        ],
+        },
+      ];
+      if (request.provider_disclosure === 'confirmed' && request.served_id !== null) {
+        ops.push(this.#selectionObservationOp(state, call, request.served_id, 'failed', at));
+      }
+      return {
+        ops,
         result: failed,
       };
     });
     return completed.result;
-  }
-
-  #resolveActing(input: ActingProjectionInput, state?: WorldState, nowInput?: string): {
-    readonly projection: ReturnType<typeof projectConversation>;
-    readonly inspection: CardInspection;
-    readonly systemUseDecision: ModelCallOpenRecord['system_use_decision'];
-  } {
-    if (input.actor.credential !== 'proc:orchestrator') {
-      throw new ConversationProjectionServiceError('forbidden', 'only the orchestrator process may read acting projection');
-    }
-    const mandateId = id.parse(input.mandateId);
-    const mandateVersion = integer.min(1).parse(input.mandateVersion);
-    const currentState = state ?? this.#store.snapshot();
-    const currentTime = timestamp.parse(nowInput ?? this.#now());
-    const governingMandate = this.#singleActiveMandate(currentState, currentTime);
-    if (governingMandate.mandate_id !== mandateId || governingMandate.version !== mandateVersion) {
-      throw new ConversationProjectionServiceError(
-        'invalid-scope',
-        'acting projection mandate does not match the sole active mandate',
-      );
-    }
-    return this.#resolveProjection(
-      {
-        mandateId,
-        mandateVersion,
-        cardId: cardSlug.parse(input.cardId),
-        cardVersion: integer.min(1).parse(input.cardVersion),
-        requestedId: modelId.parse(input.requestedId),
-        role: 'acting',
-        caseId: this.#caseId,
-      },
-      currentState,
-      currentTime,
-    );
   }
 
   screening(input: ScreeningProjectionInput): ScreeningResolution {
@@ -610,6 +958,7 @@ export class ConversationProjectionService {
   #resolveProjection(input: ResolvedProjectionInput, stateInput?: WorldState, nowInput?: string): {
     readonly projection: ReturnType<typeof projectConversation>;
     readonly inspection: CardInspection;
+    readonly approval: Mandate['approved_models'][number];
     readonly systemUseDecision: ModelCallOpenRecord['system_use_decision'];
   } {
     if (input.caseId !== this.#caseId) {
@@ -665,6 +1014,7 @@ export class ConversationProjectionService {
         entries: input.entries ?? [...state.storeItems.values()],
       }),
       inspection,
+      approval,
       systemUseDecision,
     };
   }

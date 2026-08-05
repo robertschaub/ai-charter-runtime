@@ -69,6 +69,11 @@ export const approvedModelEntry = z
 
 export type ApprovedModelEntry = z.infer<typeof approvedModelEntry>;
 
+export const defaultActingModel = z
+  .object({ card_id: cardSlug, card_version: integer.min(1), requested_id: modelId })
+  .strict();
+export type DefaultActingModel = z.infer<typeof defaultActingModel>;
+
 /** One hop of the authority chain, carrying its own subdelegation scope (spec §7.1). */
 export const authorityHop = z.object({
   hop: integer.min(0),
@@ -138,6 +143,8 @@ export const mandate = z
 
   /** Spec §4: the operating envelope names the system allowed to act. */
   approved_models: z.array(approvedModelEntry).min(1),
+  /** ADR-009: an exact HMAC-bound default, never array order or software configuration. */
+  default_acting_model: defaultActingModel,
 
   /**
    * ADR-007: HMAC-SHA256 over the canonical mandate minus this field, domain
@@ -161,6 +168,21 @@ export const mandate = z
         code: z.ZodIssueCode.custom,
         path: ['approved_models'],
         message: 'a mandate must approve at least one acting model',
+      });
+    }
+    if (
+      !value.approved_models.some(
+        (entry) =>
+          entry.card_id === value.default_acting_model.card_id &&
+          entry.card_version === value.default_acting_model.card_version &&
+          entry.requested_id === value.default_acting_model.requested_id &&
+          entry.roles.includes('acting'),
+      )
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['default_acting_model'],
+        message: 'default acting model must exactly match an approved acting entry',
       });
     }
     if (value.issued_at > value.expires_at) {

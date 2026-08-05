@@ -47,6 +47,7 @@
     "applicable": false,
     "note": "Not applicable."
   },
+  "selection_id": "sel_screening_fixture",
   "acting_model": {
     "requested_id": "swiss-ai/apertus-v1.5-70b",
     "served_id": "swiss-ai/apertus-v1.5-70b",
@@ -57,5 +58,5 @@
     "mandate_id": "mdt_demo_grant",
     "version": 1
   },
-  "proposal_hash": "7f416cafebfb8a251df701f4ad9d79c35255c2b4f1659e790284a26b66f135a2"
+  "proposal_hash": "7e0bf05ee258b675b0e7296611773b2b12ac06fc4c7f5be7dc9dc3a4ff2a16c0"
 }

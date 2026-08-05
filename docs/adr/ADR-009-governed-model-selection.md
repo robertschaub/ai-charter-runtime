@@ -1,7 +1,8 @@
 <!-- SPDX-License-Identifier: CC-BY-4.0 -->
 # ADR-009 — Governed model selection and switching
 
-**Status:** proposed for M5.7 exact-SHA review (2026-08-05). **Spec:** §3 (case-console model picker),
+**Status:** definition accepted at `4611843`; implementation candidate pending exact-SHA review (2026-08-05).
+**Spec:** §3 (case-console model picker),
 §4 (mandate, ruling, and model-card bindings), §5 (model navigation and selection), §7 beats 14 and 19–21,
 and §10 M5.
 
@@ -12,7 +13,8 @@ follow **find → check → use**, re-project for the selected provider, re-arm 
 transition, and invalidate prior in-flight authority. It must never turn card evidence, a model result, or an
 orchestrator assertion into action authority.
 
-The repository already has an M3-era `model.select` WAL shape and `recordModelSelection(proposal)` helper.
+At reviewed baseline `6884e8c`, the repository had an M3-era `model.select` WAL shape and
+`recordModelSelection(proposal)` helper.
 They record a completed proposal after provider service and therefore cannot govern which model may receive
 the next projection. The helper accepts proposal-carried served-model evidence, has no current case selection
 or predecessor check, and is absent from the authenticated process boundary. M5.7 replaces that legacy
@@ -190,7 +192,7 @@ reservation, raw output, prompt, credential, or record payload. Access evidence 
 and digests. Card fields remain factual `self-declared` or `probe-tested` evidence—never a score, trust badge,
 certification, legal approval, conformity result, or recommendation.
 
-The M5.7 implementation deletes the old proposal-time `recordModelSelection(proposal)` API and the
+The M5.7 implementation candidate deletes the old proposal-time `recordModelSelection(proposal)` API and the
 served-id-bearing `model.select` WAL operation, state projection, and tests. The exported M3 deterministic
 vertical-slice harness is rewired to perform the new check/select lifecycle before its synthetic provider call
 and to thread the returned selection id through the new call/proposal/ruling bindings. At reviewed baseline

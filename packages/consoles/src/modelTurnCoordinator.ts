@@ -12,6 +12,10 @@ import {
   modelCallAdmission,
   modelCallFailureRequest,
   modelCallStart,
+  currentModelSelectionProjection,
+  modelSelectionCheckProjection,
+  modelSelectionProjection,
+  modelSelectionTarget,
   modelOutputAdmission,
   modelOutputAdmissionRequest,
   sortedRestrictionTags,
@@ -23,6 +27,12 @@ import {
   type ModelCallFailureReason,
   type ModelCallFailureRequest,
   type ModelCallStart,
+  type CurrentModelSelectionProjection,
+  type ModelSelectionCheckProjection,
+  type ModelSelectionCheckRequest,
+  type ModelSelectionProjection,
+  type ModelSelectionRequest,
+  type ModelSelectionTarget,
   type ModelOutputAdmission,
   type ModelOutputAdmissionRequest,
 } from 'gate-core';
@@ -40,8 +50,7 @@ import { RuntimeDependencyError } from './runtimeHttpClients.js';
 const modelTurnInput = z
   .object({
     turnId: id,
-    mandateId: id,
-    mandateVersion: integer.min(1),
+    selectionId: id,
     cardId: cardSlug,
     cardVersion: integer.min(1),
     requestedId: modelId,
@@ -56,6 +65,7 @@ const quarantinedModelOutputRef = z
     call_id: id,
     case_id: id,
     turn_id: id,
+    selection_id: id,
     card_id: cardSlug,
     card_version: integer.min(1),
     requested_id: modelId,
@@ -137,14 +147,21 @@ export interface ModelTurnLaneConfig {
 }
 
 export interface ModelTurnAuthorizationClient {
+  currentModelSelection(worldIdInput: string, caseIdInput: string): Promise<CurrentModelSelectionProjection>;
+  checkModelSelection(
+    worldIdInput: string,
+    caseIdInput: string,
+    input: ModelSelectionCheckRequest,
+  ): Promise<ModelSelectionCheckProjection>;
+  selectModel(
+    worldIdInput: string,
+    caseIdInput: string,
+    input: ModelSelectionRequest,
+  ): Promise<ModelSelectionProjection>;
   beginModelCall(input: {
     readonly worldId: string;
     readonly turnId: string;
-    readonly mandateId: string;
-    readonly mandateVersion: number;
-    readonly cardId: string;
-    readonly cardVersion: number;
-    readonly requestedId: string;
+    readonly selectionId: string;
   }): Promise<ModelCallStart>;
   admitModelOutput(
     worldIdInput: string,
@@ -197,6 +214,7 @@ function bindingMatches(
   return (
     decision.case_id === caseIdInput &&
     decision.turn_id === request.turn_id &&
+    decision.selection_id === request.selection_id &&
     decision.mandate_id === request.mandate_id &&
     decision.mandate_version === request.mandate_version &&
     decision.card_id === request.card_id &&
@@ -287,6 +305,7 @@ export class ModelOutputQuarantine {
       call_id: callId,
       case_id: caseId,
       turn_id: request.turn_id,
+      selection_id: request.selection_id,
       card_id: request.card_id,
       card_version: request.card_version,
       requested_id: request.requested_id,
@@ -327,6 +346,15 @@ export class ModelOutputQuarantine {
     held.bytes.fill(0);
     this.#held.delete(turnId);
     return true;
+  }
+
+  destroySelection(selectionIdInput: string): number {
+    const selectionId = id.parse(selectionIdInput);
+    const turnIds = [...this.#held.values()]
+      .filter((held) => held.ref.selection_id === selectionId)
+      .map((held) => held.ref.turn_id);
+    for (const turnId of turnIds) this.destroy(turnId);
+    return turnIds.length;
   }
 
   clear(): void {
@@ -406,6 +434,59 @@ export class ModelTurnCoordinator {
     return this.#haltedLanes.has(laneKey(cardIdInput, cardVersionInput, requestedIdInput));
   }
 
+  async currentSelection(): Promise<CurrentModelSelectionProjection> {
+    return currentModelSelectionProjection.parse(
+      await this.#authorization.currentModelSelection(this.#worldId, this.#caseId),
+    );
+  }
+
+  async select(input: {
+    readonly expectedCurrentSelectionId: string | null;
+    readonly target: ModelSelectionTarget;
+  }): Promise<ModelSelectionProjection> {
+    const expectedCurrentSelectionId =
+      input.expectedCurrentSelectionId === null ? null : id.parse(input.expectedCurrentSelectionId);
+    const target = modelSelectionTarget.parse(input.target);
+    const checked = modelSelectionCheckProjection.parse(
+      await this.#authorization.checkModelSelection(this.#worldId, this.#caseId, {
+        expected_current_selection_id: expectedCurrentSelectionId,
+        target,
+      }),
+    );
+    if (
+      checked.check.expected_current_selection_id !== expectedCurrentSelectionId ||
+      canonicalize({
+        card_id: checked.check.target.card_id,
+        card_version: checked.check.target.card_version,
+        requested_id: checked.check.target.requested_id,
+      }) !== canonicalize(target) ||
+      checked.evidence.approval.card_id !== target.card_id ||
+      checked.evidence.approval.card_version !== target.card_version ||
+      checked.evidence.approval.requested_id !== target.requested_id ||
+      checked.evidence.current_card_digest !== checked.check.target.card_digest ||
+      checked.evidence.verifying_key_id !== checked.check.target.verifying_key_id
+    ) {
+      throw new ModelTurnError('authorization-refused');
+    }
+    const selected = modelSelectionProjection.parse(
+      await this.#authorization.selectModel(this.#worldId, this.#caseId, {
+        check_id: checked.check.check_id,
+        expected_current_selection_id: expectedCurrentSelectionId,
+      }),
+    );
+    if (
+      selected.selection.predecessor_selection_id !== expectedCurrentSelectionId ||
+      selected.selection.check_id !== checked.check.check_id ||
+      selected.selection.case_id !== this.#caseId ||
+      selected.selection.world_id !== this.#worldId ||
+      canonicalize(selected.selection.target) !== canonicalize(checked.check.target)
+    ) {
+      throw new ModelTurnError('authorization-refused');
+    }
+    if (expectedCurrentSelectionId !== null) this.#quarantine.destroySelection(expectedCurrentSelectionId);
+    return selected;
+  }
+
   async run(inputValue: ModelTurnInput): Promise<ModelTurnOutcome> {
     const input = modelTurnInput.parse(inputValue);
     const key = laneKey(input.cardId, input.cardVersion, input.requestedId);
@@ -430,11 +511,7 @@ export class ModelTurnCoordinator {
           await this.#authorization.beginModelCall({
             worldId: this.#worldId,
             turnId: input.turnId,
-            mandateId: input.mandateId,
-            mandateVersion: input.mandateVersion,
-            cardId: lane.cardId,
-            cardVersion: lane.cardVersion,
-            requestedId: lane.requestedId,
+            selectionId: input.selectionId,
           }),
         );
       } catch {
@@ -445,8 +522,7 @@ export class ModelTurnCoordinator {
         call.world_id !== this.#worldId ||
         call.case_id !== this.#caseId ||
         call.turn_id !== input.turnId ||
-        call.mandate_id !== input.mandateId ||
-        call.mandate_version !== input.mandateVersion ||
+        call.selection_id !== input.selectionId ||
         call.card_id !== lane.cardId ||
         call.card_version !== lane.cardVersion ||
         call.requested_id !== lane.requestedId ||
@@ -474,11 +550,7 @@ export class ModelTurnCoordinator {
             modelCallFailureRequest.parse({
               call_id: call.call_id,
               turn_id: call.turn_id,
-              mandate_id: call.mandate_id,
-              mandate_version: call.mandate_version,
-              card_id: call.card_id,
-              card_version: call.card_version,
-              requested_id: call.requested_id,
+              selection_id: call.selection_id,
               projection_digest: call.projection_digest,
               failure_reason: failureReason,
               provider_disclosure: providerDisclosure,
@@ -518,8 +590,9 @@ export class ModelTurnCoordinator {
 
       const parsedRequest = modelOutputAdmissionRequest.safeParse({
         turn_id: input.turnId,
-        mandate_id: input.mandateId,
-        mandate_version: input.mandateVersion,
+        selection_id: call.selection_id,
+        mandate_id: call.mandate_id,
+        mandate_version: call.mandate_version,
         card_id: lane.cardId,
         card_version: lane.cardVersion,
         requested_id: lane.requestedId,

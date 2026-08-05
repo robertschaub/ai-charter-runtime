@@ -34,6 +34,7 @@ function proposal(cardId: string, requestedId: string, servedId: string) {
     material_consequences: [],
     reversibility_class: 'reversible',
     commercial_influence: { applicable: false, note: 'n/a' },
+    selection_id: 'sel_card_test',
     acting_model: { requested_id: requestedId, served_id: servedId, card_id: cardId, card_version: 1 },
     mandate_ref: { mandate_id: 'mdt_demo', version: 1 },
   });

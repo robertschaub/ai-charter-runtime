@@ -98,5 +98,10 @@
         ]
       }
     }
-  ]
+  ],
+  "default_acting_model": {
+    "card_id": "publicai-apertus-v1.5-70b",
+    "card_version": 1,
+    "requested_id": "swiss-ai/apertus-v1.5-70b"
+  }
 }

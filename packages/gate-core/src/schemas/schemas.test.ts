@@ -44,11 +44,7 @@ const macBlock = { alg: 'hmac-sha256', key_id: 'hmac-2026-08-01', value: MAC_VAL
 const SYSTEM_USE_FAILURE_REQUEST = {
   call_id: 'mcl_system_use_failure',
   turn_id: 'turn_system_use_failure',
-  mandate_id: 'mdt_demo_grant',
-  mandate_version: 1,
-  card_id: 'publicai-apertus-v1.5-70b',
-  card_version: 1,
-  requested_id: 'swiss-ai/apertus-v1.5-70b',
+  selection_id: 'sel_system_use_failure',
   projection_digest: DIGEST,
   failure_reason: 'system-use-invalidated' as const,
 };
@@ -135,6 +131,11 @@ function validMandate(overrides: Record<string, unknown> = {}): Record<string, u
     risk_class: 'medium',
     reversibility_class: 'partially-reversible',
     approved_models: [approvedModelEntry()],
+    default_acting_model: {
+      card_id: 'publicai-apertus-v1.5-70b',
+      card_version: 1,
+      requested_id: 'swiss-ai/apertus-v1.5-70b',
+    },
     binding: macBlock,
     ...overrides,
   };
@@ -164,6 +165,7 @@ function validProposal(overrides: Record<string, unknown> = {}): Record<string, 
       card_id: 'publicai-apertus-v1.5-70b',
       card_version: 1,
     },
+    selection_id: 'sel_current',
     mandate_ref: { mandate_id: 'mdt_grant_2026_08', version: 1 },
     proposal_hash: DIGEST,
     ...overrides,
@@ -214,6 +216,7 @@ function validRuling(overrides: Record<string, unknown> = {}): Record<string, un
       mandate_id: 'mdt_grant_2026_08',
       mandate_version: 1,
       acting_model_id: 'swiss-ai/apertus-v1.5-70b',
+      selection_id: 'sel_current',
       card_digest: DIGEST,
       card_key_id: 'card-2026-08-01',
       system_use_decision: SYSTEM_USE_REFERENCE,
@@ -558,6 +561,7 @@ describe('schemas — accept the shapes the ADRs specify', () => {
       kind: 'model_output_control',
       case_id: 'case_demo',
       turn_id: 'turn_output',
+      selection_id: 'sel_current',
       mandate_id: 'mdt_demo_grant',
       mandate_version: 1,
       card_id: 'publicai-apertus-v1.5-70b',
@@ -612,6 +616,7 @@ describe('schemas — accept the shapes the ADRs specify', () => {
       authorization_boot_id: 'authz_boot_1',
       case_id: 'case_demo',
       turn_id: 'turn_output',
+      selection_id: 'sel_current',
       mandate_id: 'mdt_demo_grant',
       mandate_version: 1,
       card_id: 'publicai-apertus-v1.5-70b',
@@ -989,17 +994,31 @@ describe('schemas — reject what fails closed', () => {
     expect(modelCard.safeParse({ ...card, model }).success).toBe(false);
   });
 
-  it('an op outside the closed WAL vocabulary', () => {
-    const parsed = walTransaction.safeParse({
-      kind: 'transaction',
-      world_id: 'w-demo',
-      ts: '2026-08-01T09:14:22.418Z',
-      txn: 'commit_verify',
-      run_id: 'run-2026-08-01-02',
-      actor: { credential: 'proc:services_host', claimed_role: null },
-      ops: [{ op: 'counter.set', id: 'ctr_1', value: 0 }],
-    });
-    expect(parsed.success).toBe(false);
+  it('an unknown or legacy model-selection op outside the closed WAL vocabulary', () => {
+    for (const op of [
+      { op: 'counter.set', id: 'ctr_1', value: 0 },
+      {
+        op: 'model.select',
+        selection: {
+          world_id: 'w-demo',
+          selection_id: 'sel_legacy',
+          requested_id: 'swiss-ai/apertus-v1.5-70b',
+          served_id: 'swiss-ai/apertus-v1.5-70b',
+        },
+      },
+    ]) {
+      expect(
+        walTransaction.safeParse({
+          kind: 'transaction',
+          world_id: 'w-demo',
+          ts: '2026-08-01T09:14:22.418Z',
+          txn: 'commit_verify',
+          run_id: 'run-2026-08-01-02',
+          actor: { credential: 'proc:services_host', claimed_role: null },
+          ops: [op],
+        }).success,
+      ).toBe(false);
+    }
   });
 
   it('a confidence outside 0-100 and a non-integer confidence', () => {
@@ -1039,7 +1058,7 @@ describe('schemas — reject what fails closed', () => {
       modelCallFailureRequest.safeParse({
         ...SYSTEM_USE_FAILURE_REQUEST,
         provider_disclosure: 'confirmed',
-        served_id: SYSTEM_USE_FAILURE_REQUEST.requested_id,
+        served_id: 'swiss-ai/apertus-v1.5-70b',
       }).success,
     ).toBe(true);
 
@@ -1047,6 +1066,11 @@ describe('schemas — reject what fails closed', () => {
       kind: 'model_call_lifecycle',
       world_id: 'w-demo',
       ...SYSTEM_USE_FAILURE_REQUEST,
+      mandate_id: 'mdt_demo_grant',
+      mandate_version: 1,
+      card_id: 'publicai-apertus-v1.5-70b',
+      card_version: 1,
+      requested_id: 'swiss-ai/apertus-v1.5-70b',
       authorization_boot_id: 'authz_boot_system_use',
       case_id: 'case_demo',
       projection_item_count: 3,
@@ -1069,8 +1093,70 @@ describe('schemas — reject what fails closed', () => {
       modelCallFailedRecord.safeParse({
         ...durableFailure,
         provider_disclosure: 'confirmed',
-        served_id: SYSTEM_USE_FAILURE_REQUEST.requested_id,
+        served_id: 'swiss-ai/apertus-v1.5-70b',
       }).success,
     ).toBe(true);
+  });
+
+  it('keeps selection invalidation internal and requires possible disclosure with no served id', () => {
+    const durableSelectionFailure = {
+      kind: 'model_call_lifecycle',
+      world_id: 'w-demo',
+      call_id: 'mcl_selection_invalidated',
+      turn_id: 'turn_selection_invalidated',
+      selection_id: 'sel_selection_invalidated',
+      mandate_id: 'mdt_demo_grant',
+      mandate_version: 1,
+      card_id: 'publicai-apertus-v1.5-70b',
+      card_version: 1,
+      requested_id: 'swiss-ai/apertus-v1.5-70b',
+      authorization_boot_id: 'authz_boot_selection',
+      case_id: 'case_demo',
+      projection_digest: DIGEST,
+      projection_item_count: 3,
+      system_use_decision: SYSTEM_USE_REFERENCE,
+      opened_at: '2026-08-01T09:00:00.000Z',
+      expires_at: '2026-08-01T09:01:00.000Z',
+      state: 'terminal',
+      outcome: 'failed',
+      completed_at: '2026-08-01T09:01:01.000Z',
+      output_digest: null,
+      failure_reason: 'selection-invalidated',
+    } as const;
+    expect(
+      modelCallFailedRecord.safeParse({
+        ...durableSelectionFailure,
+        provider_disclosure: 'possible',
+        served_id: null,
+      }).success,
+    ).toBe(true);
+    for (const evidence of [
+      { provider_disclosure: 'confirmed', served_id: null },
+      { provider_disclosure: 'possible', served_id: 'swiss-ai/apertus-v1.5-70b' },
+    ] as const) {
+      expect(modelCallFailedRecord.safeParse({ ...durableSelectionFailure, ...evidence }).success).toBe(false);
+    }
+    expect(
+      modelCallFailureRequest.safeParse({
+        call_id: durableSelectionFailure.call_id,
+        turn_id: durableSelectionFailure.turn_id,
+        selection_id: durableSelectionFailure.selection_id,
+        projection_digest: durableSelectionFailure.projection_digest,
+        failure_reason: 'selection-invalidated',
+        provider_disclosure: 'possible',
+        served_id: null,
+      }).success,
+    ).toBe(false);
+    expect(
+      modelCallFailureRequest.safeParse({
+        call_id: durableSelectionFailure.call_id,
+        turn_id: durableSelectionFailure.turn_id,
+        selection_id: durableSelectionFailure.selection_id,
+        projection_digest: durableSelectionFailure.projection_digest,
+        failure_reason: 'authorization-invalidated',
+        provider_disclosure: 'possible',
+        served_id: null,
+      }).success,
+    ).toBe(false);
   });
 });

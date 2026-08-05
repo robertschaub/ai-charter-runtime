@@ -133,6 +133,7 @@ export const rulingBinding = z.object({
   mandate_id: id,
   mandate_version: integer.min(1),
   acting_model_id: modelId,
+  selection_id: id,
   /** ADR-006: the card digest and the key id that verified it, behind the model entry. */
   card_digest: hexDigest,
   card_key_id: id,
