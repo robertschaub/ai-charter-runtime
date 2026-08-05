@@ -75,6 +75,10 @@ world/case, authenticated process actor, expected predecessor, mandate/version, 
 verifying key id, system-use reference, issue time, and a maximum five-minute expiry. It contains no credential,
 model text, prompt, ruling, nonce, reservation, or token.
 
+Five minutes is the headless protocol's safety ceiling, not a claim about adequate human review time. The later
+browser slice must define and review its own gesture/session timing and evidence-refresh protocol rather than
+silently inheriting this placeholder.
+
 Check issue is appended and fsynced before the reference leaves authorization. Its replayed lifecycle is
 `issued → consumed | expired`; the sweeper may append expiry, but every consume checks time lazily. A restart makes
 every prior-boot issued check unusable even before the expiry marker is appended. The check id is correlation
@@ -82,7 +86,10 @@ metadata, not a bearer credential: only the authenticated orchestrator route can
 rechecked. A target whose card is missing, invalid, withdrawn, superseded, or marked
 `re_confirmation_required` cannot receive a new initial selection or switch; the principal must first amend or
 re-confirm the mandate under ADR-006. An already current lane is not silently rewritten merely because its card
-later supersedes, but its next call and every commitment still face the existing card-currentness checks.
+later supersedes, but its next call and every commitment still face the existing card-currentness checks. A
+security-withdrawn current lane is immediately unusable. Selection may still move away from it to another exact,
+current approved acting entry; if none exists, the case stays suspended until the principal amends or re-authorizes
+the mandate under ADR-006.
 
 The select request carries only `{check_id, expected_current_selection_id}`. Under the world lock,
 authorization consumes one exact, unexpired check and re-resolves every bound fact before appending a selection
@@ -92,10 +99,11 @@ closed without changing selection.
 
 Both write operations are authenticated only for `proc:orchestrator`, Origin-guarded, strict-body, and access-recorded.
 They are classified `authorityChanging: false`: a successful transition changes which already-approved lane may
-be used but returns no action authority and cannot enlarge the approved set. That explicit classification preserves
-ADR-002's invariant that the orchestrator reaches no authority-changing endpoint. A later browser slice must bind
-the check to the dynamic case session and user gesture; this headless slice proves that authorization supplied the
-exact evidence, not that a human cognitively reviewed it.
+be used but is monotonically authority-narrowing: it may invalidate and release unresolved work, but cannot issue
+authority, enlarge the approved set, or return a ruling, nonce, reservation, token, or output. That explicit
+classification preserves ADR-002's invariant that the orchestrator reaches no authority-changing endpoint. A
+later browser slice must bind the check to the dynamic case session and user gesture; this headless slice proves
+that authorization supplied the exact evidence, not that a human cognitively reviewed it.
 
 ### 3. Append-only transition and observation records
 
@@ -132,15 +140,29 @@ Selection check consumption, transition append, and authorization-side invalidat
 For a switch, it:
 
 1. invalidates every affected `issued` ruling and releases its still-reserved counters;
-2. terminalizes every open prior-selection model call as `authorization-invalidated`, preserving the honest
+2. terminalizes every open prior-selection model call as `selection-invalidated`, preserving the honest
    `provider_disclosure: possible` state when no response evidence exists; and
 3. appends the new selection transition last in the same operation list.
+
+`selection-invalidated` is a distinct authorization-owned terminal reason. It is emitted only by the switch
+transaction, must carry `provider_disclosure: possible` with a null served id, and is rejected on the caller-facing
+`POST /model-calls/failures` request. The implementation therefore separates caller-reportable failure reasons from
+the durable/internal reason vocabulary. Adding that durable reason and refinement is a substantive amendment to
+the frozen M5.5 call schema; the separately reviewed M5.7 implementation SHA must carry the schema change and its
+tests explicitly. It does not weaken M5.5's rule that existing `authorization-invalidated`, malformed-response,
+and tool-call-refusal failures are post-response and therefore require confirmed disclosure.
 
 Consumed rulings, bound commitments, effects, and historical records are never rewritten. A provider response
 arriving after the switch cannot be admitted because its call is terminal and its selection is stale. A held M5.4
 quarantine entry from the prior selection has no release path; the headless coordinator destroys it when it
 processes the successful transition, while authorization-side current-selection verification remains the safety
 boundary if local cleanup is interrupted.
+
+Allowing the orchestrator to request a switch gives that process a bounded availability lever: it can retire
+unresolved work by moving among principal-approved acting entries. The risk is accepted for this headless POC,
+which has no runtime caller or browser initiator, because every switch is predecessor-bound, single-use-check-bound,
+non-widening, and access-recorded; no-op selection is refused. The later browser slice must bind every
+production-like initiation to a case-officer gesture.
 
 ### 5. Selection identity joins model calls and gates
 
@@ -168,9 +190,14 @@ reservation, raw output, prompt, credential, or record payload. Access evidence 
 and digests. Card fields remain factual `self-declared` or `probe-tested` evidence—never a score, trust badge,
 certification, legal approval, conformity result, or recommendation.
 
-The old proposal-time `recordModelSelection(proposal)` API and its served-id-bearing `model.select` meaning are
-removed or migrated in the M5.7 implementation. There must be one selection lifecycle, not two competing notions
-of which model is current.
+The M5.7 implementation deletes the old proposal-time `recordModelSelection(proposal)` API and the
+served-id-bearing `model.select` WAL operation, state projection, and tests. The exported M3 deterministic
+vertical-slice harness is rewired to perform the new check/select lifecycle before its synthetic provider call
+and to thread the returned selection id through the new call/proposal/ruling bindings. At reviewed baseline
+`6884e8c`, the repository has no `records/` directory or durable `model.select` history; the legacy op is exercised
+only in temporary test roots, so the repository-supported baseline requires no replay migration. An unexpected
+local legacy op fails closed as unsupported rather than being silently reinterpreted. There must be one selection
+lifecycle, not two competing notions of which model is current.
 
 ## Acceptance tests for the implementation tranche
 
@@ -184,14 +211,19 @@ of which model is current.
 - A switch racing model-call begin or ruling issuance has only mutex-ordered outcomes: old work completes its
   authorization transition first, or the switch retires it before it can proceed. No mixed binding is possible.
 - Issued old-lane rulings are invalidated and reservations released; consumed rulings and bound effects stand.
-- Open old-lane calls become terminal without fabricated confirmed disclosure; a late served response is refused,
-  retained nowhere, and cannot create an observation that authorizes use.
+- Open old-lane calls become `selection-invalidated` with `provider_disclosure: possible` and null served id when
+  authorization has no response evidence. The durable-record schema accepts and requires that exact combination;
+  the caller-facing failure request rejects the internal reason, and existing post-response invalidation still
+  requires confirmed disclosure. A late served response is refused, retained nowhere, and cannot create an
+  observation that authorizes use.
 - Every new call, admission, proposal, ruling, and `commit-verify` rejects a stale selection id. A fresh call after
   switching recomputes the provider projection and re-arms Submit and Verify.
 - Confirmed served identity is appended only from the call terminal path; provider mismatch remains detection and
   containment, never a selected fallback.
 - Real-listener ACL/Origin tests cover all three new routes, access evidence, strict schemas, and the complete
   non-orchestrator denial matrix.
+- The legacy helper, WAL op, state projection, and test-only history are absent. The exported M3 harness selects
+  through check/select before provider use and cannot create a second lifecycle.
 - `runtime:start` still creates no model-turn coordinator or provider call; the browser message route remains
   `501`; quarantine has no content reader; no conversation item or released output is produced.
 

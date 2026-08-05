@@ -19,7 +19,11 @@ retried nor represented as successful.
 `default_acting_model` that exactly matches one approved acting entry. Authorization issues a short-lived
 single-use check over the current signed card before accepting an initial selection or switch. The append-only
 transition records requested target/card/key evidence; served identity is appended only later from confirmed
-model-call evidence and can never select a substitute.
+model-call evidence and can never select a substitute. A switch terminalizes an open prior-lane call with the
+distinct authorization-owned `selection-invalidated` reason, `possible` disclosure, and no served id when
+authorization has no response evidence. The caller-facing failure route cannot assert that reason. Adding its
+durable schema/refinement is an explicit, exact-SHA-reviewed amendment to M5.5; it does not relax the
+confirmed-disclosure requirement on existing post-response failure classes.
 
 ## Context
 Cards are the v0 evidence registry: signed JSON in git, bound to the pinned deployed version, every field marked self-declared or probe-tested — never independently attested. The trust root is a public verification key in this repo; the private key stays local. The mandate governs disclosure; a card can narrow but never widen it.

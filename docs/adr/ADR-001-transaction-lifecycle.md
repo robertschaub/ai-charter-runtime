@@ -36,7 +36,10 @@ commitment, or effect; an `allow` or `escalate` ruling may not.
 **Proposed amendment (M5.7 governed model selection, 2026-08-05):** ADR-009 gives each case one append-only
 current `selection_id`. A switch atomically consumes its exact evidence-check reference, appends the successor
 selection, invalidates affected issued rulings, releases their reservations, and terminalizes open prior-lane
-model calls without fabricating confirmed disclosure. Model-call, proposal, and ruling bindings carry the
+model calls with the distinct `selection-invalidated` reason and evidence-derived `possible` disclosure when no
+response evidence exists. Only the authorization-owned switch transaction may emit it; the caller-facing failure
+request rejects it. This is an explicit M5.5 durable-vocabulary/refinement amendment, not a reinterpretation of
+its post-response `authorization-invalidated` reason. Model-call, proposal, and ruling bindings carry the
 selection id; `commit-verify` compares current selection as the lazy backstop. An `A → B → A` sequence therefore
 cannot revive authority issued under the earlier A selection.
 

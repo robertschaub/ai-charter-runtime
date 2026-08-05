@@ -395,14 +395,18 @@ ADR-009 freezes the next implementation boundary against the already pinned spec
   Origin-guarded, access-recorded, and non-authorizing; the writes are strict-body. They cannot change the approved
   set or return a ruling, nonce, reservation, token, output, or other action authority.
 - A successful switch atomically invalidates affected issued rulings, releases reservations, and terminalizes
-  open prior-selection calls without inventing confirmed disclosure. Bound commitments and effects stand.
+  open prior-selection calls as the distinct `selection-invalidated` class with evidence-derived `possible`
+  disclosure when no response evidence exists. Only the authorization-owned switch transaction may emit it; the
+  caller-facing failure request rejects it. This explicit M5.5 durable-schema/refinement amendment leaves the
+  existing post-response `authorization-invalidated` rule unchanged. Bound commitments and effects stand.
 - `selection_id` joins model calls, admission/quarantine metadata, proposals, rulings, and `commit-verify`.
   Fresh calls derive their model/card tuple from current authorization state, recompute the provider projection,
   and re-arm Submit and Verify. An `A → B → A` sequence cannot revive an old A ruling.
 - Requested selection is recorded before a provider call. Served identity is appended only from confirmed
   model-call evidence; mismatch is containment evidence and never an automatic fallback.
-- The implementation removes or migrates the legacy proposal-time `recordModelSelection(proposal)` meaning so
-  one replayable lifecycle decides which model is current.
+- The implementation deletes the legacy proposal-time `recordModelSelection(proposal)` API and `model.select`
+  WAL/state meaning. It rewires the exported M3 deterministic harness through check/select before provider use;
+  the reviewed baseline contains no durable legacy history requiring replay migration.
 
 This definition adds no upstream governance semantics: runtime specification §5 and beats 14 and 19–21 already
 require it, so the Charter provenance pin stays unchanged. The definition tranche changes documentation only.

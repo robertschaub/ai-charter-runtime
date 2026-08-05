@@ -83,9 +83,9 @@ console's strict self-only CSP, `frame-ancestors 'none'`, no third-party code, n
 **Proposed amendment (M5.7 headless selection protocol, 2026-08-05):** authorization adds one fixed current
 selection read, one boot-bound single-use card-evidence check, and one append-only case selection transition for
 `proc:orchestrator`. All are Origin-guarded, access-recorded, and non-authorizing; the writes are strict-body.
-The select operation can consume only an exact current check, cannot change the mandate's approved set, and
-returns no ruling, nonce, reservation, token, or output. Browser selection and native provider ingress remain
-closed.
+The select operation can consume only an exact current check and is monotonically authority-narrowing: it may
+invalidate and release unresolved work, but cannot issue authority, change the mandate's approved set, or return
+a ruling, nonce, reservation, token, or output. Browser selection and native provider ingress remain closed.
 
 ## Context
 
@@ -507,7 +507,8 @@ digest-to-release binding unreachable rather than silently optional.
 non-orchestrator credential and foreign Origin, accept no caller-supplied mandate/card-currentness/system-use or
 served-model fact, consume a check once, enforce exact case/predecessor/expiry bindings, and access-record success
 and refusal without output or credentials. The existing negative-authorization enumeration must include all
-three routes, while the browser message route remains `501`.
+three routes; the caller-facing model-call failure route must reject the authorization-owned
+`selection-invalidated` reason, while the browser message route remains `501`.
 
 **Required with the browser handoff implementation.** Real-listener tests cover exact-origin/exact-window
 message acceptance and wrong/opaque origin or wrong-window refusal; mint-role confinement; absence from URLs,
