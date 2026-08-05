@@ -1,8 +1,8 @@
 <!-- SPDX-License-Identifier: CC-BY-4.0 -->
 # ADR-010 — Browser-initiated governed model selection
 
-**Status:** definition accepted at `85fef1f` after exact-SHA review returned GO — no findings; implementation not
-started (2026-08-05).
+**Status:** definition accepted at `85fef1f` after exact-SHA review returned GO — no findings; bounded
+implementation candidate present and awaiting exact-SHA adversarial review (2026-08-05).
 **Spec:** §3 (case console and demo authentication), §5 (model navigation and **find → check → use**),
 §7 beats 19–21, and §10 M4–M5.
 
@@ -196,12 +196,14 @@ back, ranks models, or turns validity into a green-light surface. `/messages` re
 
 ## Consequences and deferred work
 
-M5.8 will complete the case-officer browser initiation of governed selection and the user-choice portion of beat
+The M5.8 implementation candidate completes the case-officer browser initiation of governed selection and the
+user-choice portion of beat
 19. Beat 19 remains only partial until a native provider call under the new lane produces confirmed served-model
 evidence and fresh Submit/Verify outcomes. Beats 20–21 retain their existing deterministic coverage; no live probe
 or provider substitution test is added here.
 
 Deferred to separately approved slices: native provider ingress, admitted-output release and conversation
-ingestion, empathy-trigger completion, general multi-case binding, live provider runs, and M6 capture. The M5.8
-implementation may not run probes, generate or rotate keys, sign cards, edit generated/append-only production
+ingestion, empathy-trigger completion, general multi-case binding, live provider runs, and M6 capture. Exact-SHA
+review remains required before this candidate becomes a reviewed integration point. The M5.8 implementation may
+not run probes, generate or rotate keys, sign cards, edit generated/append-only production
 records, or move the pinned Charter provenance.

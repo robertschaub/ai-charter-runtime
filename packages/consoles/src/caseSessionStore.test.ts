@@ -32,7 +32,12 @@ describe('orchestrator-local case sessions', () => {
     expect(JSON.stringify(store.snapshot())).not.toContain(token);
     expect(store.authenticate(token, 'w-other')).toBeNull();
     expect(store.authenticate(token, 'w-demo', 'case_other')).toBeNull();
-    expect(store.authenticate(token, 'w-demo', 'case_demo')).toMatchObject({ state: 'active' });
+    expect(store.authenticate(token, 'w-demo', 'case_demo')).toMatchObject({
+      state: 'active',
+      handoff_id: 'handoff_one',
+      target_origin: 'http://127.0.0.1:7802',
+      authorization_boot_id: 'authz_boot_one',
+    });
     expect(store.close(token, 'w-demo')).toBe(true);
     expect(store.authenticate(token, 'w-demo')).toBeNull();
   });

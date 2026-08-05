@@ -23,9 +23,12 @@ export type CaseSessionClaim = z.infer<typeof caseSessionClaim>;
 export interface CaseSessionRecord {
   readonly session_id: string;
   readonly token_digest: string;
+  readonly handoff_id: string;
   readonly role: 'case_officer';
   readonly world_id: string;
   readonly case_id: string;
+  readonly target_origin: string;
+  readonly authorization_boot_id: string;
   readonly created_at: string;
   readonly expires_at: string;
   state: 'active' | 'closed';
@@ -85,9 +88,12 @@ export class CaseSessionStore {
     this.#sessions.set(digest, {
       session_id: sessionId,
       token_digest: digest,
+      handoff_id: claim.handoff_id,
       role: claim.role,
       world_id: claim.world_id,
       case_id: claim.case_id,
+      target_origin: claim.target_origin,
+      authorization_boot_id: claim.authorization_boot_id,
       created_at: at,
       expires_at: expiresAt,
       state: 'active',

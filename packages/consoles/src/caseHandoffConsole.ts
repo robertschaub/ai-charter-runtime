@@ -5,9 +5,23 @@ const WORLD_ID = /^[a-z0-9][a-z0-9-]{0,31}$/;
 const OPAQUE_ID = /^[a-z0-9][a-z0-9_.:-]*$/;
 const SECRET = /^[0-9a-f]{64,}$/;
 const SESSION_STORAGE_KEY = 'runtime-case-session';
-const MODEL_STORAGE_KEY = 'runtime-case-model-choice';
 const READY_TYPE = 'runtime.case-handoff.ready';
 const TRANSFER_TYPE = 'runtime.case-handoff.transfer';
+
+interface BrowserModelTarget {
+  readonly card_id: string;
+  readonly card_version: number;
+  readonly requested_id: string;
+}
+
+interface ActiveBrowserPreparation {
+  readonly preparationId: string;
+  readonly targetKey: string;
+}
+
+let activePreparation: ActiveBrowserPreparation | null = null;
+let preparationRequestSequence = 0;
+let selectionOperationPending = false;
 
 export interface RuntimeConsoleConfig {
   readonly authorization_origin: string;
@@ -27,6 +41,16 @@ export interface TransferredCaseHandoff {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function hasExactKeys(value: Record<string, unknown>, required: readonly string[], optional: readonly string[] = []): boolean {
+  const keys = Object.keys(value);
+  const permitted = new Set([...required, ...optional]);
+  return required.every((key) => Object.hasOwn(value, key)) && keys.every((key) => permitted.has(key));
+}
+
+function validTimestamp(value: unknown): value is string {
+  return typeof value === 'string' && Number.isFinite(Date.parse(value));
 }
 
 function exactOrigin(value: unknown): value is string {
@@ -134,19 +158,268 @@ function text(tag: keyof HTMLElementTagNameMap, value: string, className?: strin
   return node;
 }
 
-function renderModels(value: unknown): void {
+function parseTarget(value: unknown): BrowserModelTarget | null {
+  if (!isRecord(value) || Object.keys(value).length !== 3) return null;
+  if (
+    typeof value['card_id'] !== 'string' ||
+    !OPAQUE_ID.test(value['card_id']) ||
+    typeof value['card_version'] !== 'number' ||
+    !Number.isSafeInteger(value['card_version']) ||
+    value['card_version'] < 1 ||
+    typeof value['requested_id'] !== 'string' ||
+    value['requested_id'].length === 0
+  ) {
+    return null;
+  }
+  return {
+    card_id: value['card_id'],
+    card_version: value['card_version'],
+    requested_id: value['requested_id'],
+  };
+}
+
+function targetKey(target: BrowserModelTarget): string {
+  return `${target.card_id}\u0000${target.card_version}\u0000${target.requested_id}`;
+}
+
+function containsHiddenSelectionBinding(value: unknown): boolean {
+  if (Array.isArray(value)) return value.some(containsHiddenSelectionBinding);
+  if (!isRecord(value)) return false;
+  const forbidden = new Set([
+    'check_id',
+    'card_digest',
+    'current_card_digest',
+    'verifying_key_id',
+    'system_use_decision',
+    'policy_version',
+    'policy_content_digest',
+    'authenticated_actor',
+    'call_id',
+  ]);
+  return Object.entries(value).some(([key, nested]) => forbidden.has(key) || containsHiddenSelectionBinding(nested));
+}
+
+function validRestrictionMap(value: unknown): boolean {
+  return (
+    isRecord(value) &&
+    Object.entries(value).every(
+      ([role, tags]) =>
+        (role === 'acting' || role === 'screening') &&
+        Array.isArray(tags) &&
+        tags.every((tag) => typeof tag === 'string' && tag.length > 0),
+    )
+  );
+}
+
+function validBrowserEvidence(value: unknown): value is Record<string, unknown> {
+  if (
+    !isRecord(value) ||
+    !hasExactKeys(value, [
+      'approval',
+      'effective_data_classes',
+      'card_status',
+      'signature_status',
+      'integrity_alarm',
+      'current_card',
+    ]) ||
+    !isRecord(value['approval'])
+  ) {
+    return false;
+  }
+  const approval = value['approval'];
+  const approvalTarget = parseTarget({
+    card_id: approval['card_id'],
+    card_version: approval['card_version'],
+    requested_id: approval['requested_id'],
+  });
+  return (
+    approvalTarget !== null &&
+    hasExactKeys(approval, ['card_id', 'card_version', 'requested_id', 'roles', 'data_classes'], [
+      're_confirmation_required',
+    ]) &&
+    Array.isArray(approval['roles']) &&
+    approval['roles'].every((role) => role === 'acting' || role === 'screening') &&
+    validRestrictionMap(approval['data_classes']) &&
+    validRestrictionMap(value['effective_data_classes']) &&
+    (value['card_status'] === 'current' ||
+      value['card_status'] === 'superseded' ||
+      value['card_status'] === 'withdrawn') &&
+    (value['signature_status'] === 'valid' || value['signature_status'] === 'invalid') &&
+    typeof value['integrity_alarm'] === 'boolean' &&
+    (value['current_card'] === null || isRecord(value['current_card'])) &&
+    (approval['re_confirmation_required'] === undefined ||
+      typeof approval['re_confirmation_required'] === 'boolean')
+  );
+}
+
+function parseBrowserTransition(value: unknown): BrowserModelTarget | null {
+  if (
+    !isRecord(value) ||
+    !hasExactKeys(value, [
+      'selection_id',
+      'kind',
+      'predecessor_selection_id',
+      'mandate_id',
+      'mandate_version',
+      'target',
+      'selected_at',
+      'authority_effect',
+    ]) ||
+    typeof value['selection_id'] !== 'string' ||
+    !OPAQUE_ID.test(value['selection_id']) ||
+    typeof value['mandate_id'] !== 'string' ||
+    !OPAQUE_ID.test(value['mandate_id']) ||
+    typeof value['mandate_version'] !== 'number' ||
+    !Number.isSafeInteger(value['mandate_version']) ||
+    value['mandate_version'] < 1 ||
+    !validTimestamp(value['selected_at']) ||
+    value['authority_effect'] !== 'none'
+  ) {
+    return null;
+  }
+  if (
+    (value['kind'] === 'initial' && value['predecessor_selection_id'] !== null) ||
+    (value['kind'] === 'switch' &&
+      (typeof value['predecessor_selection_id'] !== 'string' ||
+        !OPAQUE_ID.test(value['predecessor_selection_id']))) ||
+    (value['kind'] !== 'initial' && value['kind'] !== 'switch')
+  ) {
+    return null;
+  }
+  return parseTarget(value['target']);
+}
+
+export function parseBrowserSelectionPreparation(
+  value: unknown,
+): { readonly preparation_id: string; readonly target: BrowserModelTarget; readonly evidence: unknown } | null {
+  if (!isRecord(value) || !hasExactKeys(value, ['preparation', 'evidence']) || !isRecord(value['preparation'])) {
+    return null;
+  }
+  const preparation = value['preparation'];
+  if (
+    !hasExactKeys(preparation, ['preparation_id', 'target', 'issued_at', 'expires_at']) ||
+    typeof preparation['preparation_id'] !== 'string' ||
+    !OPAQUE_ID.test(preparation['preparation_id']) ||
+    !validTimestamp(preparation['issued_at']) ||
+    !validTimestamp(preparation['expires_at']) ||
+    Date.parse(preparation['issued_at']) >= Date.parse(preparation['expires_at']) ||
+    containsHiddenSelectionBinding(value)
+  ) {
+    return null;
+  }
+  const target = parseTarget(preparation['target']);
+  if (target === null || !validBrowserEvidence(value['evidence'])) return null;
+  return { preparation_id: preparation['preparation_id'], target, evidence: value['evidence'] };
+}
+
+export function parseBrowserCurrentSelection(
+  value: unknown,
+): { readonly state: 'unselected' | 'selected'; readonly target: BrowserModelTarget | null } | null {
+  if (
+    !isRecord(value) ||
+    !hasExactKeys(value, ['state', 'case_id', 'selection', 'latest_observation']) ||
+    typeof value['case_id'] !== 'string' ||
+    !OPAQUE_ID.test(value['case_id']) ||
+    containsHiddenSelectionBinding(value)
+  ) {
+    return null;
+  }
+  if (value['state'] === 'unselected' && value['selection'] === null && value['latest_observation'] === null) {
+    return { state: 'unselected', target: null };
+  }
+  if (value['state'] !== 'selected') return null;
+  if (value['latest_observation'] !== null) {
+    const observation = value['latest_observation'];
+    if (
+      !isRecord(observation) ||
+      !hasExactKeys(observation, ['served_id', 'model_resolution', 'terminal_outcome', 'observed_at']) ||
+      typeof observation['served_id'] !== 'string' ||
+      observation['served_id'].length === 0 ||
+      (observation['model_resolution'] !== 'exact' &&
+        observation['model_resolution'] !== 'benign-resolution' &&
+        observation['model_resolution'] !== 'mismatch') ||
+      (observation['terminal_outcome'] !== 'admitted' &&
+        observation['terminal_outcome'] !== 'withheld' &&
+        observation['terminal_outcome'] !== 'failed') ||
+      !validTimestamp(observation['observed_at'])
+    ) {
+      return null;
+    }
+  }
+  const target = parseBrowserTransition(value['selection']);
+  return target === null ? null : { state: 'selected', target };
+}
+
+export function parseBrowserSelectionResult(
+  value: unknown,
+): { readonly selection_id: string; readonly target: BrowserModelTarget } | null {
+  if (
+    !isRecord(value) ||
+    !hasExactKeys(value, ['selection', 'invalidated_ruling_count', 'terminalized_open_call_count']) ||
+    !isRecord(value['selection']) ||
+    !Number.isSafeInteger(value['invalidated_ruling_count']) ||
+    Number(value['invalidated_ruling_count']) < 0 ||
+    !Number.isSafeInteger(value['terminalized_open_call_count']) ||
+    Number(value['terminalized_open_call_count']) < 0 ||
+    containsHiddenSelectionBinding(value)
+  ) {
+    return null;
+  }
+  const selectionId = value['selection']['selection_id'];
+  const target = parseBrowserTransition(value['selection']);
+  if (typeof selectionId !== 'string' || !OPAQUE_ID.test(selectionId) || target === null) return null;
+  return { selection_id: selectionId, target };
+}
+
+function disableSelectionControls(): void {
+  activePreparation = null;
+  for (const candidate of document.querySelectorAll<HTMLButtonElement>('button[data-model-select]')) {
+    candidate.disabled = true;
+  }
+}
+
+function renderModels(
+  value: unknown,
+  currentValue: unknown,
+  token: string,
+  world: string,
+  caseId: string,
+  reload: () => Promise<void>,
+): void {
   const target = document.getElementById('model-list');
   if (target === null) return;
+  preparationRequestSequence += 1;
+  selectionOperationPending = false;
+  activePreparation = null;
   clearChildren(target);
   const models = isRecord(value) && Array.isArray(value['models']) ? value['models'] : [];
   const mandateActive = isRecord(value) && value['mandate_state'] === 'active';
+  const defaultTarget = isRecord(value) ? parseTarget(value['default_acting_model']) : null;
+  const current = parseBrowserCurrentSelection(currentValue);
+  if (defaultTarget === null || current === null) throw new Error('invalid-model-selection-projection');
+  const currentKey = current.target === null ? null : targetKey(current.target);
+  const defaultKey = targetKey(defaultTarget);
+  const selectionStatus = document.getElementById('model-status');
+  if (selectionStatus !== null) {
+    selectionStatus.textContent = current.target === null
+      ? `No model is selected. The mandate default is ${defaultTarget.requested_id}.`
+      : `${current.target.requested_id} is the authorization-owned current selection.`;
+  }
   for (const candidate of models) {
     if (!isRecord(candidate) || !isRecord(candidate['approval'])) continue;
     const approval = candidate['approval'];
-    const requestedId = typeof approval['requested_id'] === 'string' ? approval['requested_id'] : null;
-    if (requestedId === null) continue;
+    const modelTarget = parseTarget({
+      card_id: approval['card_id'],
+      card_version: approval['card_version'],
+      requested_id: approval['requested_id'],
+    });
+    if (modelTarget === null) continue;
+    const requestedId = modelTarget.requested_id;
+    const modelKey = targetKey(modelTarget);
+    const isCurrent = currentKey === modelKey;
+    const isDefault = defaultKey === modelKey;
     const item = text('article', '', 'model-card');
-    item.append(text('h3', requestedId));
+    item.append(text('h3', `${requestedId}${isCurrent ? ' · current' : ''}${isDefault ? ' · mandate default' : ''}`));
     item.append(
       text(
         'p',
@@ -154,38 +427,103 @@ function renderModels(value: unknown): void {
           `card ${String(candidate['card_status'] ?? 'unknown')} · signature ${String(candidate['signature_status'] ?? 'unknown')}`,
       ),
     );
-    const evidence = text('pre', JSON.stringify(candidate['current_card'] ?? candidate, null, 2), 'evidence');
+    const evidence = text('pre', 'Request current signed-card evidence before selecting.', 'evidence');
     evidence.hidden = true;
     evidence.tabIndex = 0;
     const review = document.createElement('button');
     review.type = 'button';
-    review.textContent = 'Review signed card evidence';
-    const prepare = document.createElement('button');
-    prepare.type = 'button';
-    prepare.textContent = 'Prepare this model';
-    prepare.disabled = true;
+    review.textContent = 'Review current evidence';
+    const select = document.createElement('button');
+    select.type = 'button';
+    select.textContent = 'Select this model for the case';
+    select.dataset['modelSelect'] = 'true';
+    select.disabled = true;
     const selectable =
       mandateActive &&
       candidate['signature_status'] === 'valid' &&
       candidate['integrity_alarm'] === false &&
       candidate['card_status'] !== 'withdrawn' &&
-      candidate['current_card'] !== null;
+      candidate['current_card'] !== null &&
+      !isCurrent &&
+      (current.state === 'selected' || isDefault);
+    if (!selectable) review.disabled = true;
     review.addEventListener('click', () => {
-      evidence.hidden = false;
-      prepare.disabled = !selectable;
-      review.textContent = 'Evidence reviewed in this tab';
+      if (selectionOperationPending) return;
+      selectionOperationPending = true;
+      const requestSequence = ++preparationRequestSequence;
+      void (async () => {
+        disableSelectionControls();
+        const output = document.getElementById('model-status');
+        if (output !== null) output.textContent = `Refreshing evidence for ${requestedId}.`;
+        const parsed = parseBrowserSelectionPreparation(
+          await sameOriginJson(
+            `/w/${world}/cases/${caseId}/model-selection-preparations`,
+            { target: modelTarget },
+            token,
+          ),
+        );
+        if (parsed === null || targetKey(parsed.target) !== modelKey) throw new Error('invalid-preparation-response');
+        if (requestSequence !== preparationRequestSequence) return;
+        evidence.textContent = JSON.stringify(parsed.evidence, null, 2);
+        evidence.hidden = false;
+        activePreparation = { preparationId: parsed.preparation_id, targetKey: modelKey };
+        select.disabled = false;
+        review.textContent = 'Current evidence refreshed in this tab';
+        if (output !== null) {
+          output.textContent = `Evidence refreshed for ${requestedId}. Select within two minutes or refresh again.`;
+        }
+      })()
+        .catch(() => {
+          if (requestSequence !== preparationRequestSequence) return;
+          disableSelectionControls();
+          const output = document.getElementById('model-status');
+          if (output !== null) output.textContent = `Current evidence for ${requestedId} could not be prepared.`;
+        })
+        .finally(() => {
+          if (requestSequence === preparationRequestSequence) selectionOperationPending = false;
+        });
     });
-    prepare.addEventListener('click', () => {
-      sessionStorage.setItem(MODEL_STORAGE_KEY, requestedId);
-      const output = document.getElementById('model-status');
-      if (output !== null) {
-        output.textContent = `${requestedId} is prepared for a later model interaction. No model request was sent.`;
-      }
+    select.addEventListener('click', () => {
+      if (selectionOperationPending) return;
+      selectionOperationPending = true;
+      void (async () => {
+        const prepared = activePreparation;
+        preparationRequestSequence += 1;
+        disableSelectionControls();
+        if (prepared === null || prepared.targetKey !== modelKey) throw new Error('preparation-unavailable');
+        const selected = parseBrowserSelectionResult(
+          await sameOriginJson(
+            `/w/${world}/cases/${caseId}/model-selections`,
+            { preparation_id: prepared.preparationId },
+            token,
+          ),
+        );
+        if (selected === null || targetKey(selected.target) !== modelKey) throw new Error('invalid-selection-response');
+        const output = document.getElementById('model-status');
+        if (output !== null) {
+          output.textContent = `${requestedId} is selected for this case. No model request was sent.`;
+        }
+        await reload();
+      })()
+        .catch(async () => {
+          disableSelectionControls();
+          const output = document.getElementById('model-status');
+          if (output !== null) {
+            output.textContent = 'Selection was not confirmed. Current state is being recovered from authorization.';
+          }
+          await reload().catch(() => status('Current model selection could not be recovered.'));
+        })
+        .finally(() => {
+          selectionOperationPending = false;
+        });
     });
     const actions = text('div', '', 'model-actions');
-    actions.append(review, prepare);
+    actions.append(review, select);
     item.append(actions, evidence);
-    if (!selectable) item.append(text('p', 'This model cannot be prepared from the current evidence state.'));
+    if (isCurrent) item.append(text('p', 'This is the current selection; no-op re-selection is unavailable.'));
+    else if (current.state === 'unselected' && !isDefault) {
+      item.append(text('p', 'The mandate default must be selected before switching to this model.'));
+    } else if (!selectable) item.append(text('p', 'This model cannot be selected from the current evidence state.'));
     target.append(item);
   }
   if (target.childElementCount === 0) target.append(text('p', 'No acting model evidence is available for this mandate.'));
@@ -248,8 +586,14 @@ async function loadCaseSurface(
   caseId: string,
   config: RuntimeConsoleConfig,
 ): Promise<void> {
-  const models = await sameOriginGet(`/w/${world}/models`, token);
-  renderModels(models);
+  const refreshModels = async (): Promise<void> => {
+    const [models, current] = await Promise.all([
+      sameOriginGet(`/w/${world}/models`, token),
+      sameOriginGet(`/w/${world}/cases/${caseId}/model-selection`, token),
+    ]);
+    renderModels(models, current, token, world, caseId, refreshModels);
+  };
+  await refreshModels();
   const refresh = async (): Promise<void> => {
     const state = await sameOriginGet(`/w/${world}/cases/${caseId}/state`, token);
     renderCaseState({ ...(isRecord(state) ? state : {}), world_id: world }, config);
@@ -324,7 +668,9 @@ async function mountCaseHandoffConsole(): Promise<void> {
       if (world === undefined || !WORLD_ID.test(world)) throw new Error('session-world-unavailable');
       await sameOriginJson(`/w/${world}/case-sessions/close`, {}, token);
       sessionStorage.removeItem(SESSION_STORAGE_KEY);
-      sessionStorage.removeItem(MODEL_STORAGE_KEY);
+      preparationRequestSequence += 1;
+      selectionOperationPending = true;
+      disableSelectionControls();
       status('Case session closed.');
       const button = document.getElementById('close-session');
       if (button instanceof HTMLButtonElement) button.disabled = true;

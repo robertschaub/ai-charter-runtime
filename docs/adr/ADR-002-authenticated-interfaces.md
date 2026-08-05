@@ -87,8 +87,8 @@ The select operation can consume only an exact current check and is monotonicall
 invalidate and release unresolved work, but cannot issue authority, change the mandate's approved set, or return
 a ruling, nonce, reservation, token, or output. Browser selection and native provider ingress remain closed.
 
-**Accepted definition (M5.8 browser-initiated selection, reviewed at `85fef1f`, implementation pending,
-2026-08-05):** ADR-010 gives the orchestrator origin a
+**Implementation candidate (M5.8 browser-initiated selection, definition reviewed at `85fef1f`, implementation
+review pending, 2026-08-05):** ADR-010 gives the orchestrator origin a
 dynamic-session-only current-selection mirror and two-step preparation/selection protocol. The browser supplies
 only an exact public target and then an unrelated preparation id; authorization check ids, the predecessor used
 for selection, and gate bindings stay server-held. Mutations require a present exact same Origin. Calls to

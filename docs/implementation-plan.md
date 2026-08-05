@@ -60,7 +60,7 @@ distinguish an uncommitted latest checkpoint from confirmed remote rollback or m
 | M2 — transactional core | Implemented and fault-tested | Authorization remains the single durable serialization point; authority defects fail closed. |
 | M3 — vertical slice | Implemented | Deterministic authorize → propose → rule → commit-verify → effect → receipt path, adapters, service ledger, and signed cards are present. |
 | M4 — escalation + governance console | **Complete** | Final exact-SHA review of `e326562` returned GO with no findings; the offline acceptance ledger preserves the remaining partial and not-assessed boundaries. |
-| M5 — screening + empathy + switching | **In progress** | M5.1 is reviewed at `c1b5eb0`; M5.2 at `1973515`; M5.3 at `1cc7fb2`, with its Low wording finding closed at `2b7b45a`; M5.4 at `b247d5b`; M5.5 durable call evidence at `1d992fa`; M5.6 system-use decisions at `b57c01e`; and M5.7 headless governed selection at `442397a`. The M5.8 browser-initiation definition is reviewed at `85fef1f`; its implementation, native provider ingress, output release, empathy-trigger completion, and M6 remain incomplete. |
+| M5 — screening + empathy + switching | **In progress** | M5.1 is reviewed at `c1b5eb0`; M5.2 at `1973515`; M5.3 at `1cc7fb2`, with its Low wording finding closed at `2b7b45a`; M5.4 at `b247d5b`; M5.5 durable call evidence at `1d992fa`; M5.6 system-use decisions at `b57c01e`; and M5.7 headless governed selection at `442397a`. The M5.8 browser-initiation definition is reviewed at `85fef1f`; its bounded implementation is now a candidate awaiting exact-SHA review. Native provider ingress, output release, empathy-trigger completion, and M6 remain incomplete. |
 | M6–M7 | Not started | Full capture/publication work follows the implementation milestones. |
 
 These labels describe repository implementation status, not assurance, certification, or independent
@@ -415,7 +415,7 @@ selection, native provider ingress, output release, conversation ingestion, live
 validation is `npm run typecheck` clean plus 4 Git-safety hook tests and 326 Vitest tests across 36 files,
 `git diff --check` clean, both unchanged signed cards verified, and both pinned Charter digests recomputed.
 
-### M5.8 accepted definition — browser-initiated governed selection
+### M5.8 implementation candidate — browser-initiated governed selection
 
 ADR-010 defines the bounded browser bridge from the existing dynamic case session to the reviewed M5.7
 authorization protocol. It adds no upstream governance semantics and does not move the Charter provenance pin:
@@ -438,10 +438,22 @@ authorization protocol. It adds no upstream governance semantics and does not mo
   unavailable, and no provider call, conversation item, output release, empathy transition, probe, or M6 path is
   added.
 
-Exact-SHA adversarial review at `85fef1f` returned **GO — no findings**. It independently reproduced
+Exact-SHA adversarial review of the definition at `85fef1f` returned **GO — no findings**. It independently reproduced
 `npm run typecheck` clean, 4 Git-safety hook tests and 326 Vitest tests across 36 files passing,
 `git diff --check` clean, both unchanged signed cards verified, and both Charter digests. The review accepts only
-the contract; implementation remains a separate bounded slice and review point.
+the contract.
+
+The current implementation candidate realizes that contract without changing the Charter pin or opening a model
+ingress. It retains the handoff and authorization boot bindings in the in-memory session, keeps at most one
+two-minute preparation per session, marks use consuming before the dependency call, burns it on every terminal or
+ambiguous outcome, and exposes only redacted model evidence/current-transition projections. The console removes
+the old storage marker and separates evidence review from selection. Unit, HTTP-route, and real-listener coverage
+exercise strict bodies, exact Origin/session confinement, two-session races, A → B → A identities, on-behalf
+provenance, ambiguous failure, authorization/orchestrator restart, and the still-closed provider/message/release
+paths. This candidate is not a reviewed integration point until an exact committed SHA receives GO.
+Pre-review validation is `npm run typecheck` clean, 4 Git-safety hook tests and 331 Vitest tests across 37 files
+passing, `git diff --check` clean, and both unchanged signed cards verified. No probe, key operation, card signing,
+generated-record edit, provider call, or push was performed.
 
 ## Resolved browser credential-handoff protocol
 
@@ -460,11 +472,11 @@ authorization route. The bounded handoff and session implementation was independ
 
 ## Ordered next slices
 
-1. **After separate approval, implement only the accepted M5.8 browser boundary.** Preserve the exact preparation,
-   session/Origin, hidden-binding, provenance, redaction, ambiguity, restart, and closed-path contract reviewed at
-   `85fef1f`; do not combine native provider ingress, conversation ingestion, output release, or empathy completion.
-2. **Commit and obtain exact-SHA adversarial review of that implementation.** Close any substantive finding before
-   publication or another M5 slice; a documentation-only review acknowledgement creates no recursive review loop.
+1. **Commit and obtain exact-SHA adversarial review of the bounded M5.8 implementation candidate.** Review the
+   preparation, session/Origin, hidden-binding, provenance, redaction, ambiguity, race, restart, and closed-path
+   contract against ADR-010; do not combine another M5 slice.
+2. **Close any substantive finding before publication or another M5 slice.** A documentation-only review
+   acknowledgement creates no recursive review loop.
 3. **Do not begin M6.** Provider ingress, release/ingestion, empathy completion, and capture remain separately
    approved bounded slices after browser initiation.
 

@@ -5,8 +5,8 @@ A runnable proof of concept of the [Our AI Charter runtime reference model](http
 at an AI prompt, the action path **plan → prepare → check → decide → review** executes with five gates
 (**Authorize → Submit → Verify → Commit → Rely**) enforced *outside* the acting model — machine verdicts
 **allow / deny / escalate**, automatic escalation to a human console carrying a six-field intervention
-contract, two principal-approved acting-model evidence entries, a headless authorization-owned selection/switch
-protocol (without browser initiation or native provider wiring), and hash-chained action records
+contract, two principal-approved acting-model evidence entries, an authorization-owned browser-initiated
+selection/switch protocol (without native provider wiring), and hash-chained action records
 sealed before effect.
 
 The authoritative build specification lives in the documentation repository:
@@ -32,9 +32,11 @@ The exact upstream revision, digest, reviewed runtime baseline, and remaining mi
   M5.6 is reviewed at `b57c01e`; it adds an authorization-owned, replayable system-use decision prerequisite and a
   principal-only read view. Approval is necessary for the synthetic use but never sufficient for an action.
   The authorization gate and principal read view are wired into `runtime:start`; model-turn provider ingress,
-  browser mutation/message ingress, and an output-release consumer are not. M5.7, reviewed at `442397a`, adds
-  replayable headless selection and switching through orchestrator-authenticated authorization routes, but
-  `runtime:start` has no caller for them and the browser path remains closed. Empathy triggers are also inactive.
+  browser message ingress, and an output-release consumer are not. M5.7, reviewed at `442397a`, adds replayable
+  headless selection and switching through orchestrator-authenticated authorization routes. The current M5.8
+  implementation candidate adds a dynamic-session-only browser caller with a two-minute, single-use preparation,
+  redacted recovery, and no model request; exact-SHA adversarial review is still pending. Empathy triggers are also
+  inactive.
 - **A deterministic gate proves declared rules were applied** — not that the rules are lawful, fair, or legitimate.
 - **Commit-token window (interpretive choice).** Commitment binds at `commit-verify`; a revocation landing in the
   token's short TTL is too late for that action by definition. On the stricter reading of "authority in flight",
@@ -98,8 +100,11 @@ rather than an assurance signal. The applicant can append an extract-bound factu
 reliance pending a principal-owned routing obligation without rewriting the effect. The handoff opens the fixed orchestrator-origin receiver, consumes a
 maximum-30-second boot-bound code over the authenticated process channel, and creates an independent
 maximum-15-minute session whose raw bearer is kept only in that tab's `sessionStorage`. That case surface now
-shows the mandate's signed-card evidence, requires a local evidence check before preparing a model choice,
-and polls only the authorization-owned ruling-status projection. A safe link opens the routed dialogue on the
+shows the mandate's signed-card evidence and current authorization-owned selection. A distinct evidence-review
+gesture asks the orchestrator to derive the current predecessor and obtain a fresh authorization check; only the
+resulting process-private, maximum-two-minute preparation can be selected once. The browser receives neither the
+check id nor authorization-only bindings, stores no model target/preparation, and polls only authorization-owned
+state. A safe link opens the routed dialogue on the
 authorization origin, where the responder's own role token reads the question/contract and posts the answer
 directly. Raw clients still face the same ACL, Origin guard, evidence resolution, and single-use state machine.
 The browser message route remains explicitly closed until a later approved M5 ingress slice. M4 acceptance
@@ -130,8 +135,10 @@ M5.7, reviewed at `442397a`, replaces the legacy proposal-time selection marker 
 authorization-owned current selection per configured case. Boot-bound single-use checks precede initial selection
 or switching; selection identity binds calls, admission, proposals, rulings, and commitment verification. A switch
 atomically retires unresolved prior-lane rulings and calls, while served identity is appended only from confirmed
-terminal call evidence. The reviewed implementation adds no browser selection,
-native provider ingress, conversation ingestion, output release, live probe, or M6 path.
+terminal call evidence. The current M5.8 implementation candidate connects that protocol only to the authenticated
+case console. It keeps the authorization check and predecessor server-side, derives case-seat provenance from the
+session, and recovers only through a redacted current-selection read. It adds no native provider ingress,
+conversation ingestion, output release, live probe, or M6 path and remains pending exact-SHA adversarial review.
 
 Offline and deterministic verification uses synthetic records and skips only the remote-presence step:
 

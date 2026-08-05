@@ -66,6 +66,11 @@ const handoffClaim = z
 export type HandoffRedeemInput = z.infer<typeof handoffRedeemInput>;
 export type HandoffClaim = z.infer<typeof handoffClaim>;
 
+const onBehalfOfClaim = z
+  .object({ role: z.literal('case_officer'), session_id: id })
+  .strict();
+export type OnBehalfOfClaim = z.infer<typeof onBehalfOfClaim>;
+
 async function responseJson(response: Response, maxBytes: number): Promise<unknown> {
   const declared = response.headers.get('content-length');
   if (declared !== null && Number(declared) > maxBytes) throw new Error('runtime response exceeded limit');
@@ -123,12 +128,19 @@ abstract class JsonHttpClient {
     this.#fetch = options.fetchImplementation ?? fetch;
   }
 
-  protected async post(path: string, body: unknown): Promise<unknown> {
+  protected async post(path: string, body: unknown, onBehalfOf?: OnBehalfOfClaim): Promise<unknown> {
     let response: Response;
+    const claim = onBehalfOf === undefined ? undefined : onBehalfOfClaim.parse(onBehalfOf);
     try {
       response = await this.#fetch(new URL(path, this.#origin), {
         method: 'POST',
-        headers: { authorization: `Bearer ${this.#token}`, 'content-type': 'application/json' },
+        headers: {
+          authorization: `Bearer ${this.#token}`,
+          'content-type': 'application/json',
+          ...(claim === undefined
+            ? {}
+            : { 'x-on-behalf-of-role': claim.role, 'x-session-id': claim.session_id }),
+        },
         body: JSON.stringify(body),
         redirect: 'error',
         signal: AbortSignal.timeout(this.#timeoutMs),
@@ -171,12 +183,13 @@ export class OrchestratorAuthorizationHttpClient extends JsonHttpClient {
     worldIdInput: string,
     caseIdInput: string,
     input: ModelSelectionCheckRequest,
+    onBehalfOf?: OnBehalfOfClaim,
   ): Promise<ModelSelectionCheckProjection> {
     const world = worldId.parse(worldIdInput);
     const caseId = id.parse(caseIdInput);
     const request = modelSelectionCheckRequest.parse(input);
     return modelSelectionCheckProjection.parse(
-      await this.post(`/w/${world}/cases/${caseId}/model-selection-checks`, request),
+      await this.post(`/w/${world}/cases/${caseId}/model-selection-checks`, request, onBehalfOf),
     );
   }
 
@@ -184,12 +197,13 @@ export class OrchestratorAuthorizationHttpClient extends JsonHttpClient {
     worldIdInput: string,
     caseIdInput: string,
     input: ModelSelectionRequest,
+    onBehalfOf?: OnBehalfOfClaim,
   ): Promise<ModelSelectionProjection> {
     const world = worldId.parse(worldIdInput);
     const caseId = id.parse(caseIdInput);
     const request = modelSelectionRequest.parse(input);
     return modelSelectionProjection.parse(
-      await this.post(`/w/${world}/cases/${caseId}/model-selections`, request),
+      await this.post(`/w/${world}/cases/${caseId}/model-selections`, request, onBehalfOf),
     );
   }
 

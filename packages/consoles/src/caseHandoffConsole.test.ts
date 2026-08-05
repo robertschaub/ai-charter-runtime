@@ -6,10 +6,30 @@ import { describe, expect, it } from 'vitest';
 
 import {
   acceptsHandoffTransfer,
+  parseBrowserCurrentSelection,
+  parseBrowserSelectionPreparation,
+  parseBrowserSelectionResult,
   parseCreatedSession,
   parseRuntimeConsoleConfig,
   shouldPollCaseState,
 } from './caseHandoffConsole.js';
+
+const target = {
+  card_id: 'publicai-apertus-v1.5-70b',
+  card_version: 1,
+  requested_id: 'swiss-ai/apertus-v1.5-70b',
+};
+
+const transition = {
+  selection_id: 'sel_one',
+  kind: 'initial',
+  predecessor_selection_id: null,
+  mandate_id: 'mdt_demo_grant',
+  mandate_version: 1,
+  target,
+  selected_at: '2026-08-05T10:00:01.000Z',
+  authority_effect: 'none',
+};
 
 describe('orchestrator-origin exact-window handoff client', () => {
   it('accepts only an exact two-origin runtime configuration', () => {
@@ -75,6 +95,67 @@ describe('orchestrator-origin exact-window handoff client', () => {
     expect(shell).not.toMatch(/<style\b/i);
     expect(shell).not.toMatch(/\son[a-z]+=/i);
     expect(shell).not.toMatch(/https?:\/\//i);
+    expect(shell).toContain('Find → check → select');
+  });
+
+  it('accepts only redacted browser model-selection projections', () => {
+    const evidence = {
+      approval: {
+        ...target,
+        roles: ['acting'],
+        data_classes: { acting: ['conf:case'] },
+      },
+      effective_data_classes: { acting: ['conf:case'] },
+      card_status: 'current',
+      signature_status: 'valid',
+      integrity_alarm: false,
+      current_card: null,
+    };
+    const preparation = {
+      preparation: {
+        preparation_id: 'msp_one',
+        target,
+        issued_at: '2026-08-05T10:00:00.000Z',
+        expires_at: '2026-08-05T10:02:00.000Z',
+      },
+      evidence,
+    };
+    expect(parseBrowserSelectionPreparation(preparation)).toEqual({
+      preparation_id: 'msp_one',
+      target,
+      evidence,
+    });
+    expect(parseBrowserSelectionPreparation({
+      ...preparation,
+      evidence: { ...evidence, check_id: 'msc_hidden' },
+    })).toBeNull();
+    expect(parseBrowserSelectionPreparation({
+      ...preparation,
+      evidence: { ...evidence, approval: { ...evidence.approval, card_digest: 'a'.repeat(64) } },
+    })).toBeNull();
+    expect(parseBrowserCurrentSelection({
+      state: 'selected',
+      case_id: 'case_demo',
+      selection: transition,
+      latest_observation: null,
+    })).toEqual({ state: 'selected', target });
+    expect(parseBrowserCurrentSelection({
+      state: 'selected',
+      case_id: 'case_demo',
+      selection: { ...transition, system_use_decision: {} },
+      latest_observation: null,
+    })).toBeNull();
+    expect(parseBrowserSelectionResult({
+      selection: transition,
+      invalidated_ruling_count: 0,
+      terminalized_open_call_count: 0,
+    })).toEqual({ selection_id: 'sel_one', target });
+  });
+
+  it('does not persist a model target or preparation in browser storage', () => {
+    const source = readFileSync(resolve('packages/consoles/src/caseHandoffConsole.ts'), 'utf8');
+    expect(source).not.toContain('runtime-case-model-choice');
+    expect(source).not.toMatch(/(?:local|session)Storage\.setItem\([^\n]*(?:model|preparation)/i);
   });
 
   it('binds created sessions to one case and polls only an open dialogue mirror', () => {
