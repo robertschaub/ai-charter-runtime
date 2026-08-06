@@ -95,6 +95,14 @@ for selection, and gate bindings stay server-held. Mutations require a present e
 authorization keep `proc:orchestrator` as the authenticated actor and record the server-derived case role/session
 only as `claimed_actor`, never as authority. Provider ingress, `/messages`, and output release remain closed.
 
+**Proposed amendment (M5.9 native provider ingress):** ADR-011 adds an orchestrator-origin,
+dynamic-session-only preparation/use/status protocol for one selected-lane call over authorization's existing
+synthetic projection. The browser supplies no message, prompt, turn/model/selection binding, or retry instruction;
+use is single and marked consuming before any dependency call. The native orchestrator receives the two provider
+configurations and keys as its exclusive child-environment custody, reuses only the existing non-authorizing
+call-begin, output-admission, and failure routes, and returns metadata-only disclosure status. `/messages`, output
+release, conversation ingestion, and every authority-bearing route remain closed.
+
 ## Context
 
 Three OS processes make "the model proposes, a component outside the model decides, the executing service
@@ -234,10 +242,13 @@ accepts only the single-use handoff in a strict same-origin body and is explicit
 `POST /w/{w}/cases/{id}/messages`, `GET /w/{w}/cases/{id}/state`, `GET /w/{w}/models`,
 `GET /w/{w}/cases/{id}/model-selection`,
 `POST /w/{w}/cases/{id}/model-selection-preparations`,
-`POST /w/{w}/cases/{id}/model-selections`, and `POST /w/{w}/case-sessions/close` require the
+`POST /w/{w}/cases/{id}/model-selections`,
+`POST /w/{w}/cases/{id}/model-turn-preparations`,
+`POST /w/{w}/cases/{id}/model-turns`, `GET /w/{w}/cases/{id}/model-turns/{turn_id}`,
+and `POST /w/{w}/case-sessions/close` require the
 dynamic case-session bearer and re-check its exact role/world/case/expiry binding. ADR-010's two selection
-mutations additionally require a present exact orchestrator Origin; all other browser routes continue to reject a
-present foreign or opaque Origin. The bounded headless
+mutations and ADR-011's two model-turn mutations additionally require a present exact orchestrator Origin; all
+other browser routes continue to reject a present foreign or opaque Origin. The bounded headless
 transport seam `POST /w/{w}/actions/execute` continues to accept only the derived
 `ORCHESTRATOR_TOKEN_CASE_OFFICER`; browser sessions are denied there, and the static derived credential is
 denied on every browser case route.
@@ -431,8 +442,9 @@ allowlist projection**, decided per route and per credential:
   access chain before return;
 - model-call failure → the terminal lifecycle binding plus `failed`, the fixed reason, `possible | confirmed`
   provider-disclosure state, and nullable served-model id. It contains no raw response or error detail;
-- model-selection read → the current transition plus its latest confirmed observation, or explicit unselected
-  state. It exposes no check history, raw output, or authority-bearing object;
+- model-selection read → the current authorization boot id plus the current transition and its latest confirmed
+  observation, or explicit unselected state. The boot id is process-only and is redacted from the orchestrator's
+  browser mirror; the response exposes no check history, raw output, or authority-bearing object;
 - model-selection check → one exact current card-evidence projection plus a boot-bound check reference carrying
   only case/mandate/target/card-key/system-use bindings, expected predecessor, issue time, and expiry;
 - model selection → the append-only transition projection plus invalidated-ruling and terminalized-open-call
@@ -529,6 +541,17 @@ bodies cannot assert check/predecessor/session/actor/authority facts; and browse
 authorization bindings. The orchestrator must derive on-behalf-of headers from its session record, burn local
 preparations on replay/expiry/restart or dependency ambiguity, recover current selection from authorization, and
 leave provider ingress, conversation ingestion, output release, and `/messages` closed.
+
+**Required with the M5.9 implementation.** Real-listener tests must prove the three orchestrator-origin model-turn
+routes accept only the exact dynamic case session; both mutations reject absent, foreign, and opaque Origin; and
+strict bodies cannot assert message, prompt, turn, selection, model, mandate, system-use, projection, tag, actor,
+provider, authority, or retry facts. Provider credentials/configuration must appear only in the orchestrator child
+environment and never in output or records. The process-only current-selection projection must carry the
+authorization boot id while its browser mirror redacts it, so a restart invalidates the session before call-open.
+Synthetic loopback coverage must show server-derived claimed-session provenance, consuming-before-call, selection
+race closure under a shared case-local selection/turn mutex, predecessor/session cleanup with honest `discarded`
+status, no automatic retry/fallback, branch-derived disclosure status, content-free responses, sealed quarantine,
+and the still-closed `/messages`, conversation-ingestion, release, and M6 paths.
 
 **Required with the browser handoff implementation.** Real-listener tests cover exact-origin/exact-window
 message acceptance and wrong/opaque origin or wrong-window refusal; mint-role confinement; absence from URLs,

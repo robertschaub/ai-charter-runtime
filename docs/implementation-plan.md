@@ -35,9 +35,8 @@ The latest cross-model adversarially reviewed implementation is
 selection implementation returned **GO — no findings**. Validation reproduced `npm run typecheck`, 4 Git-safety
 hook tests, 331 Vitest tests across 37 files, `git diff --check`, and verification of both unchanged signed cards.
 The reviewer also recomputed both pinned Charter digests without moving the provenance baseline.
-The published runtime head is `42d2b9c1b2c8ba0a13e5458ba180934552537221` (`42d2b9c`). It contains the
-reviewed M5.3–M5.6 integration range and the documentation-only M5.6 review closure. The reviewed M5.7 and M5.8
-tranches remain local and unpushed; this documentation-only acknowledgement records the M5.8 review closure.
+The published runtime head is `10b6ba394efaef0eb969c25b2c8ca04e27387c86` (`10b6ba3`). It contains the
+reviewed M5.3–M5.8 integration range and the documentation-only M5.8 review closure.
 
 The final M4 acceptance review at `e326562f6c29fe2fc625a18127517163d5665dcd` returned **GO — M4
 acceptance complete; no findings**. Review of `d25f366` had found one Medium asymmetric
@@ -454,6 +453,30 @@ paths. Exact-SHA adversarial review of `ff9e438` returned **GO — no findings**
 both Charter digests. No probe, key operation, card signing, generated-record edit, provider call, or push was
 performed.
 
+### M5.9 definition candidate — native provider ingress to sealed quarantine
+
+ADR-011 proposes the next bounded implementation slice. It does not move the Charter provenance pin or implement
+the path:
+
+- A dynamic case session receives a two-step, maximum-two-minute preparation/use protocol for one run of the
+  current authorization-owned selection. The browser supplies no message, prompt, turn/model/selection binding,
+  projection content, tag, authority fact, or retry instruction.
+- The native orchestrator constructs both reviewed OpenAI-compatible lanes before binding. The supervisor gives
+  lane keys and endpoint/model configuration only to that child; endpoint, lane, requested id, and token parameter
+  must match the current signed card. Configuration never selects a model and startup itself makes no provider
+  request; loopback adapters enter only through a non-runtime test seam.
+- Authorization's existing call-begin transaction remains the only provider-input source and records the exact
+  selection/system-use/projection binding before disclosure. Output returns directly to authorization admission;
+  no failure, timeout, or mismatch triggers a retry or fallback.
+- Browser use/status responses are bounded metadata with branch-derived `none | possible | confirmed` disclosure.
+  Admitted bytes remain sealed behind the existing no-reader quarantine; withheld and failed bytes are destroyed.
+- Selection use and turn use share a case-local mutex. A switch, session close, or expiry destroys affected held
+  bytes and projects `discarded` rather than claiming a quarantine still exists.
+- `/messages` remains `501`, `model_interaction_available` remains false, and there is no user-message or model-output
+  conversation ingestion, output release, proposal construction, empathy completion, live call, probe, or M6 path.
+
+The definition awaits exact-SHA adversarial review. Approval of the definition does not authorize implementation.
+
 ## Resolved browser credential-handoff protocol
 
 The normative decision is pinned above at Charter commit `6a52bd9`: a user-initiated authorization-origin
@@ -471,11 +494,14 @@ authorization route. The bounded handoff and session implementation was independ
 
 ## Ordered next slices
 
-1. **The maintainer decides whether to publish the reviewed local range.** Before any push, inspect the complete
-   range from published `42d2b9c` through this documentation-only review closure; do not combine another M5 slice.
-2. **After separate approval, define the next bounded M5 slice.** Native provider ingress, release/ingestion, and
-   empathy completion remain separate decisions; no review acknowledgement authorizes implementation.
-3. **Do not begin M6.** Capture remains gated on the remaining M5 work and separate approval.
+1. **Review the M5.9 definition at one exact committed SHA.** Confirm that native provider ingress remains separate
+   from browser-message ingestion and output release, and that the proposed browser/runtime boundary preserves the
+   M5.5–M5.8 bindings and disclosure honesty.
+2. **Implement M5.9 only after explicit approval of the reviewed definition.** Do not combine output release,
+   conversation ingestion, proposal construction, empathy completion, a live provider run, or another milestone.
+3. **After M5.9 implementation review, define release/ingestion separately.** No review acknowledgement authorizes
+   that next slice.
+4. **Do not begin M6.** Capture remains gated on the remaining M5 work and separate approval.
 
 Substantive tranches are committed and reviewed at bounded integration points. A documentation-only status
 acknowledgement does not trigger a recursive review round; changes to ADRs, gates, invariants, ACLs,

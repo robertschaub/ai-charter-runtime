@@ -67,8 +67,10 @@ POST /w/{world_id}/cases/{case_id}/model-selections
 ```
 
 The fixed read returns the current transition and its latest confirmed observation, or an explicit unselected
-state. It is the recovery path after either process restarts; clients never infer current selection from card order,
-environment, or their own cache. It is orchestrator-only, non-authorizing, Origin-guarded, and access-recorded.
+state. ADR-011's proposed M5.9 amendment also adds the current authorization boot id to this process-only envelope
+so a stale case session can be closed before call-open; the browser mirror redacts it. The read is the recovery path
+after either process restarts; clients never infer current selection from card order, environment, or their own
+cache. It is orchestrator-only, non-authorizing, Origin-guarded, and access-recorded.
 
 The strict check request carries only:
 
@@ -165,7 +167,9 @@ Consumed rulings, bound commitments, effects, and historical records are never r
 arriving after the switch cannot be admitted because its call is terminal and its selection is stale. A held M5.4
 quarantine entry from the prior selection has no release path; the headless coordinator destroys it when it
 processes the successful transition, while authorization-side current-selection verification remains the safety
-boundary if local cleanup is interrupted.
+boundary if local cleanup is interrupted. ADR-011's proposed native wiring serializes browser selection use and
+turn use under one case-local mutex, destroys predecessor quarantine before returning the switch, and projects
+destroyed local custody as `discarded` rather than retained.
 
 Allowing the orchestrator to request a switch gives that process a bounded availability lever: it can retire
 unresolved work by moving among principal-approved acting entries. The risk is accepted for this headless POC,
