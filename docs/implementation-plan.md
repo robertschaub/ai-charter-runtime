@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: CC-BY-4.0 -->
 # Runtime implementation plan
 
-**Status date:** 2026-08-05
+**Status date:** 2026-08-06
 
 **Current milestone:** M4 complete; M5 implementation is in progress.
 
@@ -31,14 +31,13 @@ URLs, commit, paths, and digests above. A later upstream change does not silentl
 ## Reviewed implementation baseline
 
 The latest cross-model adversarially reviewed implementation is
-`442397a55ebf4456990b847de87b621476cd9f86` (`442397a`). Exact-SHA review of the M5.7 implementation
-returned **GO — no findings** after the definition correction at `4611843` had separately closed its two
-review findings. Validation reproduced `npm run typecheck`, 4 Git-safety hook tests, 326 Vitest tests across
-36 files, `git diff --check`, and verification of both unchanged signed cards. The reviewer also recomputed
-both pinned Charter digests without moving the provenance baseline.
+`ff9e438aac8369f1ca7c60c049c5fee91000228f` (`ff9e438`). Exact-SHA review of the bounded M5.8 browser
+selection implementation returned **GO — no findings**. Validation reproduced `npm run typecheck`, 4 Git-safety
+hook tests, 331 Vitest tests across 37 files, `git diff --check`, and verification of both unchanged signed cards.
+The reviewer also recomputed both pinned Charter digests without moving the provenance baseline.
 The published runtime head is `42d2b9c1b2c8ba0a13e5458ba180934552537221` (`42d2b9c`). It contains the
-reviewed M5.3–M5.6 integration range and the documentation-only M5.6 review closure. The reviewed M5.7
-implementation remains local and unpushed; this documentation-only acknowledgement records its review closure.
+reviewed M5.3–M5.6 integration range and the documentation-only M5.6 review closure. The reviewed M5.7 and M5.8
+tranches remain local and unpushed; this documentation-only acknowledgement records the M5.8 review closure.
 
 The final M4 acceptance review at `e326562f6c29fe2fc625a18127517163d5665dcd` returned **GO — M4
 acceptance complete; no findings**. Review of `d25f366` had found one Medium asymmetric
@@ -60,7 +59,7 @@ distinguish an uncommitted latest checkpoint from confirmed remote rollback or m
 | M2 — transactional core | Implemented and fault-tested | Authorization remains the single durable serialization point; authority defects fail closed. |
 | M3 — vertical slice | Implemented | Deterministic authorize → propose → rule → commit-verify → effect → receipt path, adapters, service ledger, and signed cards are present. |
 | M4 — escalation + governance console | **Complete** | Final exact-SHA review of `e326562` returned GO with no findings; the offline acceptance ledger preserves the remaining partial and not-assessed boundaries. |
-| M5 — screening + empathy + switching | **In progress** | M5.1 is reviewed at `c1b5eb0`; M5.2 at `1973515`; M5.3 at `1cc7fb2`, with its Low wording finding closed at `2b7b45a`; M5.4 at `b247d5b`; M5.5 durable call evidence at `1d992fa`; M5.6 system-use decisions at `b57c01e`; and M5.7 headless governed selection at `442397a`. The M5.8 browser-initiation definition is reviewed at `85fef1f`; its bounded implementation is now a candidate awaiting exact-SHA review. Native provider ingress, output release, empathy-trigger completion, and M6 remain incomplete. |
+| M5 — screening + empathy + switching | **In progress** | M5.1 is reviewed at `c1b5eb0`; M5.2 at `1973515`; M5.3 at `1cc7fb2`, with its Low wording finding closed at `2b7b45a`; M5.4 at `b247d5b`; M5.5 durable call evidence at `1d992fa`; M5.6 system-use decisions at `b57c01e`; M5.7 headless governed selection at `442397a`; and M5.8 browser initiation at `ff9e438`. Native provider ingress, output release, empathy-trigger completion, and M6 remain incomplete. |
 | M6–M7 | Not started | Full capture/publication work follows the implementation milestones. |
 
 These labels describe repository implementation status, not assurance, certification, or independent
@@ -415,7 +414,7 @@ selection, native provider ingress, output release, conversation ingestion, live
 validation is `npm run typecheck` clean plus 4 Git-safety hook tests and 326 Vitest tests across 36 files,
 `git diff --check` clean, both unchanged signed cards verified, and both pinned Charter digests recomputed.
 
-### M5.8 implementation candidate — browser-initiated governed selection
+### M5.8 implemented and reviewed at `ff9e438` — browser-initiated governed selection
 
 ADR-010 defines the bounded browser bridge from the existing dynamic case session to the reviewed M5.7
 authorization protocol. It adds no upstream governance semantics and does not move the Charter provenance pin:
@@ -443,17 +442,17 @@ Exact-SHA adversarial review of the definition at `85fef1f` returned **GO — no
 `git diff --check` clean, both unchanged signed cards verified, and both Charter digests. The review accepts only
 the contract.
 
-The current implementation candidate realizes that contract without changing the Charter pin or opening a model
+The reviewed implementation realizes that contract without changing the Charter pin or opening a model
 ingress. It retains the handoff and authorization boot bindings in the in-memory session, keeps at most one
 two-minute preparation per session, marks use consuming before the dependency call, burns it on every terminal or
 ambiguous outcome, and exposes only redacted model evidence/current-transition projections. The console removes
 the old storage marker and separates evidence review from selection. Unit, HTTP-route, and real-listener coverage
 exercise strict bodies, exact Origin/session confinement, two-session races, A → B → A identities, on-behalf
 provenance, ambiguous failure, authorization/orchestrator restart, and the still-closed provider/message/release
-paths. This candidate is not a reviewed integration point until an exact committed SHA receives GO.
-Pre-review validation is `npm run typecheck` clean, 4 Git-safety hook tests and 331 Vitest tests across 37 files
-passing, `git diff --check` clean, and both unchanged signed cards verified. No probe, key operation, card signing,
-generated-record edit, provider call, or push was performed.
+paths. Exact-SHA adversarial review of `ff9e438` returned **GO — no findings** and reproduced `npm run typecheck`,
+4 Git-safety hook tests and 331 Vitest tests across 37 files, `git diff --check`, both unchanged signed cards, and
+both Charter digests. No probe, key operation, card signing, generated-record edit, provider call, or push was
+performed.
 
 ## Resolved browser credential-handoff protocol
 
@@ -472,13 +471,11 @@ authorization route. The bounded handoff and session implementation was independ
 
 ## Ordered next slices
 
-1. **Commit and obtain exact-SHA adversarial review of the bounded M5.8 implementation candidate.** Review the
-   preparation, session/Origin, hidden-binding, provenance, redaction, ambiguity, race, restart, and closed-path
-   contract against ADR-010; do not combine another M5 slice.
-2. **Close any substantive finding before publication or another M5 slice.** A documentation-only review
-   acknowledgement creates no recursive review loop.
-3. **Do not begin M6.** Provider ingress, release/ingestion, empathy completion, and capture remain separately
-   approved bounded slices after browser initiation.
+1. **The maintainer decides whether to publish the reviewed local range.** Before any push, inspect the complete
+   range from published `42d2b9c` through this documentation-only review closure; do not combine another M5 slice.
+2. **After separate approval, define the next bounded M5 slice.** Native provider ingress, release/ingestion, and
+   empathy completion remain separate decisions; no review acknowledgement authorizes implementation.
+3. **Do not begin M6.** Capture remains gated on the remaining M5 work and separate approval.
 
 Substantive tranches are committed and reviewed at bounded integration points. A documentation-only status
 acknowledgement does not trigger a recursive review round; changes to ADRs, gates, invariants, ACLs,

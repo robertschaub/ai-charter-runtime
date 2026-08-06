@@ -6,8 +6,8 @@
 §4 (mandate, ruling, and model-card bindings), §5 (model navigation and selection), §7 beats 14 and 19–21,
 and §10 M5.
 
-**Implementation candidate (M5.8 browser initiation, definition reviewed at `85fef1f`, implementation review
-pending, 2026-08-05):**
+**Implemented and reviewed (M5.8 browser initiation, definition `85fef1f`, implementation `ff9e438`,
+2026-08-06):**
 ADR-010 binds the existing process protocol to
 an exact dynamic case session, a refreshed two-minute browser preparation, and a separate user selection gesture.
 Authorization check ids remain hidden, and the browser cannot supply the predecessor used for selection;
@@ -242,7 +242,7 @@ M5.7 makes the selected lane authorization-owned and replayable without activati
 adds protocol state and invalidation work but no new authority and no new Charter semantics; the pinned upstream
 specification already requires this behaviour.
 
-ADR-010 defines the reviewed dynamic browser-selection boundary; its bounded implementation candidate now awaits
-exact-SHA review. Also deferred: native provider ingress, admitted-output release and conversation
+ADR-010 defines the reviewed dynamic browser-selection boundary; its bounded implementation at `ff9e438` passed
+exact-SHA adversarial review with no findings. Still deferred: native provider ingress, admitted-output release and conversation
 ingestion, empathy-trigger completion, general multi-case binding, live provider runs, and M6 capture. No M5.7
 operation runs probes, changes keys, signs cards, or edits generated/append-only production records.

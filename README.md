@@ -33,10 +33,9 @@ The exact upstream revision, digest, reviewed runtime baseline, and remaining mi
   principal-only read view. Approval is necessary for the synthetic use but never sufficient for an action.
   The authorization gate and principal read view are wired into `runtime:start`; model-turn provider ingress,
   browser message ingress, and an output-release consumer are not. M5.7, reviewed at `442397a`, adds replayable
-  headless selection and switching through orchestrator-authenticated authorization routes. The current M5.8
-  implementation candidate adds a dynamic-session-only browser caller with a two-minute, single-use preparation,
-  redacted recovery, and no model request; exact-SHA adversarial review is still pending. Empathy triggers are also
-  inactive.
+  headless selection and switching through orchestrator-authenticated authorization routes. M5.8, reviewed at
+  `ff9e438`, adds a dynamic-session-only browser caller with a two-minute, single-use preparation, redacted
+  recovery, and no model request. Empathy triggers are also inactive.
 - **A deterministic gate proves declared rules were applied** — not that the rules are lawful, fair, or legitimate.
 - **Commit-token window (interpretive choice).** Commitment binds at `commit-verify`; a revocation landing in the
   token's short TTL is too late for that action by definition. On the stricter reading of "authority in flight",
@@ -135,10 +134,10 @@ M5.7, reviewed at `442397a`, replaces the legacy proposal-time selection marker 
 authorization-owned current selection per configured case. Boot-bound single-use checks precede initial selection
 or switching; selection identity binds calls, admission, proposals, rulings, and commitment verification. A switch
 atomically retires unresolved prior-lane rulings and calls, while served identity is appended only from confirmed
-terminal call evidence. The current M5.8 implementation candidate connects that protocol only to the authenticated
-case console. It keeps the authorization check and predecessor server-side, derives case-seat provenance from the
-session, and recovers only through a redacted current-selection read. It adds no native provider ingress,
-conversation ingestion, output release, live probe, or M6 path and remains pending exact-SHA adversarial review.
+terminal call evidence. M5.8, reviewed at `ff9e438`, connects that protocol only to the authenticated case console.
+It keeps the authorization check and predecessor server-side, derives case-seat provenance from the session, and
+recovers only through a redacted current-selection read. It adds no native provider ingress, conversation
+ingestion, output release, live probe, or M6 path.
 
 Offline and deterministic verification uses synthetic records and skips only the remote-presence step:
 
