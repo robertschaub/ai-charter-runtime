@@ -187,8 +187,10 @@ commit token independently.
 - Preparation is current-selection-bound, session-bound, boot-bound, maximum two minutes, one per session, and
   domain-separated from ADR-010 preparation ids. Replacement, logout, expiry, selection change, either process
   restart, wrong session, replay, and concurrent use burn or refuse it without a provider call.
-- The process-only current-selection envelope carries the authorization boot id; the browser projection redacts it.
-  A boot mismatch closes the old session before call-open or projection disclosure. Authorization access evidence
+- The process-only current-selection envelope carries the authorization boot id. The browser mirror is constructed
+  field-by-field in both the `selected` and `unselected` states—never by passing the dependency object through—and
+  exact-key assertions prove both states omit the boot id. A boot mismatch closes the old session before call-open
+  or projection disclosure. Authorization access evidence
   records the authenticated process separately from server-derived claimed session provenance on begin, admission,
   and failure, and ignores the claim for every decision.
 - A use rechecks current selection, marks consuming before dependencies, and calls exactly the selected configured
