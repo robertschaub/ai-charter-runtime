@@ -1,9 +1,13 @@
 // SPDX-License-Identifier: MIT
+import { digestFor, digestModelOutput } from 'gate-core';
+import { ModelAdapterError } from 'model-adapters';
 import { describe, expect, it, vi } from 'vitest';
 
 import { CaseConsoleStateStore } from './caseConsoleState.js';
 import { CaseModelSelectionPreparationStore } from './caseModelSelection.js';
+import { CaseModelTurnStore } from './caseModelTurn.js';
 import { CaseSessionStore } from './caseSessionStore.js';
+import { ModelTurnCoordinator, type ModelTurnAuthorizationClient } from './modelTurnCoordinator.js';
 import { OrchestratorHttpServer } from './orchestratorHttpServer.js';
 import type { OrchestratorAuthorizationHttpClient, OrchestratorServicesHttpClient } from './runtimeHttpClients.js';
 
@@ -68,6 +72,7 @@ describe('orchestrator case-console routes', () => {
     }));
     const currentModelSelection = vi.fn(async () => ({
       state: 'unselected' as const,
+      authorization_boot_id: 'authz_boot_test',
       case_id: 'case_demo',
       selection: null,
       latest_observation: null,
@@ -370,6 +375,330 @@ describe('orchestrator case-console routes', () => {
       });
       expect(message.status).toBe(501);
       await expect(message.json()).resolves.toEqual({ error: 'model-interaction-not-active' });
+    } finally {
+      await server.close();
+    }
+  });
+
+  it('runs a selected lane only through a single-use, same-session, content-free two-step route', async () => {
+    const digest = 'd'.repeat(64);
+    const target = {
+      card_id: 'publicai-apertus-v1.5-70b',
+      card_version: 1,
+      requested_id: 'swiss-ai/apertus-v1.5-70b',
+    };
+    const transition = {
+      world_id: 'w-demo',
+      selection_id: 'sel_native_turn',
+      case_id: 'case_demo',
+      kind: 'initial' as const,
+      predecessor_selection_id: null,
+      mandate_id: 'mdt_demo_grant',
+      mandate_version: 1,
+      target: { ...target, card_digest: digest, verifying_key_id: 'card_test' },
+      system_use_decision: {
+        decision_id: 'sud_native_turn',
+        version: 1,
+        record_digest: digest,
+        status: 'approved' as const,
+        conditions: [],
+      },
+      check_id: 'msc_native_turn',
+      selected_at: '2026-08-07T09:00:00.000Z',
+      authority_effect: 'none' as const,
+    };
+    let current = {
+      state: 'selected' as const,
+      authorization_boot_id: 'authz_boot_native_turn',
+      case_id: 'case_demo',
+      selection: transition,
+      latest_observation: null,
+    };
+    const projection = {
+      world_id: 'w-demo',
+      case_id: 'case_demo',
+      provider: target.card_id,
+      role: 'acting' as const,
+      items: [],
+      summary: { included: 0, dropped: 0, dropped_item_ids: [], unmet_tags: [] },
+    };
+    const projectionDigest = digestFor('conversation-projection', projection);
+    const beginModelCall = vi.fn(async (
+      input: { worldId: string; turnId: string; selectionId: string },
+      _claim?: { role: 'case_officer'; session_id: string },
+    ) => ({
+      call: {
+        kind: 'model_call_lifecycle' as const,
+        world_id: 'w-demo',
+        call_id: `mcl_${input.turnId}`,
+        authorization_boot_id: 'authz_boot_native_turn',
+        case_id: 'case_demo',
+        turn_id: input.turnId,
+        selection_id: input.selectionId,
+        mandate_id: 'mdt_demo_grant',
+        mandate_version: 1,
+        card_id: target.card_id,
+        card_version: target.card_version,
+        requested_id: target.requested_id,
+        projection_digest: projectionDigest,
+        projection_item_count: 0,
+        system_use_decision: transition.system_use_decision,
+        opened_at: '2026-08-07T09:00:00.000Z',
+        expires_at: '2026-08-07T09:02:00.000Z',
+        state: 'open' as const,
+        outcome: 'indeterminate' as const,
+        provider_disclosure: 'possible' as const,
+        completed_at: null,
+        served_id: null,
+        output_digest: null,
+        failure_reason: null,
+      },
+      projection,
+    }));
+    const admitModelOutput = vi.fn(async (
+      _world: string,
+      callId: string,
+      input: Parameters<ModelTurnAuthorizationClient['admitModelOutput']>[2],
+      _claim?: { role: 'case_officer'; session_id: string },
+    ) => ({
+      kind: 'model_call_admission' as const,
+      call_id: callId,
+      decision: {
+        kind: 'model_output_control' as const,
+        case_id: 'case_demo',
+        turn_id: input.turn_id,
+        selection_id: input.selection_id,
+        mandate_id: input.mandate_id,
+        mandate_version: input.mandate_version,
+        card_id: input.card_id,
+        card_version: input.card_version,
+        requested_id: input.requested_id,
+        served_id: input.served_id,
+        projection_digest: input.projection_digest,
+        projection_item_count: 0,
+        output_digest: digestModelOutput(input, 'case_demo'),
+        model_resolution: 'exact' as const,
+        flags: [],
+        authority_effect: 'none' as const,
+        disposition: 'admitted' as const,
+        reasons: [],
+        derived_tags: [],
+      },
+    }));
+    const failModelCall = vi.fn(async (
+      _world: string,
+      _input: unknown,
+      _claim?: { role: 'case_officer'; session_id: string },
+    ) => ({} as never));
+    const authorization = {
+      currentModelSelection: vi.fn(async () => current),
+      checkModelSelection: vi.fn(),
+      selectModel: vi.fn(),
+      beginModelCall,
+      admitModelOutput,
+      failModelCall,
+      rulingStatus: vi.fn(),
+      approvedModels: vi.fn(),
+      redeemCaseSessionHandoff: vi.fn(),
+      ruleCommit: vi.fn(),
+    };
+    const provider = vi
+      .fn()
+      .mockResolvedValueOnce({
+        lane: 'publicai',
+        requestedId: target.requested_id,
+        servedId: target.requested_id,
+        content: 'Synthetic output confined to quarantine.',
+        toolCalls: [],
+      })
+      .mockRejectedValueOnce(new ModelAdapterError('timeout', 'synthetic timeout'));
+    const coordinator = new ModelTurnCoordinator({
+      worldId: 'w-demo',
+      caseId: 'case_demo',
+      authorization: authorization as unknown as ModelTurnAuthorizationClient,
+      lanes: [{
+        lane: 'publicai',
+        cardId: target.card_id,
+        cardVersion: target.card_version,
+        requestedId: target.requested_id,
+        adapter: { lane: 'publicai', requestedId: target.requested_id, act: provider },
+      }],
+    });
+    const sessions = new CaseSessionStore({
+      randomToken: (() => {
+        const values = ['c'.repeat(64), 'e'.repeat(64), 'f'.repeat(64)];
+        return () => values.shift() ?? '9'.repeat(64);
+      })(),
+      nextSessionId: (() => {
+        const values = ['session_native_one', 'session_native_two', 'session_native_three'];
+        return () => values.shift() ?? 'session_native_exhausted';
+      })(),
+      now: () => '2026-08-07T09:00:00.000Z',
+    });
+    const firstCreated = sessions.create({
+      handoff_id: 'handoff_native_one',
+      role: 'case_officer',
+      world_id: 'w-demo',
+      case_id: 'case_demo',
+      target_origin: 'http://127.0.0.1:7802',
+      authorization_boot_id: 'authz_boot_native_turn',
+      consumed_at: '2026-08-07T09:00:00.000Z',
+    });
+    const modelTurns = new CaseModelTurnStore({ now: () => '2026-08-07T09:00:00.000Z' });
+    const server = new OrchestratorHttpServer({
+      authorization: authorization as unknown as OrchestratorAuthorizationHttpClient,
+      services: {} as OrchestratorServicesHttpClient,
+      modelTurnCoordinator: coordinator,
+      modelTurns,
+      worldId: 'w-demo',
+      demoCaseId: 'case_demo',
+      demoMandateId: 'mdt_demo_grant',
+      caseOfficerToken: 'b'.repeat(64),
+      authorizationOrigin: 'http://127.0.0.1:7801',
+      caseConsoleAssets: { shell: '', script: '', stylesheet: '' },
+      caseSessions: sessions,
+      host: '127.0.0.1',
+      port: 0,
+    });
+    const address = await server.listen();
+    const post = (path: string, body: unknown, token = firstCreated.session_token, origin = address.origin) =>
+      fetch(`${address.origin}${path}`, {
+        method: 'POST',
+        headers: {
+          authorization: `Bearer ${token}`,
+          'content-type': 'application/json',
+          origin,
+        },
+        body: JSON.stringify(body),
+      });
+    const preparationPath = '/w/w-demo/cases/case_demo/model-turn-preparations';
+    const usePath = '/w/w-demo/cases/case_demo/model-turns';
+    try {
+      expect((await fetch(`${address.origin}${preparationPath}`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: '{}',
+      })).status).toBe(403);
+      expect((await post(preparationPath, {}, firstCreated.session_token, 'null')).status).toBe(403);
+      expect((await post(preparationPath, {}, 'b'.repeat(64))).status).toBe(401);
+      expect((await post(preparationPath, { message: 'forbidden' })).status).toBe(422);
+      expect(beginModelCall).not.toHaveBeenCalled();
+      expect(provider).not.toHaveBeenCalled();
+
+      const preparedResponse = await post(preparationPath, {});
+      expect(preparedResponse.status).toBe(201);
+      const prepared = (await preparedResponse.json()) as {
+        preparation_id: string;
+        turn_id: string;
+        selection_id: string;
+      };
+      expect(Object.keys(prepared).sort()).toEqual([
+        'expires_at',
+        'issued_at',
+        'preparation_id',
+        'selection_id',
+        'target',
+        'turn_id',
+      ]);
+      expect((await post(usePath, { preparation_id: prepared.preparation_id }, firstCreated.session_token, 'null')).status)
+        .toBe(403);
+      expect((await fetch(`${address.origin}${usePath}`, {
+        method: 'POST',
+        headers: {
+          authorization: `Bearer ${firstCreated.session_token}`,
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({ preparation_id: prepared.preparation_id }),
+      })).status).toBe(403);
+      expect((await post(usePath, { preparation_id: prepared.preparation_id }, 'b'.repeat(64))).status).toBe(401);
+      expect(provider).not.toHaveBeenCalled();
+      const runResponse = await post(usePath, { preparation_id: prepared.preparation_id });
+      expect(runResponse.status).toBe(200);
+      const run = await runResponse.json();
+      expect(run).toMatchObject({
+        turn_id: prepared.turn_id,
+        state: 'quarantined',
+        provider_disclosure: 'confirmed',
+        quarantine: { release_state: 'sealed-no-release-path' },
+      });
+      expect(JSON.stringify(run)).not.toContain('Synthetic output confined');
+      expect(provider).toHaveBeenCalledTimes(1);
+      expect(provider.mock.calls[0]?.[0]).toMatchObject({ maxOutputTokens: 512 });
+      expect(beginModelCall.mock.calls[0]?.[1]).toEqual({
+        role: 'case_officer',
+        session_id: firstCreated.session_id,
+      });
+      expect(admitModelOutput.mock.calls[0]?.[3]).toEqual({
+        role: 'case_officer',
+        session_id: firstCreated.session_id,
+      });
+      expect((await post(usePath, { preparation_id: prepared.preparation_id })).status).toBe(409);
+      expect(provider).toHaveBeenCalledTimes(1);
+      expect((await fetch(`${address.origin}${usePath}/${prepared.turn_id}`, {
+        headers: {
+          authorization: `Bearer ${firstCreated.session_token}`,
+          origin: 'null',
+        },
+      })).status).toBe(403);
+      expect((await fetch(`${address.origin}${usePath}/${prepared.turn_id}`, {
+        headers: { authorization: `Bearer ${'b'.repeat(64)}` },
+      })).status).toBe(401);
+      const statusRead = await fetch(`${address.origin}${usePath}/${prepared.turn_id}`, {
+        headers: { authorization: `Bearer ${firstCreated.session_token}` },
+      });
+      expect(statusRead.status).toBe(200);
+      expect(await statusRead.json()).toEqual(run);
+
+      const firstSession = sessions.authenticate(firstCreated.session_token, 'w-demo', 'case_demo');
+      if (firstSession === null) throw new Error('synthetic session disappeared');
+      expect((await post('/w/w-demo/case-sessions/close', {})).status).toBe(200);
+      expect(coordinator.quarantine.size).toBe(0);
+      expect(modelTurns.status(prepared.turn_id, firstSession)).toMatchObject({
+        state: 'discarded',
+        terminal_reason: 'session-ended',
+        quarantine: null,
+      });
+
+      const second = sessions.create({
+        handoff_id: 'handoff_native_two',
+        role: 'case_officer',
+        world_id: 'w-demo',
+        case_id: 'case_demo',
+        target_origin: address.origin,
+        authorization_boot_id: 'authz_boot_native_turn',
+        consumed_at: '2026-08-07T09:00:00.000Z',
+      });
+      const secondPreparedResponse = await post(preparationPath, {}, second.session_token);
+      const secondPrepared = (await secondPreparedResponse.json()) as { preparation_id: string; turn_id: string };
+      const failedResponse = await post(usePath, { preparation_id: secondPrepared.preparation_id }, second.session_token);
+      expect(await failedResponse.json()).toMatchObject({
+        turn_id: secondPrepared.turn_id,
+        state: 'failed',
+        provider_disclosure: 'possible',
+        terminal_reason: 'provider-failure',
+        quarantine: null,
+      });
+      expect(failModelCall.mock.calls[0]?.[2]).toEqual({
+        role: 'case_officer',
+        session_id: second.session_id,
+      });
+      expect((await post('/w/w-demo/cases/case_demo/messages', { message: 'still closed' }, second.session_token)).status)
+        .toBe(501);
+      expect(provider).toHaveBeenCalledTimes(2);
+
+      const third = sessions.create({
+        handoff_id: 'handoff_native_three',
+        role: 'case_officer',
+        world_id: 'w-demo',
+        case_id: 'case_demo',
+        target_origin: address.origin,
+        authorization_boot_id: 'authz_boot_native_turn',
+        consumed_at: '2026-08-07T09:00:00.000Z',
+      });
+      current = { ...current, authorization_boot_id: 'authz_boot_restarted' };
+      expect((await post(preparationPath, {}, third.session_token)).status).toBe(401);
+      expect((await post(preparationPath, {}, third.session_token)).status).toBe(401);
+      expect(provider).toHaveBeenCalledTimes(2);
     } finally {
       await server.close();
     }

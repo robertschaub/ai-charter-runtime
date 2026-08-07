@@ -420,7 +420,8 @@ describe('M5.4 containment with M5.5 durable model-call evidence', () => {
       quarantine,
     });
 
-    const pending = coordinator.run(turn);
+    const caller = { role: 'case_officer' as const, session_id: 'session_model_turn' };
+    const pending = coordinator.run(turn, { onBehalfOf: caller });
     await providerEntered;
     expect([...h.store.snapshot().modelCalls.values()].find((call) => call.turn_id === turn.turnId)).toMatchObject({
       state: 'open',
@@ -444,6 +445,20 @@ describe('M5.4 containment with M5.5 durable model-call evidence', () => {
       admission: { disposition: 'admitted', authority_effect: 'none' },
       quarantine: { release_state: 'sealed-no-release-path' },
     });
+    expect(h.store.snapshot().accessRecords).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          route: 'POST /w/{world_id}/model-calls/begin',
+          authenticated_actor: 'proc:orchestrator',
+          claimed_actor: { role: 'case_officer', session: 'session_model_turn' },
+        }),
+        expect.objectContaining({
+          route: 'POST /w/{world_id}/model-outputs/admit',
+          authenticated_actor: 'proc:orchestrator',
+          claimed_actor: { role: 'case_officer', session: 'session_model_turn' },
+        }),
+      ]),
+    );
     expect(quarantine.has(turn.turnId)).toBe(true);
     expect(quarantine.metadata(turn.turnId)).toEqual(
       expect.objectContaining({ turn_id: turn.turnId, output_digest: outcome.admission.output_digest }),
@@ -652,7 +667,10 @@ describe('M5.4 containment with M5.5 durable model-call evidence', () => {
           },
         ],
       });
-      await expect(coordinator.run({ ...turn, turnId: failure.turnId })).rejects.toEqual(
+      await expect(coordinator.run(
+        { ...turn, turnId: failure.turnId },
+        { onBehalfOf: { role: 'case_officer', session_id: 'session_failure_claim' } },
+      )).rejects.toEqual(
         expect.objectContaining({ code: 'provider-failure' }),
       );
     }
@@ -670,6 +688,15 @@ describe('M5.4 containment with M5.5 durable model-call evidence', () => {
     const evidence = JSON.stringify(h.store.snapshot().accessRecords);
     expect(evidence).not.toContain('synthetic secret timeout detail');
     expect(evidence).not.toContain('synthetic secret outage detail');
+    expect(h.store.snapshot().accessRecords).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          route: 'POST /w/{world_id}/model-calls/failures',
+          authenticated_actor: 'proc:orchestrator',
+          claimed_actor: { role: 'case_officer', session: 'session_failure_claim' },
+        }),
+      ]),
+    );
     expect(provider.requests).toHaveLength(0);
   });
 

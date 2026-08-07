@@ -3,7 +3,7 @@
 import { join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
-import { id, worldId } from 'gate-core';
+import { CardRegistry, id, worldId } from 'gate-core';
 
 import {
   OrchestratorHttpServer,
@@ -14,6 +14,8 @@ import {
   OrchestratorAuthorizationHttpClient,
   OrchestratorServicesHttpClient,
 } from './runtimeHttpClients.js';
+import { ModelTurnCoordinator } from './modelTurnCoordinator.js';
+import { nativeModelLaneConfigs, type NativeModelLaneDependencies } from './nativeModelLanes.js';
 
 function required(env: NodeJS.ProcessEnv, name: string): string {
   const value = env[name];
@@ -85,8 +87,11 @@ export interface OrchestratorProcessHandle {
   close(): Promise<void>;
 }
 
+export interface OrchestratorProcessDependencies extends NativeModelLaneDependencies {}
+
 export async function startOrchestratorProcess(
   env: NodeJS.ProcessEnv = process.env,
+  dependencies: OrchestratorProcessDependencies = {},
 ): Promise<OrchestratorProcessHandle> {
   const host = loopbackHost(env);
   const port = portFrom(env, 'ORCHESTRATOR_PORT', 7802);
@@ -118,18 +123,34 @@ export async function startOrchestratorProcess(
   });
   await requireHealthy(authorizationOrigin, 'authorization service', 'authorization');
   await requireHealthy(servicesOrigin, 'services host', 'services');
+  const configuredWorld = worldId.parse(env['DEMO_WORLD_ID'] ?? 'w-demo');
+  const configuredCase = id.parse(env['DEMO_CASE_ID'] ?? 'case_demo');
+  const configuredMandate = id.parse(env['DEMO_MANDATE_ID'] ?? 'mdt_demo_grant');
+  const authorization = new OrchestratorAuthorizationHttpClient({
+    origin: authorizationOrigin,
+    token: authorizationToken,
+  });
+  const lanes = nativeModelLaneConfigs(
+    CardRegistry.load(resolve(env['RUNTIME_CARDS_ROOT'] ?? 'docs/cards')),
+    env,
+    dependencies,
+  );
+  const modelTurns = new ModelTurnCoordinator({
+    worldId: configuredWorld,
+    caseId: configuredCase,
+    authorization,
+    lanes,
+  });
   const server = new OrchestratorHttpServer({
-    authorization: new OrchestratorAuthorizationHttpClient({
-      origin: authorizationOrigin,
-      token: authorizationToken,
-    }),
+    authorization,
     services: new OrchestratorServicesHttpClient({
       origin: servicesOrigin,
       token: servicesToken,
     }),
-    worldId: worldId.parse(env['DEMO_WORLD_ID'] ?? 'w-demo'),
-    demoCaseId: id.parse(env['DEMO_CASE_ID'] ?? 'case_demo'),
-    demoMandateId: id.parse(env['DEMO_MANDATE_ID'] ?? 'mdt_demo_grant'),
+    modelTurnCoordinator: modelTurns,
+    worldId: configuredWorld,
+    demoCaseId: configuredCase,
+    demoMandateId: configuredMandate,
     caseOfficerToken,
     authorizationOrigin,
     caseConsoleAssets,

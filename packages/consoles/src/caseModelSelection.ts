@@ -186,7 +186,14 @@ function publicTransition(input: CurrentModelSelectionProjection['selection'] | 
 
 export function toBrowserCurrentModelSelection(input: unknown): BrowserCurrentModelSelectionProjection {
   const parsed = currentModelSelectionProjection.parse(input);
-  if (parsed.state === 'unselected') return browserCurrentModelSelectionProjection.parse(parsed);
+  if (parsed.state === 'unselected') {
+    return browserCurrentModelSelectionProjection.parse({
+      state: 'unselected',
+      case_id: parsed.case_id,
+      selection: null,
+      latest_observation: null,
+    });
+  }
   return browserCurrentModelSelectionProjection.parse({
     state: 'selected',
     case_id: parsed.case_id,

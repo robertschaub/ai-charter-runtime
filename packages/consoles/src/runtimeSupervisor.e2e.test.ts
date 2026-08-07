@@ -167,6 +167,8 @@ function runtimeEnvironment(
     SERVICES_TOKEN_PROC_AUTHZ: '6'.repeat(64),
     GATE_HMAC_KEY: 'a'.repeat(64),
     GATE_HMAC_KEY_ID: 'hmac-test',
+    PUBLICAI_API_KEY: 'synthetic-publicai-key',
+    OPENAI_API_KEY: 'synthetic-openai-key',
   };
 }
 

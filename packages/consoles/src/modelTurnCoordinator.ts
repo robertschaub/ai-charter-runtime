@@ -115,8 +115,22 @@ export type ModelTurnErrorCode =
   | 'quarantine-capacity'
   | 'admission-binding-invalid';
 
+export interface ModelTurnCallerClaim {
+  readonly role: 'case_officer';
+  readonly session_id: string;
+}
+
+export interface ModelTurnRunContext {
+  readonly onBehalfOf?: ModelTurnCallerClaim;
+  readonly onProviderAttempt?: () => void;
+}
+
 export class ModelTurnError extends Error {
-  constructor(readonly code: ModelTurnErrorCode) {
+  constructor(
+    readonly code: ModelTurnErrorCode,
+    readonly providerDisclosure: 'none' | 'possible' | 'confirmed' = 'none',
+    readonly servedId: string | null = null,
+  ) {
     super(code);
     this.name = 'ModelTurnError';
   }
@@ -162,13 +176,18 @@ export interface ModelTurnAuthorizationClient {
     readonly worldId: string;
     readonly turnId: string;
     readonly selectionId: string;
-  }): Promise<ModelCallStart>;
+  }, onBehalfOf?: ModelTurnCallerClaim): Promise<ModelCallStart>;
   admitModelOutput(
     worldIdInput: string,
     callIdInput: string,
     input: ModelOutputAdmissionRequest,
+    onBehalfOf?: ModelTurnCallerClaim,
   ): Promise<ModelCallAdmission>;
-  failModelCall(worldIdInput: string, input: ModelCallFailureRequest): Promise<ModelCallFailedRecord>;
+  failModelCall(
+    worldIdInput: string,
+    input: ModelCallFailureRequest,
+    onBehalfOf?: ModelTurnCallerClaim,
+  ): Promise<ModelCallFailedRecord>;
 }
 
 export interface ModelTurnCoordinatorOptions {
@@ -434,6 +453,10 @@ export class ModelTurnCoordinator {
     return this.#haltedLanes.has(laneKey(cardIdInput, cardVersionInput, requestedIdInput));
   }
 
+  hasConfiguredLane(cardIdInput: string, cardVersionInput: number, requestedIdInput: string): boolean {
+    return this.#lanes.has(laneKey(cardIdInput, cardVersionInput, requestedIdInput));
+  }
+
   async currentSelection(): Promise<CurrentModelSelectionProjection> {
     return currentModelSelectionProjection.parse(
       await this.#authorization.currentModelSelection(this.#worldId, this.#caseId),
@@ -487,7 +510,7 @@ export class ModelTurnCoordinator {
     return selected;
   }
 
-  async run(inputValue: ModelTurnInput): Promise<ModelTurnOutcome> {
+  async run(inputValue: ModelTurnInput, context: ModelTurnRunContext = {}): Promise<ModelTurnOutcome> {
     const input = modelTurnInput.parse(inputValue);
     const key = laneKey(input.cardId, input.cardVersion, input.requestedId);
     const lane = this.#lanes.get(key);
@@ -499,20 +522,27 @@ export class ModelTurnCoordinator {
       if (this.#seenTurns.has(input.turnId)) throw new ModelTurnError('turn-replay');
       this.#seenTurns.add(input.turnId);
 
-      const halt = (code: ModelTurnErrorCode): never => {
+      const halt = (
+        code: ModelTurnErrorCode,
+        providerDisclosure: 'none' | 'possible' | 'confirmed' = 'none',
+        servedId: string | null = null,
+      ): never => {
         this.#quarantine.destroy(input.turnId);
         this.#haltedLanes.add(key);
-        throw new ModelTurnError(code);
+        throw new ModelTurnError(code, providerDisclosure, servedId);
       };
 
       let started: ModelCallStart;
       try {
         started = modelCallStart.parse(
-          await this.#authorization.beginModelCall({
-            worldId: this.#worldId,
-            turnId: input.turnId,
-            selectionId: input.selectionId,
-          }),
+          await this.#authorization.beginModelCall(
+            {
+              worldId: this.#worldId,
+              turnId: input.turnId,
+              selectionId: input.selectionId,
+            },
+            context.onBehalfOf,
+          ),
         );
       } catch {
         return halt('authorization-refused');
@@ -556,15 +586,17 @@ export class ModelTurnCoordinator {
               provider_disclosure: providerDisclosure,
               served_id: servedId,
             }),
+            context.onBehalfOf,
           );
         } catch {
           // The durable open attempt remains explicitly indeterminate; never synthesize a terminal outcome.
         }
-        throw new ModelTurnError(code);
+        throw new ModelTurnError(code, providerDisclosure, servedId);
       };
 
       let rawResponse: ActingResponse;
       try {
+        context.onProviderAttempt?.();
         rawResponse = await lane.adapter.act({
           messages: projectionPrompt(projection),
           maxOutputTokens: input.maxOutputTokens,
@@ -607,7 +639,12 @@ export class ModelTurnCoordinator {
       let admissionEnvelope: ModelCallAdmission;
       try {
         admissionEnvelope = modelCallAdmission.parse(
-          await this.#authorization.admitModelOutput(this.#worldId, call.call_id, request),
+          await this.#authorization.admitModelOutput(
+            this.#worldId,
+            call.call_id,
+            request,
+            context.onBehalfOf,
+          ),
         );
       } catch (error) {
         return await haltStarted(
@@ -617,9 +654,13 @@ export class ModelTurnCoordinator {
           response.servedId,
         );
       }
-      if (admissionEnvelope.call_id !== call.call_id) return halt('admission-binding-invalid');
+      if (admissionEnvelope.call_id !== call.call_id) {
+        return halt('admission-binding-invalid', 'confirmed', response.servedId);
+      }
       const admission = admissionEnvelope.decision;
-      if (!bindingMatches(admission, request, this.#caseId)) return halt('admission-binding-invalid');
+      if (!bindingMatches(admission, request, this.#caseId)) {
+        return halt('admission-binding-invalid', 'confirmed', response.servedId);
+      }
       if (admission.disposition === 'withheld') {
         this.#quarantine.destroy(input.turnId);
         this.#haltedLanes.add(key);
@@ -632,7 +673,11 @@ export class ModelTurnCoordinator {
           quarantine: sealQuarantinedOutput(this.#quarantine, call.call_id, request, admission, this.#caseId),
         };
       } catch (error) {
-        return halt(error instanceof ModelTurnError ? error.code : 'admission-binding-invalid');
+        return halt(
+          error instanceof ModelTurnError ? error.code : 'admission-binding-invalid',
+          'confirmed',
+          response.servedId,
+        );
       }
     } finally {
       this.#busyLanes.delete(key);

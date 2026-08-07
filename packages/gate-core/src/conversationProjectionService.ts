@@ -201,6 +201,7 @@ export class ConversationProjectionService {
     if (selection === null) {
       return currentModelSelectionProjection.parse({
         state: 'unselected',
+        authorization_boot_id: this.#authorizationBootId,
         case_id: this.#caseId,
         selection: null,
         latest_observation: null,
@@ -214,6 +215,7 @@ export class ConversationProjectionService {
       )[0] ?? null;
     return currentModelSelectionProjection.parse({
       state: 'selected',
+      authorization_boot_id: this.#authorizationBootId,
       case_id: this.#caseId,
       selection,
       latest_observation: latestObservation,

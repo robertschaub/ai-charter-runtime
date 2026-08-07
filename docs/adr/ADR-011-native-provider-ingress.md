@@ -1,7 +1,8 @@
 <!-- SPDX-License-Identifier: CC-BY-4.0 -->
 # ADR-011 — Native provider ingress to sealed quarantine
 
-**Status:** proposed M5.9 definition; awaiting exact-SHA adversarial review.
+**Status:** definition reviewed at `2a508ba`; focused correction `be01667` reviewed GO with no open finding;
+implementation candidate awaiting exact-SHA adversarial review.
 **Spec:** §3 (orchestrator, model adapter, and case console), §4 (model-call and system-use bindings),
 §5 (entry boundary, model selection, and fail-closed provider behavior), §7 beats 14 and 19–21, and §10 M5.
 

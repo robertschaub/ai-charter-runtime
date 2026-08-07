@@ -35,6 +35,12 @@ import {
   toBrowserCurrentModelSelection,
   toBrowserModelSelectionResult,
 } from './caseModelSelection.js';
+import {
+  browserModelTurnPreparationRequest,
+  browserModelTurnUseRequest,
+  CaseModelTurnStore,
+} from './caseModelTurn.js';
+import { ModelTurnCoordinator, ModelTurnError } from './modelTurnCoordinator.js';
 
 const executeRequest = z
   .object({ proposal: frozenProposal, service: id, action_class: classToken })
@@ -136,6 +142,24 @@ function assertCurrentSelectionBinding(
   }
 }
 
+class CaseOperationMutex {
+  #tail: Promise<void> = Promise.resolve();
+
+  async run<T>(operation: () => Promise<T>): Promise<T> {
+    let release: () => void = () => {};
+    const predecessor = this.#tail;
+    this.#tail = new Promise<void>((resolveRelease) => {
+      release = resolveRelease;
+    });
+    await predecessor;
+    try {
+      return await operation();
+    } finally {
+      release();
+    }
+  }
+}
+
 function assertSelectionResultBinding(
   selected: ModelSelectionProjection,
   binding: {
@@ -183,6 +207,7 @@ export function loadCaseConsoleAssets(paths: CaseConsoleAssetPaths): CaseConsole
 export interface OrchestratorHttpServerOptions {
   readonly authorization: OrchestratorAuthorizationHttpClient;
   readonly services: OrchestratorServicesHttpClient;
+  readonly modelTurnCoordinator?: ModelTurnCoordinator;
   readonly worldId: string;
   readonly demoCaseId: string;
   readonly demoMandateId: string;
@@ -191,6 +216,7 @@ export interface OrchestratorHttpServerOptions {
   readonly caseConsoleAssets: CaseConsoleAssets;
   readonly caseSessions?: CaseSessionStore;
   readonly modelSelectionPreparations?: CaseModelSelectionPreparationStore;
+  readonly modelTurns?: CaseModelTurnStore;
   readonly caseState?: CaseConsoleStateStore;
   readonly host: string;
   readonly port: number;
@@ -207,6 +233,8 @@ export class OrchestratorHttpServer {
   readonly #server: Server;
   readonly #host: string;
   readonly #port: number;
+  readonly #cleanupTimer: NodeJS.Timeout | null;
+  readonly #cleanupRuntimeState: () => void;
   #origin: string | null;
 
   constructor(options: OrchestratorHttpServerOptions) {
@@ -216,12 +244,26 @@ export class OrchestratorHttpServer {
     const authorizationOrigin = browserOrigin.parse(options.authorizationOrigin);
     const sessions = options.caseSessions ?? new CaseSessionStore();
     const preparations = options.modelSelectionPreparations ?? new CaseModelSelectionPreparationStore();
+    const modelTurns = options.modelTurns ?? new CaseModelTurnStore();
     const caseState = options.caseState ?? new CaseConsoleStateStore();
+    const caseOperations = new CaseOperationMutex();
+    const coordinator = options.modelTurnCoordinator;
     const maxBodyBytes = options.maxBodyBytes ?? 1024 * 1024;
     if (!/^[0-9a-fA-F]{64,}$/.test(options.caseOfficerToken)) throw new Error('invalid case-console credential');
     this.#host = options.host;
     this.#port = options.port;
     this.#origin = options.port === 0 ? null : `http://${options.host}:${options.port}`;
+    this.#cleanupTimer = coordinator === undefined
+      ? null
+      : setInterval(() => modelTurns.expire(coordinator.quarantine), 1_000);
+    this.#cleanupTimer?.unref();
+    this.#cleanupRuntimeState = () => {
+      if (coordinator === undefined) return;
+      for (const session of sessions.snapshot()) {
+        modelTurns.discardSession(session.session_id, coordinator.quarantine);
+      }
+      coordinator.quarantine.clear();
+    };
     this.#server = createServer((request, response) => {
       void (async () => {
         try {
@@ -313,12 +355,17 @@ export class OrchestratorHttpServer {
               return;
             }
             closeSessionRequest.parse(await readJson(request, maxBodyBytes));
-            if (!sessions.close(presented, configuredWorld)) {
-              sendJson(response, 401, { error: 'unauthenticated' });
-              return;
-            }
-            preparations.burnForSession(session.session_id);
-            sendJson(response, 200, { closed: true });
+            await caseOperations.run(async () => {
+              if (!sessions.close(presented, configuredWorld)) {
+                sendJson(response, 401, { error: 'unauthenticated' });
+                return;
+              }
+              preparations.burnForSession(session.session_id);
+              if (coordinator !== undefined) {
+                modelTurns.discardSession(session.session_id, coordinator.quarantine);
+              }
+              sendJson(response, 200, { closed: true });
+            });
             return;
           }
           const stateMatch = /^\/w\/([^/]+)\/cases\/([^/]+)\/state$/.exec(url.pathname);
@@ -400,18 +447,35 @@ export class OrchestratorHttpServer {
             const session = presented === null
               ? null
               : sessions.authenticate(presented, configuredWorld, configuredCase);
-            if (session === null) {
+            if (presented === null || session === null) {
               sendJson(response, 401, { error: 'unauthenticated' });
               return;
             }
             const dependencyCurrent = await options.authorization.currentModelSelection(configuredWorld, configuredCase);
             assertCurrentSelectionBinding(dependencyCurrent, configuredWorld, configuredCase);
+            if (dependencyCurrent.authorization_boot_id !== session.authorization_boot_id) {
+              sessions.close(presented, configuredWorld);
+              preparations.burnForSession(session.session_id);
+              if (coordinator !== undefined) {
+                modelTurns.discardSession(session.session_id, coordinator.quarantine);
+              }
+              sendJson(response, 401, { error: 'session-restart-required' });
+              return;
+            }
             const current = toBrowserCurrentModelSelection(dependencyCurrent);
             preparations.burnStaleForCase(
               configuredWorld,
               configuredCase,
               current.selection?.selection_id ?? null,
             );
+            if (coordinator !== undefined) {
+              modelTurns.reconcileSelection(
+                configuredWorld,
+                configuredCase,
+                current.selection?.selection_id ?? null,
+                coordinator.quarantine,
+              );
+            }
             sendJson(response, 200, current);
             return;
           }
@@ -476,6 +540,9 @@ export class OrchestratorHttpServer {
               ) {
                 preparations.burnForSession(session.session_id);
                 sessions.close(presented, configuredWorld);
+                if (coordinator !== undefined) {
+                  modelTurns.discardSession(session.session_id, coordinator.quarantine);
+                }
                 sendJson(response, 401, { error: 'session-restart-required' });
                 return;
               }
@@ -513,38 +580,254 @@ export class OrchestratorHttpServer {
               return;
             }
             const parsed = browserModelSelectionUseRequest.parse(await readJson(request, maxBodyBytes));
-            const begun = preparations.beginUse(parsed.preparation_id, session);
-            if (begun === null) {
-              sendJson(response, 409, { error: 'selection-preparation-unavailable' });
-              return;
-            }
-            try {
-              const selected = await options.authorization.selectModel(
-                configuredWorld,
-                configuredCase,
-                {
-                  check_id: begun.checkId,
-                  expected_current_selection_id: begun.expectedCurrentSelectionId,
-                },
-                { role: session.role, session_id: session.session_id },
-              );
-              assertSelectionResultBinding(selected, {
-                worldId: configuredWorld,
-                caseId: configuredCase,
-                checkId: begun.checkId,
-                expectedCurrentSelectionId: begun.expectedCurrentSelectionId,
-                target: begun.target,
-              });
-              preparations.burnForCase(configuredWorld, configuredCase);
-              sendJson(response, 200, toBrowserModelSelectionResult(selected));
-            } catch (error) {
-              preparations.burn(begun.preparationId);
-              if (error instanceof RuntimeDependencyError && error.httpStatus >= 400 && error.httpStatus < 500) {
-                sendJson(response, 409, { error: 'model-selection-refused' });
+            await caseOperations.run(async () => {
+              const begun = preparations.beginUse(parsed.preparation_id, session);
+              if (begun === null) {
+                sendJson(response, 409, { error: 'selection-preparation-unavailable' });
                 return;
               }
-              throw error;
+              try {
+                const selected = await options.authorization.selectModel(
+                  configuredWorld,
+                  configuredCase,
+                  {
+                    check_id: begun.checkId,
+                    expected_current_selection_id: begun.expectedCurrentSelectionId,
+                  },
+                  { role: session.role, session_id: session.session_id },
+                );
+                assertSelectionResultBinding(selected, {
+                  worldId: configuredWorld,
+                  caseId: configuredCase,
+                  checkId: begun.checkId,
+                  expectedCurrentSelectionId: begun.expectedCurrentSelectionId,
+                  target: begun.target,
+                });
+                preparations.burnForCase(configuredWorld, configuredCase);
+                if (coordinator !== undefined && selected.selection.predecessor_selection_id !== null) {
+                  modelTurns.discardSelection(
+                    selected.selection.predecessor_selection_id,
+                    coordinator.quarantine,
+                  );
+                }
+                sendJson(response, 200, toBrowserModelSelectionResult(selected));
+              } catch (error) {
+                preparations.burn(begun.preparationId);
+                if (error instanceof RuntimeDependencyError && error.httpStatus >= 400 && error.httpStatus < 500) {
+                  sendJson(response, 409, { error: 'model-selection-refused' });
+                  return;
+                }
+                throw error;
+              }
+            });
+            return;
+          }
+          const turnPreparationMatch = /^\/w\/([^/]+)\/cases\/([^/]+)\/model-turn-preparations$/.exec(
+            url.pathname,
+          );
+          if (request.method === 'POST' && turnPreparationMatch !== null) {
+            const requestedWorld = worldId.safeParse(turnPreparationMatch[1]);
+            const requestedCase = id.safeParse(turnPreparationMatch[2]);
+            if (
+              !requestedWorld.success ||
+              requestedWorld.data !== configuredWorld ||
+              !requestedCase.success ||
+              requestedCase.data !== configuredCase
+            ) {
+              sendJson(response, 404, { error: 'not-found' });
+              return;
             }
+            if (requestOrigin(request) !== ownOrigin) {
+              sendJson(response, 403, { error: 'forbidden' });
+              return;
+            }
+            const presented = bearer(request.headers.authorization);
+            const session = presented === null
+              ? null
+              : sessions.authenticate(presented, configuredWorld, configuredCase);
+            if (presented === null || session === null) {
+              sendJson(response, 401, { error: 'unauthenticated' });
+              return;
+            }
+            browserModelTurnPreparationRequest.parse(await readJson(request, maxBodyBytes));
+            if (coordinator === undefined) {
+              sendJson(response, 503, { error: 'model-turns-unavailable' });
+              return;
+            }
+            await caseOperations.run(async () => {
+              let current: CurrentModelSelectionProjection;
+              try {
+                current = await options.authorization.currentModelSelection(configuredWorld, configuredCase);
+                assertCurrentSelectionBinding(current, configuredWorld, configuredCase);
+              } catch {
+                sendJson(response, 409, { error: 'model-turn-preparation-refused' });
+                return;
+              }
+              if (current.authorization_boot_id !== session.authorization_boot_id) {
+                sessions.close(presented, configuredWorld);
+                preparations.burnForSession(session.session_id);
+                modelTurns.discardSession(session.session_id, coordinator.quarantine);
+                sendJson(response, 401, { error: 'session-restart-required' });
+                return;
+              }
+              const selectionId = current.selection?.selection_id ?? null;
+              modelTurns.reconcileSelection(configuredWorld, configuredCase, selectionId, coordinator.quarantine);
+              if (
+                current.state !== 'selected' ||
+                !coordinator.hasConfiguredLane(
+                  current.selection.target.card_id,
+                  current.selection.target.card_version,
+                  current.selection.target.requested_id,
+                )
+              ) {
+                sendJson(response, 409, { error: 'model-turn-preparation-refused' });
+                return;
+              }
+              try {
+                sendJson(response, 201, modelTurns.create(session, current));
+              } catch {
+                sendJson(response, 409, { error: 'model-turn-preparation-refused' });
+              }
+            });
+            return;
+          }
+          const turnUseMatch = /^\/w\/([^/]+)\/cases\/([^/]+)\/model-turns$/.exec(url.pathname);
+          if (request.method === 'POST' && turnUseMatch !== null) {
+            const requestedWorld = worldId.safeParse(turnUseMatch[1]);
+            const requestedCase = id.safeParse(turnUseMatch[2]);
+            if (
+              !requestedWorld.success ||
+              requestedWorld.data !== configuredWorld ||
+              !requestedCase.success ||
+              requestedCase.data !== configuredCase
+            ) {
+              sendJson(response, 404, { error: 'not-found' });
+              return;
+            }
+            if (requestOrigin(request) !== ownOrigin) {
+              sendJson(response, 403, { error: 'forbidden' });
+              return;
+            }
+            const presented = bearer(request.headers.authorization);
+            const session = presented === null
+              ? null
+              : sessions.authenticate(presented, configuredWorld, configuredCase);
+            if (presented === null || session === null) {
+              sendJson(response, 401, { error: 'unauthenticated' });
+              return;
+            }
+            const parsed = browserModelTurnUseRequest.parse(await readJson(request, maxBodyBytes));
+            if (coordinator === undefined) {
+              sendJson(response, 503, { error: 'model-turns-unavailable' });
+              return;
+            }
+            await caseOperations.run(async () => {
+              const begun = modelTurns.beginUse(parsed.preparation_id, session);
+              if (begun === null) {
+                sendJson(response, 409, { error: 'model-turn-preparation-unavailable' });
+                return;
+              }
+              let current: CurrentModelSelectionProjection;
+              try {
+                current = await options.authorization.currentModelSelection(configuredWorld, configuredCase);
+                assertCurrentSelectionBinding(current, configuredWorld, configuredCase);
+              } catch {
+                sendJson(response, 200, modelTurns.fail(begun.turnId, new ModelTurnError('authorization-refused')));
+                return;
+              }
+              if (current.authorization_boot_id !== session.authorization_boot_id) {
+                sessions.close(presented, configuredWorld);
+                preparations.burnForSession(session.session_id);
+                modelTurns.discardSession(session.session_id, coordinator.quarantine);
+                modelTurns.fail(begun.turnId, new ModelTurnError('authorization-refused'));
+                sendJson(response, 401, { error: 'session-restart-required' });
+                return;
+              }
+              const currentSelectionId = current.selection?.selection_id ?? null;
+              modelTurns.reconcileSelection(
+                configuredWorld,
+                configuredCase,
+                currentSelectionId,
+                coordinator.quarantine,
+              );
+              if (
+                current.state !== 'selected' ||
+                current.selection.selection_id !== begun.selectionId ||
+                !sameModelTarget(current.selection.target, begun.target) ||
+                !coordinator.hasConfiguredLane(
+                  begun.target.card_id,
+                  begun.target.card_version,
+                  begun.target.requested_id,
+                )
+              ) {
+                sendJson(response, 200, modelTurns.fail(begun.turnId, new ModelTurnError('authorization-refused')));
+                return;
+              }
+              try {
+                const outcome = await coordinator.run(
+                  {
+                    turnId: begun.turnId,
+                    selectionId: begun.selectionId,
+                    cardId: begun.target.card_id,
+                    cardVersion: begun.target.card_version,
+                    requestedId: begun.target.requested_id,
+                    maxOutputTokens: 512,
+                  },
+                  {
+                    onBehalfOf: { role: session.role, session_id: session.session_id },
+                    onProviderAttempt: () => modelTurns.markProviderPossible(begun.turnId),
+                  },
+                );
+                sendJson(response, 200, modelTurns.complete(begun.turnId, outcome, coordinator.quarantine));
+              } catch (error) {
+                sendJson(
+                  response,
+                  200,
+                  modelTurns.fail(begun.turnId, error instanceof ModelTurnError ? error : null),
+                );
+              }
+            });
+            return;
+          }
+          const turnStatusMatch = /^\/w\/([^/]+)\/cases\/([^/]+)\/model-turns\/([^/]+)$/.exec(url.pathname);
+          if (request.method === 'GET' && turnStatusMatch !== null) {
+            const requestedWorld = worldId.safeParse(turnStatusMatch[1]);
+            const requestedCase = id.safeParse(turnStatusMatch[2]);
+            const requestedTurn = id.safeParse(turnStatusMatch[3]);
+            if (
+              !requestedWorld.success ||
+              requestedWorld.data !== configuredWorld ||
+              !requestedCase.success ||
+              requestedCase.data !== configuredCase ||
+              !requestedTurn.success
+            ) {
+              sendJson(response, 404, { error: 'not-found' });
+              return;
+            }
+            const origin = requestOrigin(request);
+            if (origin !== undefined && origin !== ownOrigin) {
+              sendJson(response, 403, { error: 'forbidden' });
+              return;
+            }
+            const presented = bearer(request.headers.authorization);
+            const session = presented === null
+              ? null
+              : sessions.authenticate(presented, configuredWorld, configuredCase);
+            if (session === null) {
+              sendJson(response, 401, { error: 'unauthenticated' });
+              return;
+            }
+            if (coordinator === undefined) {
+              sendJson(response, 503, { error: 'model-turns-unavailable' });
+              return;
+            }
+            modelTurns.expire(coordinator.quarantine);
+            const status = modelTurns.status(requestedTurn.data, session);
+            if (status === null) {
+              sendJson(response, 404, { error: 'not-found' });
+              return;
+            }
+            sendJson(response, 200, status);
             return;
           }
           const messageMatch = /^\/w\/([^/]+)\/cases\/([^/]+)\/messages$/.exec(url.pathname);
@@ -641,9 +924,21 @@ export class OrchestratorHttpServer {
   }
 
   close(): Promise<void> {
+    if (this.#cleanupTimer !== null) clearInterval(this.#cleanupTimer);
     return new Promise((resolve, reject) => {
-      if (!this.#server.listening) return resolve();
-      this.#server.close((error) => (error === undefined ? resolve() : reject(error)));
+      if (!this.#server.listening) {
+        this.#cleanupRuntimeState();
+        resolve();
+        return;
+      }
+      this.#server.close((error) => {
+        if (error !== undefined) {
+          reject(error);
+          return;
+        }
+        this.#cleanupRuntimeState();
+        resolve();
+      });
     });
   }
 }

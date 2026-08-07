@@ -19,9 +19,30 @@ interface ActiveBrowserPreparation {
   readonly targetKey: string;
 }
 
+interface ActiveModelTurnPreparation {
+  readonly preparationId: string;
+  readonly turnId: string;
+  readonly selectionId: string;
+  readonly target: BrowserModelTarget;
+}
+
+export interface BrowserModelTurnStatus {
+  readonly turn_id: string;
+  readonly selection_id: string;
+  readonly target: BrowserModelTarget;
+  readonly state: 'prepared' | 'running' | 'quarantined' | 'withheld' | 'discarded' | 'failed';
+  readonly provider_disclosure: 'none' | 'possible' | 'confirmed';
+  readonly requested_id: string;
+  readonly served_id: string | null;
+  readonly terminal_reason: string | null;
+  readonly quarantine: Record<string, unknown> | null;
+}
+
 let activePreparation: ActiveBrowserPreparation | null = null;
 let preparationRequestSequence = 0;
 let selectionOperationPending = false;
+let activeModelTurnPreparation: ActiveModelTurnPreparation | null = null;
+let modelTurnOperationPending = false;
 
 export interface RuntimeConsoleConfig {
   readonly authorization_origin: string;
@@ -371,6 +392,254 @@ export function parseBrowserSelectionResult(
   return { selection_id: selectionId, target };
 }
 
+export function parseBrowserModelTurnPreparation(value: unknown): ActiveModelTurnPreparation | null {
+  if (
+    !isRecord(value) ||
+    !hasExactKeys(value, ['preparation_id', 'turn_id', 'selection_id', 'target', 'issued_at', 'expires_at']) ||
+    typeof value['preparation_id'] !== 'string' ||
+    !OPAQUE_ID.test(value['preparation_id']) ||
+    typeof value['turn_id'] !== 'string' ||
+    !OPAQUE_ID.test(value['turn_id']) ||
+    typeof value['selection_id'] !== 'string' ||
+    !OPAQUE_ID.test(value['selection_id']) ||
+    !validTimestamp(value['issued_at']) ||
+    !validTimestamp(value['expires_at']) ||
+    Date.parse(value['issued_at']) >= Date.parse(value['expires_at'])
+  ) {
+    return null;
+  }
+  const target = parseTarget(value['target']);
+  return target === null
+    ? null
+    : {
+        preparationId: value['preparation_id'],
+        turnId: value['turn_id'],
+        selectionId: value['selection_id'],
+        target,
+      };
+}
+
+const MODEL_TURN_STATES = new Set(['prepared', 'running', 'quarantined', 'withheld', 'discarded', 'failed']);
+const DISCLOSURE_STATES = new Set(['none', 'possible', 'confirmed']);
+const TERMINAL_REASONS = new Set([
+  'authorization-refused',
+  'provider-failure',
+  'provider-protocol',
+  'quarantine-capacity',
+  'admission-binding-invalid',
+  'lane-unconfigured',
+  'lane-halted',
+  'lane-busy',
+  'turn-replay',
+  'output-withheld',
+  'selection-changed',
+  'session-ended',
+  'runtime-failure',
+]);
+
+export function parseBrowserModelTurnStatus(value: unknown): BrowserModelTurnStatus | null {
+  if (
+    !isRecord(value) ||
+    !hasExactKeys(value, [
+      'turn_id',
+      'selection_id',
+      'target',
+      'state',
+      'provider_disclosure',
+      'requested_id',
+      'served_id',
+      'terminal_reason',
+      'quarantine',
+    ]) ||
+    typeof value['turn_id'] !== 'string' ||
+    !OPAQUE_ID.test(value['turn_id']) ||
+    typeof value['selection_id'] !== 'string' ||
+    !OPAQUE_ID.test(value['selection_id']) ||
+    typeof value['state'] !== 'string' ||
+    !MODEL_TURN_STATES.has(value['state']) ||
+    typeof value['provider_disclosure'] !== 'string' ||
+    !DISCLOSURE_STATES.has(value['provider_disclosure']) ||
+    typeof value['requested_id'] !== 'string' ||
+    value['requested_id'].length === 0 ||
+    (value['served_id'] !== null && (typeof value['served_id'] !== 'string' || value['served_id'].length === 0)) ||
+    (value['terminal_reason'] !== null &&
+      (typeof value['terminal_reason'] !== 'string' || !TERMINAL_REASONS.has(value['terminal_reason'])))
+  ) {
+    return null;
+  }
+  const target = parseTarget(value['target']);
+  if (target === null || target.requested_id !== value['requested_id']) return null;
+  let quarantine: Record<string, unknown> | null = null;
+  if (value['quarantine'] !== null) {
+    if (
+      !isRecord(value['quarantine']) ||
+      !hasExactKeys(value['quarantine'], [
+        'release_state',
+        'call_id',
+        'projection_digest',
+        'output_digest',
+        'derived_tags',
+      ]) ||
+      value['quarantine']['release_state'] !== 'sealed-no-release-path' ||
+      typeof value['quarantine']['call_id'] !== 'string' ||
+      !OPAQUE_ID.test(value['quarantine']['call_id']) ||
+      typeof value['quarantine']['projection_digest'] !== 'string' ||
+      !/^[0-9a-f]{64}$/.test(value['quarantine']['projection_digest']) ||
+      typeof value['quarantine']['output_digest'] !== 'string' ||
+      !/^[0-9a-f]{64}$/.test(value['quarantine']['output_digest']) ||
+      !Array.isArray(value['quarantine']['derived_tags']) ||
+      !value['quarantine']['derived_tags'].every((tag) => typeof tag === 'string' && tag.length > 0)
+    ) {
+      return null;
+    }
+    quarantine = value['quarantine'];
+  }
+  const state = value['state'] as BrowserModelTurnStatus['state'];
+  const disclosure = value['provider_disclosure'] as BrowserModelTurnStatus['provider_disclosure'];
+  const terminal = state === 'quarantined' || state === 'withheld' || state === 'discarded' || state === 'failed';
+  if (
+    (state === 'quarantined') !== (quarantine !== null) ||
+    (state === 'quarantined' && disclosure !== 'confirmed') ||
+    (value['served_id'] !== null && disclosure !== 'confirmed') ||
+    (terminal !== (value['terminal_reason'] !== null || state === 'quarantined'))
+  ) {
+    return null;
+  }
+  return {
+    turn_id: value['turn_id'],
+    selection_id: value['selection_id'],
+    target,
+    state,
+    provider_disclosure: disclosure,
+    requested_id: value['requested_id'],
+    served_id: value['served_id'] as string | null,
+    terminal_reason: value['terminal_reason'] as string | null,
+    quarantine,
+  };
+}
+
+function renderModelTurnStatus(value: BrowserModelTurnStatus): void {
+  const statusTarget = document.getElementById('model-turn-status');
+  const metadata = document.getElementById('model-turn-metadata');
+  if (statusTarget !== null) {
+    statusTarget.textContent =
+      `Run ${value.turn_id}: ${value.state}; provider disclosure ${value.provider_disclosure}. ` +
+      'No response content is available on this surface.';
+  }
+  if (metadata !== null) {
+    metadata.textContent = JSON.stringify(value, null, 2);
+    metadata.hidden = false;
+  }
+}
+
+function clearModelTurnSurface(message: string): void {
+  activeModelTurnPreparation = null;
+  const statusTarget = document.getElementById('model-turn-status');
+  const metadata = document.getElementById('model-turn-metadata');
+  if (statusTarget !== null) statusTarget.textContent = message;
+  if (metadata !== null) {
+    metadata.textContent = '';
+    metadata.hidden = true;
+  }
+}
+
+function configureModelTurnControls(
+  current: ReturnType<typeof parseBrowserCurrentSelection>,
+  token: string,
+  world: string,
+  caseId: string,
+): void {
+  const prepare = document.getElementById('prepare-model-turn');
+  const use = document.getElementById('use-model-turn');
+  const output = document.getElementById('model-turn-status');
+  if (!(prepare instanceof HTMLButtonElement) || !(use instanceof HTMLButtonElement) || current === null) return;
+  if (current.state !== 'selected' || current.target === null) {
+    activeModelTurnPreparation = null;
+    prepare.disabled = true;
+    use.disabled = true;
+    if (output !== null) output.textContent = 'Select a model before preparing a run.';
+    return;
+  }
+  const currentTarget = current.target;
+  if (
+    activeModelTurnPreparation !== null &&
+    targetKey(activeModelTurnPreparation.target) !== targetKey(currentTarget)
+  ) {
+    activeModelTurnPreparation = null;
+  }
+  prepare.disabled = modelTurnOperationPending;
+  use.disabled = modelTurnOperationPending || activeModelTurnPreparation === null;
+  prepare.onclick = () => {
+    if (modelTurnOperationPending) return;
+    modelTurnOperationPending = true;
+    activeModelTurnPreparation = null;
+    prepare.disabled = true;
+    use.disabled = true;
+    if (output !== null) output.textContent = 'Preparing a single model run.';
+    void (async () => {
+      const parsed = parseBrowserModelTurnPreparation(
+        await sameOriginJson(`/w/${world}/cases/${caseId}/model-turn-preparations`, {}, token),
+      );
+      if (parsed === null || targetKey(parsed.target) !== targetKey(currentTarget)) {
+        throw new Error('invalid-model-turn-preparation');
+      }
+      activeModelTurnPreparation = parsed;
+      if (output !== null) {
+        output.textContent = 'Run prepared. Confirm the second step to contact the selected provider.';
+      }
+    })()
+      .catch(() => {
+        if (output !== null) output.textContent = 'The model run could not be prepared.';
+      })
+      .finally(() => {
+        modelTurnOperationPending = false;
+        prepare.disabled = false;
+        use.disabled = activeModelTurnPreparation === null;
+      });
+  };
+  use.onclick = () => {
+    if (modelTurnOperationPending) return;
+    const prepared = activeModelTurnPreparation;
+    activeModelTurnPreparation = null;
+    if (prepared === null) return;
+    modelTurnOperationPending = true;
+    prepare.disabled = true;
+    use.disabled = true;
+    if (output !== null) output.textContent = 'Running the selected model. No response content will be shown.';
+    void (async () => {
+      let raw: unknown;
+      try {
+        raw = await sameOriginJson(
+          `/w/${world}/cases/${caseId}/model-turns`,
+          { preparation_id: prepared.preparationId },
+          token,
+        );
+      } catch {
+        raw = await sameOriginGet(`/w/${world}/cases/${caseId}/model-turns/${prepared.turnId}`, token);
+      }
+      const result = parseBrowserModelTurnStatus(raw);
+      if (
+        result === null ||
+        result.turn_id !== prepared.turnId ||
+        result.selection_id !== prepared.selectionId ||
+        targetKey(result.target) !== targetKey(prepared.target)
+      ) {
+        throw new Error('invalid-model-turn-status');
+      }
+      renderModelTurnStatus(result);
+    })()
+      .catch(() => {
+        if (output !== null) {
+          output.textContent = 'The run outcome could not be recovered. It was not retried.';
+        }
+      })
+      .finally(() => {
+        modelTurnOperationPending = false;
+        prepare.disabled = false;
+      });
+  };
+}
+
 function disableSelectionControls(): void {
   activePreparation = null;
   for (const candidate of document.querySelectorAll<HTMLButtonElement>('button[data-model-select]')) {
@@ -503,6 +772,7 @@ function renderModels(
         if (output !== null) {
           output.textContent = `${requestedId} is selected for this case. No model request was sent.`;
         }
+        clearModelTurnSurface('The model selection changed. Prepare a new run for the new selection.');
         await reload();
       })()
         .catch(async () => {
@@ -527,6 +797,7 @@ function renderModels(
     target.append(item);
   }
   if (target.childElementCount === 0) target.append(text('p', 'No acting model evidence is available for this mandate.'));
+  configureModelTurnControls(current, token, world, caseId);
 }
 
 export function shouldPollCaseState(value: unknown): boolean {
@@ -670,7 +941,14 @@ async function mountCaseHandoffConsole(): Promise<void> {
       sessionStorage.removeItem(SESSION_STORAGE_KEY);
       preparationRequestSequence += 1;
       selectionOperationPending = true;
+      activeModelTurnPreparation = null;
+      modelTurnOperationPending = true;
       disableSelectionControls();
+      const prepareRun = document.getElementById('prepare-model-turn');
+      const useRun = document.getElementById('use-model-turn');
+      if (prepareRun instanceof HTMLButtonElement) prepareRun.disabled = true;
+      if (useRun instanceof HTMLButtonElement) useRun.disabled = true;
+      clearModelTurnSurface('Case session closed; no retained model output remains available.');
       status('Case session closed.');
       const button = document.getElementById('close-session');
       if (button instanceof HTMLButtonElement) button.disabled = true;

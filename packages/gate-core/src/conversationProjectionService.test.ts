@@ -185,6 +185,7 @@ describe('M5.7 authorization-owned governed model selection', () => {
     expect(h.mandateBody.approved_models[0]?.card_id).toBe('openai-gpt-5.5');
     expect(h.service.currentSelection(ORCHESTRATOR)).toEqual({
       state: 'unselected',
+      authorization_boot_id: 'authz_boot_projection_1',
       case_id: 'case_demo',
       selection: null,
       latest_observation: null,
@@ -266,6 +267,7 @@ describe('M5.7 authorization-owned governed model selection', () => {
     });
     expect(restarted.currentSelection(ORCHESTRATOR)).toMatchObject({
       state: 'selected',
+      authorization_boot_id: 'authz_boot_projection_restart',
       selection: {
         selection_id: secondA.selection.selection_id,
         predecessor_selection_id: selectedB.selection.selection_id,

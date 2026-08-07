@@ -199,6 +199,7 @@ describe('ADR-010 browser redaction', () => {
     });
     const current = toBrowserCurrentModelSelection({
       state: 'selected',
+      authorization_boot_id: 'authz_boot_test',
       case_id: 'case_demo',
       selection: transition('sel_a'),
       latest_observation: {
@@ -221,6 +222,7 @@ describe('ADR-010 browser redaction', () => {
     });
     const serialized = JSON.stringify({ approved, current, result });
     for (const hidden of [
+      'authorization_boot_id',
       'card_digest',
       'current_card_digest',
       'verifying_key_id',
@@ -232,11 +234,35 @@ describe('ADR-010 browser redaction', () => {
     ]) {
       expect(serialized).not.toContain(hidden);
     }
-    expect(current).toMatchObject({
+    expect(current).toEqual({
       state: 'selected',
-      selection: { selection_id: 'sel_a', target: TARGET },
-      latest_observation: { served_id: TARGET.requested_id, model_resolution: 'exact' },
+      case_id: 'case_demo',
+      selection: {
+        selection_id: 'sel_a',
+        kind: 'initial',
+        predecessor_selection_id: null,
+        mandate_id: 'mdt_demo_grant',
+        mandate_version: 1,
+        selected_at: '2026-08-05T10:00:01.000Z',
+        authority_effect: 'none',
+        target: TARGET,
+      },
+      latest_observation: {
+        served_id: TARGET.requested_id,
+        model_resolution: 'exact',
+        terminal_outcome: 'admitted',
+        observed_at: '2026-08-05T10:00:02.000Z',
+      },
     });
+    expect(
+      toBrowserCurrentModelSelection({
+        state: 'unselected',
+        authorization_boot_id: 'authz_boot_test',
+        case_id: 'case_demo',
+        selection: null,
+        latest_observation: null,
+      }),
+    ).toEqual({ state: 'unselected', case_id: 'case_demo', selection: null, latest_observation: null });
     expect(result).toMatchObject({ selection: { selection_id: 'sel_b', predecessor_selection_id: 'sel_a' } });
   });
 });

@@ -6,7 +6,7 @@ at an AI prompt, the action path **plan → prepare → check → decide → rev
 (**Authorize → Submit → Verify → Commit → Rely**) enforced *outside* the acting model — machine verdicts
 **allow / deny / escalate**, automatic escalation to a human console carrying a six-field intervention
 contract, two principal-approved acting-model evidence entries, an authorization-owned browser-initiated
-selection/switch protocol (without native provider wiring), and hash-chained action records
+selection/switch protocol, a review-pending native selected-lane call into sealed quarantine, and hash-chained action records
 sealed before effect.
 
 The authoritative build specification lives in the documentation repository:
@@ -31,11 +31,13 @@ The exact upstream revision, digest, reviewed runtime baseline, and remaining mi
   durable, metadata-only evidence for each attempt before disclosure and for its terminal admission or fixed failure.
   M5.6 is reviewed at `b57c01e`; it adds an authorization-owned, replayable system-use decision prerequisite and a
   principal-only read view. Approval is necessary for the synthetic use but never sufficient for an action.
-  The authorization gate and principal read view are wired into `runtime:start`; model-turn provider ingress,
-  browser message ingress, and an output-release consumer are not. M5.7, reviewed at `442397a`, adds replayable
+  The authorization gate and principal read view are wired into `runtime:start`. The M5.9 implementation candidate
+  adds a two-step, dynamic-session-only selected-lane call whose admitted bytes remain sealed and unreadable;
+  browser message ingress and an output-release consumer are not implemented. M5.7, reviewed at `442397a`, adds replayable
   headless selection and switching through orchestrator-authenticated authorization routes. M5.8, reviewed at
   `ff9e438`, adds a dynamic-session-only browser caller with a two-minute, single-use preparation, redacted
-  recovery, and no model request. Empathy triggers are also inactive.
+  recovery, and no model request as part of selection. The M5.9 candidate has not yet received exact-SHA
+  adversarial review. Empathy triggers are also inactive.
 - **A deterministic gate proves declared rules were applied** — not that the rules are lawful, fair, or legitimate.
 - **Commit-token window (interpretive choice).** Commitment binds at `commit-verify`; a revocation landing in the
   token's short TTL is too late for that action by definition. On the stricter reading of "authority in flight",
@@ -59,7 +61,7 @@ The exact upstream revision, digest, reviewed runtime baseline, and remaining mi
 | `packages/gate-core/` | Authorization service — the independent gate (AGPL-3.0-only) | M2 |
 | `packages/adapters/` | OpenAI-compatible model adapters (MIT) | M3–M5 |
 | `packages/services-mock/` | Executing services with commitment verification (MIT) | M3 |
-| `packages/consoles/` | M3 deterministic loop, M4 process/consoles, and M5 containment-only model-turn coordinator (MIT) | M3–M5 |
+| `packages/consoles/` | M3 deterministic loop, M4 process/consoles, and M5 selected-lane ingress into sealed quarantine (MIT) | M3–M5 |
 | `fixtures/` | Synthetic grant-scenario data and pinned test fixtures (MIT) | M3+ |
 
 Licensing is per-directory — see [LICENSE.md](LICENSE.md).
@@ -76,7 +78,7 @@ Results land in `docs/m0-probe-results.json` (gitignored); conclusions go into
 
 ## M4 native process boundary
 
-After `.env.local` contains the ADR-002 credentials and ADR-007 HMAC pair, start the local
+After `.env.local` contains the ADR-002 credentials, ADR-007 HMAC pair, and both model-lane API keys, start the local
 services, authorization, and orchestrator processes in fail-closed recovery order with:
 
 ```powershell
@@ -102,8 +104,11 @@ maximum-15-minute session whose raw bearer is kept only in that tab's `sessionSt
 shows the mandate's signed-card evidence and current authorization-owned selection. A distinct evidence-review
 gesture asks the orchestrator to derive the current predecessor and obtain a fresh authorization check; only the
 resulting process-private, maximum-two-minute preparation can be selected once. The browser receives neither the
-check id nor authorization-only bindings, stores no model target/preparation, and polls only authorization-owned
-state. A safe link opens the routed dialogue on the
+  check id nor authorization-only bindings, stores no model target/selection preparation, and polls only authorization-owned
+  state. The M5.9 implementation candidate adds a separate prepare/run gesture over the current selection. It uses
+  only authorization's current synthetic projection, fixes the output ceiling at 512 tokens, returns metadata-only
+  disclosure status, and leaves admitted bytes in a process-private no-reader quarantine. It provides no message
+  composer and no output display or release. A safe link opens the routed dialogue on the
 authorization origin, where the responder's own role token reads the question/contract and posts the answer
 directly. Raw clients still face the same ACL, Origin guard, evidence resolution, and single-use state machine.
 The browser message route remains explicitly closed until a later approved M5 ingress slice. M4 acceptance
@@ -117,7 +122,7 @@ narrow lexical checker can miss paraphrases, so admission is not a semantic safe
   or token, makes no provider call, leaves the browser route at `501`, and does not complete M5. M5.4
 connects an authorization projection to a synthetic loopback adapter and returns the response to authorization;
 an admitted result is held behind a process-private metadata/destroy-only quarantine with no release path. This
-coordinator is not constructed by the runtime process, so `runtime:start` still makes no provider call. The M5.5
+coordinator was not constructed by the runtime process in that reviewed slice. The M5.5
 integration point reviewed at `1d992fa` replaces the raw projection route with a single-use call lifecycle:
 authorization durably records the turn/mandate/card/model/projection binding before returning the projection, then
 records admitted, withheld, or a fixed failure class without raw output, prompts, provider errors, endpoints, or
@@ -138,6 +143,10 @@ terminal call evidence. M5.8, reviewed at `ff9e438`, connects that protocol only
 It keeps the authorization check and predecessor server-side, derives case-seat provenance from the session, and
 recovers only through a redacted current-selection read. It adds no native provider ingress, conversation
 ingestion, output release, live probe, or M6 path.
+The M5.9 candidate now constructs the two signed-card-bound adapters and coordinator before the orchestrator
+listener binds, gives provider configuration only to that child, and exposes single-use preparation/use/status
+routes to the dynamic case session. Startup itself makes no provider request, no live provider invocation was run
+for this tranche, and `/messages`, conversation ingestion, output release, empathy completion, and M6 remain closed.
 
 Offline and deterministic verification uses synthetic records and skips only the remote-presence step:
 

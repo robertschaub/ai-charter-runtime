@@ -100,6 +100,12 @@ export function runtimeChildEnvironments(env: NodeJS.ProcessEnv): RuntimeChildEn
       AUTHZ_TOKEN_PROC_ORCHESTRATOR: required(env, 'AUTHZ_TOKEN_PROC_ORCHESTRATOR'),
       SERVICES_TOKEN_PROC_ORCHESTRATOR: orchestratorAtServices,
       ORCHESTRATOR_TOKEN_CASE_OFFICER: caseAtOrchestrator,
+      PUBLICAI_API_KEY: required(env, 'PUBLICAI_API_KEY'),
+      OPENAI_API_KEY: required(env, 'OPENAI_API_KEY'),
+      ...(env['PUBLICAI_BASE_URL'] === undefined ? {} : { PUBLICAI_BASE_URL: env['PUBLICAI_BASE_URL'] }),
+      ...(env['PUBLICAI_MODEL'] === undefined ? {} : { PUBLICAI_MODEL: env['PUBLICAI_MODEL'] }),
+      ...(env['OPENAI_BASE_URL'] === undefined ? {} : { OPENAI_BASE_URL: env['OPENAI_BASE_URL'] }),
+      ...(env['OPENAI_MODEL'] === undefined ? {} : { OPENAI_MODEL: env['OPENAI_MODEL'] }),
     },
   };
 }

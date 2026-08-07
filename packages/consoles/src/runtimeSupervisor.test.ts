@@ -24,12 +24,16 @@ const checkpointKeys = [
 ];
 
 describe('runtime supervisor credential custody', () => {
-  it('constructs exact child environment allowlists without model keys or NODE_OPTIONS', () => {
+  it('gives model configuration only to the orchestrator child and never forwards NODE_OPTIONS', () => {
     const env: NodeJS.ProcessEnv = {
       Path: 'synthetic-path',
       NODE_OPTIONS: '--inspect',
       OPENAI_API_KEY: 'must-not-cross',
       PUBLICAI_API_KEY: 'must-not-cross',
+      OPENAI_BASE_URL: 'https://api.openai.com/v1',
+      OPENAI_MODEL: 'gpt-5.5',
+      PUBLICAI_BASE_URL: 'https://api.publicai.co/v1',
+      PUBLICAI_MODEL: 'swiss-ai/apertus-v1.5-70b',
       RUNTIME_HOST: '127.0.0.1',
       AUTHZ_PORT: '17801',
       ORCHESTRATOR_PORT: '17802',
@@ -83,6 +87,12 @@ describe('runtime supervisor credential custody', () => {
         'AUTHZ_TOKEN_PROC_ORCHESTRATOR',
         'SERVICES_TOKEN_PROC_ORCHESTRATOR',
         'ORCHESTRATOR_TOKEN_CASE_OFFICER',
+        'OPENAI_API_KEY',
+        'OPENAI_BASE_URL',
+        'OPENAI_MODEL',
+        'PUBLICAI_API_KEY',
+        'PUBLICAI_BASE_URL',
+        'PUBLICAI_MODEL',
       ].sort(),
     );
 
@@ -92,11 +102,17 @@ describe('runtime supervisor credential custody', () => {
     expect(children.orchestrator['ORCHESTRATOR_TOKEN_CASE_OFFICER']).toBe(
       deriveAudienceToken(env['AUTHZ_TOKEN_CASE_OFFICER'] ?? '', 'orchestrator-case-officer'),
     );
-    for (const child of Object.values(children)) {
+    for (const child of [children.authorization, children.services]) {
       expect(child).not.toHaveProperty('OPENAI_API_KEY');
       expect(child).not.toHaveProperty('PUBLICAI_API_KEY');
+      expect(child).not.toHaveProperty('OPENAI_BASE_URL');
+      expect(child).not.toHaveProperty('PUBLICAI_BASE_URL');
+    }
+    for (const child of Object.values(children)) {
       expect(child).not.toHaveProperty('NODE_OPTIONS');
     }
+    expect(children.orchestrator['OPENAI_API_KEY']).toBe('must-not-cross');
+    expect(children.orchestrator['PUBLICAI_API_KEY']).toBe('must-not-cross');
     expect(children.services).not.toHaveProperty('RUNTIME_CHECKPOINTS_ROOT');
     expect(children.orchestrator).not.toHaveProperty('CHECKPOINT_VERIFY_LOCAL');
   });

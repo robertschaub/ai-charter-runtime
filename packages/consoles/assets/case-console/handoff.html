@@ -27,6 +27,18 @@
         <div id="model-list" class="collection" aria-live="polite"></div>
         <p id="model-status" class="status" aria-live="polite">Loading current model selection.</p>
 
+        <h2>Run the selected model on current case state</h2>
+        <p>
+          This sends only the current authorization-projected synthetic case state. You cannot add a message or
+          prompt, and no model response will be shown or released in this slice.
+        </p>
+        <div class="model-actions">
+          <button id="prepare-model-turn" type="button" disabled>Prepare model run</button>
+          <button id="use-model-turn" type="button" disabled>Run selected model</button>
+        </div>
+        <p id="model-turn-status" class="status" aria-live="polite">Select a model before preparing a run.</p>
+        <pre id="model-turn-metadata" class="evidence" tabindex="0" hidden></pre>
+
         <h2>Case gate state</h2>
         <div id="case-state" class="state" aria-live="polite">
           <p>No ruling is currently mirrored for this case.</p>
@@ -34,7 +46,8 @@
         <div id="dialogue-link" class="dialogue-link" aria-live="polite"></div>
         <p class="boundary-note">
           Selection changes only the current principal-approved lane. It creates no action authority and sends no
-          model request; model interaction and output release remain inactive.
+          model request. A separate two-step run may contact the selected provider, but output release and message
+          ingestion remain inactive.
         </p>
       </section>
       <button id="close-session" type="button" disabled>Close session</button>

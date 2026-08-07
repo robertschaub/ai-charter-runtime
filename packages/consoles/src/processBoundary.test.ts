@@ -275,6 +275,8 @@ describe('M4 native three-process boundary', () => {
         AUTHZ_TOKEN_PROC_ORCHESTRATOR: tokens.orchestratorAtAuthz,
         SERVICES_TOKEN_PROC_ORCHESTRATOR: orchestratorAtServices,
         ORCHESTRATOR_TOKEN_CASE_OFFICER: caseAtOrchestrator,
+        PUBLICAI_API_KEY: 'synthetic-publicai-key',
+        OPENAI_API_KEY: 'synthetic-openai-key',
       };
       const runtimeProcesses: RunningProcess[] = [];
       let services = await startProcess(

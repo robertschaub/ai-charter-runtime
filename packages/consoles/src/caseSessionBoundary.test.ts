@@ -186,6 +186,8 @@ describe('ADR-002 and ADR-010 real-listener browser boundary', () => {
         AUTHZ_TOKEN_PROC_ORCHESTRATOR: tokens.orchestratorAtAuthz,
         SERVICES_TOKEN_PROC_ORCHESTRATOR: orchestratorAtServices,
         ORCHESTRATOR_TOKEN_CASE_OFFICER: caseAtOrchestrator,
+        PUBLICAI_API_KEY: 'synthetic-publicai-key',
+        OPENAI_API_KEY: 'synthetic-openai-key',
       };
       const services = await start(
         join(ROOT, 'packages', 'services-mock', 'dist', 'servicesProcess.js'),

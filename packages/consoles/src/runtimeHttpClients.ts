@@ -211,29 +211,36 @@ export class OrchestratorAuthorizationHttpClient extends JsonHttpClient {
     readonly worldId: string;
     readonly turnId: string;
     readonly selectionId: string;
-  }): Promise<ModelCallStart> {
+  }, onBehalfOf?: OnBehalfOfClaim): Promise<ModelCallStart> {
     const world = worldId.parse(input.worldId);
     const request = modelCallBeginRequest.parse({
       turn_id: input.turnId,
       selection_id: id.parse(input.selectionId),
     });
-    return modelCallStart.parse(await this.post(`/w/${world}/model-calls/begin`, request));
+    return modelCallStart.parse(await this.post(`/w/${world}/model-calls/begin`, request, onBehalfOf));
   }
 
   async admitModelOutput(
     worldIdInput: string,
     callIdInput: string,
     input: ModelOutputAdmissionRequest,
+    onBehalfOf?: OnBehalfOfClaim,
   ): Promise<ModelCallAdmission> {
     const world = worldId.parse(worldIdInput);
     const request = modelCallAdmissionRequest.parse({ call_id: id.parse(callIdInput), output: input });
-    return modelCallAdmission.parse(await this.post(`/w/${world}/model-outputs/admit`, request));
+    return modelCallAdmission.parse(await this.post(`/w/${world}/model-outputs/admit`, request, onBehalfOf));
   }
 
-  async failModelCall(worldIdInput: string, input: ModelCallFailureRequest): Promise<ModelCallFailedRecord> {
+  async failModelCall(
+    worldIdInput: string,
+    input: ModelCallFailureRequest,
+    onBehalfOf?: OnBehalfOfClaim,
+  ): Promise<ModelCallFailedRecord> {
     const world = worldId.parse(worldIdInput);
     const request = modelCallFailureRequest.parse(input);
-    return modelCallFailedRecord.parse(await this.post(`/w/${world}/model-calls/failures`, request));
+    return modelCallFailedRecord.parse(
+      await this.post(`/w/${world}/model-calls/failures`, request, onBehalfOf),
+    );
   }
 
   async ruleCommit(input: {

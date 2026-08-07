@@ -7,6 +7,8 @@ import { describe, expect, it } from 'vitest';
 import {
   acceptsHandoffTransfer,
   parseBrowserCurrentSelection,
+  parseBrowserModelTurnPreparation,
+  parseBrowserModelTurnStatus,
   parseBrowserSelectionPreparation,
   parseBrowserSelectionResult,
   parseCreatedSession,
@@ -96,6 +98,57 @@ describe('orchestrator-origin exact-window handoff client', () => {
     expect(shell).not.toMatch(/\son[a-z]+=/i);
     expect(shell).not.toMatch(/https?:\/\//i);
     expect(shell).toContain('Find → check → select');
+    expect(shell).toContain('Prepare model run');
+    expect(shell).toContain('Run selected model');
+    expect(shell).not.toMatch(/<textarea\b/i);
+    expect(shell).not.toMatch(/<input\b/i);
+  });
+
+  it('accepts only exact content-free model-turn preparation and status projections', () => {
+    const preparation = {
+      preparation_id: 'mtp_one',
+      turn_id: 'turn_one',
+      selection_id: 'sel_one',
+      target,
+      issued_at: '2026-08-07T09:00:00.000Z',
+      expires_at: '2026-08-07T09:02:00.000Z',
+    };
+    expect(parseBrowserModelTurnPreparation(preparation)).toEqual({
+      preparationId: 'mtp_one',
+      turnId: 'turn_one',
+      selectionId: 'sel_one',
+      target,
+    });
+    expect(parseBrowserModelTurnPreparation({ ...preparation, message: 'forbidden' })).toBeNull();
+    const status = {
+      turn_id: 'turn_one',
+      selection_id: 'sel_one',
+      target,
+      state: 'quarantined',
+      provider_disclosure: 'confirmed',
+      requested_id: target.requested_id,
+      served_id: target.requested_id,
+      terminal_reason: null,
+      quarantine: {
+        release_state: 'sealed-no-release-path',
+        call_id: 'mcl_one',
+        projection_digest: 'a'.repeat(64),
+        output_digest: 'b'.repeat(64),
+        derived_tags: ['conf:case'],
+      },
+    };
+    expect(parseBrowserModelTurnStatus(status)).toEqual(status);
+    expect(parseBrowserModelTurnStatus({ ...status, content: 'forbidden output' })).toBeNull();
+    expect(parseBrowserModelTurnStatus({ ...status, provider_disclosure: 'none' })).toBeNull();
+    expect(parseBrowserModelTurnStatus({ ...status, quarantine: null })).toBeNull();
+    expect(parseBrowserModelTurnStatus({
+      ...status,
+      state: 'failed',
+      provider_disclosure: 'possible',
+      served_id: null,
+      terminal_reason: 'provider-failure',
+      quarantine: null,
+    })).toMatchObject({ state: 'failed', provider_disclosure: 'possible' });
   });
 
   it('accepts only redacted browser model-selection projections', () => {
@@ -139,6 +192,13 @@ describe('orchestrator-origin exact-window handoff client', () => {
       selection: transition,
       latest_observation: null,
     })).toEqual({ state: 'selected', target });
+    expect(parseBrowserCurrentSelection({
+      state: 'selected',
+      authorization_boot_id: 'authz_boot_hidden',
+      case_id: 'case_demo',
+      selection: transition,
+      latest_observation: null,
+    })).toBeNull();
     expect(parseBrowserCurrentSelection({
       state: 'selected',
       case_id: 'case_demo',

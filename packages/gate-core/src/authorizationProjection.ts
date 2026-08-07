@@ -159,6 +159,7 @@ export const currentModelSelectionProjection = z.discriminatedUnion('state', [
   z
     .object({
       state: z.literal('unselected'),
+      authorization_boot_id: id,
       case_id: id,
       selection: z.null(),
       latest_observation: z.null(),
@@ -167,6 +168,7 @@ export const currentModelSelectionProjection = z.discriminatedUnion('state', [
   z
     .object({
       state: z.literal('selected'),
+      authorization_boot_id: id,
       case_id: id,
       selection: modelSelectionTransition,
       latest_observation: modelSelectionObservation.nullable(),
