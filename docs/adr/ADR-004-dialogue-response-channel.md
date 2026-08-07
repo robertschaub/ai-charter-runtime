@@ -18,6 +18,12 @@ source proposal. The response event, ruling invalidation, escalation consumption
 operations are one WAL transaction. Historical M4 events without a scope remain replayable but cannot be
 used to create an M5 state transition.
 
+**Proposed amendment (M5.10 ordinary conversation ingress):** ADR-012 may attribute an authorization-ingested
+case-console message to `origin_actor: officer` only as a `said` item under the fixed ingress profile. That route
+cannot answer or consume a dialogue escalation, create `confirmed` or `permitted` state, satisfy an evidence
+requirement, or inherit the responder authority of this direct role-token channel. Only this ADR's
+authorization-origin response route can perform those transitions.
+
 ## Context
 A dialogue trigger is an ordinary escalation routed to the conversation partner — same single-use state machine, same six-field intervention contract — but two boundary rules constrain the channel. The answer posts **directly from the browser to the authorization service** under the responder's role token, from a control served by the **authorization service's own origin**, so the orchestrator neither serves the credential-bearing control nor carries the answer. And standing is **evidentiary, not managerial**: a responder answers only within their own standing; a third party's facts are resolved by cited evidence or routed to that party, never by bare assertion.
 

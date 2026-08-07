@@ -17,11 +17,16 @@ other is not a provenance pin; both paths and byte digests are verified independ
 
 | Source | Path | SHA-256 | Immutable URL |
 |---|---|---|---|
-| Runtime-gates POC specification | `docs/wip/runtime-gates-poc-spec.md` | `5616c9859da6e7ce1bc2bd516a9dd18a8edd3ab636fa43e3b04d7eeddf696b1f` | `https://github.com/robertschaub/our-ai-charter/blob/6a52bd9c3806721b60de738206deff8d0357cecf/docs/wip/runtime-gates-poc-spec.md` |
-| System-use decision record | `docs/wip/system-use-decision-record.md` | `ea4342c16221687c33bffb6ca3a4d94f267ce98e3d18880bacc08316278e0a84` | `https://github.com/robertschaub/our-ai-charter/blob/6a52bd9c3806721b60de738206deff8d0357cecf/docs/wip/system-use-decision-record.md` |
+| Runtime-gates POC specification | `docs/wip/runtime-gates-poc-spec.md` | `4e52e02115dacbaaf782a999ecc1aeb05c9a3d99ba5f53cdd76998b0c205e5f5` | `https://github.com/robertschaub/our-ai-charter/blob/51b408c5f1bad929fbf0a27599689857130817a3/docs/wip/runtime-gates-poc-spec.md` |
+| System-use decision record | `docs/wip/system-use-decision-record.md` | `ea4342c16221687c33bffb6ca3a4d94f267ce98e3d18880bacc08316278e0a84` | `https://github.com/robertschaub/our-ai-charter/blob/51b408c5f1bad929fbf0a27599689857130817a3/docs/wip/system-use-decision-record.md` |
 
-Shared Charter commit: `6a52bd9c3806721b60de738206deff8d0357cecf`. Publication status: both immutable
+Shared Charter commit: `51b408c5f1bad929fbf0a27599689857130817a3`. Publication status: both immutable
 URLs resolve to the named path and independently verified digest.
+
+This pin moves from `6a52bd9` because the published runtime specification added two explicit honest-limit
+paragraphs: effect-specific terminal enforcement and the representation-error ambiguity in the pattern counter.
+The system-use source is byte-identical; its row moves only to keep both governing sources on one Charter commit.
+Neither upstream change supplies or pre-approves ADR-012's protocol mechanics.
 
 The provenance rows change only after an approved upstream specification change. Move both source pins in
 one runtime commit, even when only one source changed, and re-verify both byte digests against the shared
@@ -34,10 +39,9 @@ The latest cross-model adversarially reviewed implementation is
 `e58d397c38ff00fe86f4c363cdb6dbcae9f707ed` (`e58d397`). Exact-SHA review of the bounded M5.9 native
 provider-ingress implementation returned **GO — no findings**. Validation reproduced `npm run typecheck`, 4 Git-safety
 hook tests, 344 Vitest tests across 40 files, `git diff --check`, and verification of both unchanged signed cards.
-The implementation and review did not move the Charter provenance baseline.
-The published runtime head is `10b6ba394efaef0eb969c25b2c8ca04e27387c86` (`10b6ba3`). It contains the
-reviewed M5.3–M5.8 integration range and the documentation-only M5.8 review closure. The M5.9 definition,
-correction, reviewed implementation, and this documentation-only acknowledgement remain local and unpushed.
+That implementation and review did not move the Charter provenance baseline.
+The published runtime head is `91bac64dede6a45b66e208e475127d46063176be` (`91bac64`). It contains the
+reviewed M5.3–M5.9 integration range and the documentation-only M5.9 review closure.
 
 The M5.9 definition at `2a508ba7500d6f0775e4cb52b63a7ac222066f64` received one focused browser-redaction
 finding. Commit `be01667d169beb918ec4ceffb384edb8a526020e` bound field-by-field construction and exact-key
@@ -64,7 +68,7 @@ distinguish an uncommitted latest checkpoint from confirmed remote rollback or m
 | M2 — transactional core | Implemented and fault-tested | Authorization remains the single durable serialization point; authority defects fail closed. |
 | M3 — vertical slice | Implemented | Deterministic authorize → propose → rule → commit-verify → effect → receipt path, adapters, service ledger, and signed cards are present. |
 | M4 — escalation + governance console | **Complete** | Final exact-SHA review of `e326562` returned GO with no findings; the offline acceptance ledger preserves the remaining partial and not-assessed boundaries. |
-| M5 — screening + empathy + switching | **In progress** | M5.1 is reviewed at `c1b5eb0`; M5.2 at `1973515`; M5.3 at `1cc7fb2`, with its Low wording finding closed at `2b7b45a`; M5.4 at `b247d5b`; M5.5 durable call evidence at `1d992fa`; M5.6 system-use decisions at `b57c01e`; M5.7 headless governed selection at `442397a`; M5.8 browser initiation at `ff9e438`; and M5.9 native provider ingress at `e58d397`. Output release, conversation ingestion, empathy-trigger completion, and M6 remain incomplete. |
+| M5 — screening + empathy + switching | **In progress** | M5.1 is reviewed at `c1b5eb0`; M5.2 at `1973515`; M5.3 at `1cc7fb2`, with its Low wording finding closed at `2b7b45a`; M5.4 at `b247d5b`; M5.5 durable call evidence at `1d992fa`; M5.6 system-use decisions at `b57c01e`; M5.7 headless governed selection at `442397a`; M5.8 browser initiation at `ff9e438`; and M5.9 native provider ingress at `e58d397`. The M5.10 release/ingestion definition awaits review; its implementation, empathy-trigger completion, and M6 remain incomplete. |
 | M6–M7 | Not started | Full capture/publication work follows the implementation milestones. |
 
 These labels describe repository implementation status, not assurance, certification, or independent
@@ -487,9 +491,32 @@ tests, 344 Vitest tests across 40 files, `git diff --check`, and verification of
 use synthetic adapters/fixtures only; no live provider call, probe, key operation, card signing, generated-record
 edit, push, output release, or M6 work was performed.
 
+### M5.10 definition candidate — conversation ingestion and single-use output release
+
+ADR-012 proposes the next bounded M5 implementation contract. It moves both Charter provenance rows to the
+published `51b408c` baseline but does not implement the path:
+
+- A case-session-only, two-step message preparation/use accepts one bounded case-officer message. Authorization
+  assigns the fixed ingress profile, persists it as `said`, advances a case conversation version, and invalidates
+  unresolved rulings before any provider call.
+- Only a message-bound call can receive an admission-issued, boot-bound, maximum-two-minute release. Projection-only
+  M5.9 runs and every withheld/failed/stale result remain non-releasable.
+- Release consumption rechecks conversation version, selection, mandate/card/model, policy, system use, projection,
+  output digest, and inherited tags under the world lock. It atomically persists one `inferred` item and consumes
+  the release; caller fields can create neither provenance nor authority.
+- The quarantine transfers held bytes only to authorization through a module-private consumer and never returns
+  them to the browser handler. After durable ingestion the browser renders only an authorization-owned, exact-key
+  transcript labelled `inferred-unconfirmed` for model text.
+- Message/release mutations share the existing case-local mutex with selection and model-turn use. Eager
+  invalidation plus consume-time recheck closes switch, system-use, mandate/card/policy, session, and restart races.
+- Proposal construction, dialogue-trigger completion, broader ingestion, retention/deletion propagation, live
+  provider runs, and M6 capture remain closed.
+
+The definition awaits exact-SHA adversarial review. Approval of the definition would not authorize implementation.
+
 ## Resolved browser credential-handoff protocol
 
-The normative decision is pinned above at Charter commit `6a52bd9`: a user-initiated authorization-origin
+The normative decision is pinned above at Charter commit `51b408c`: a user-initiated authorization-origin
 control mints an at-least-256-bit, single-use, maximum-30-second code bound to role, world, case, exact
 orchestrator origin, and authorization boot id. An exact-origin/exact-window `postMessage` exchange carries
 it without URL or persistent-storage exposure; the orchestrator redeems it over its process-authenticated
@@ -504,13 +531,12 @@ authorization route. The bounded handoff and session implementation was independ
 
 ## Ordered next slices
 
-1. **The maintainer decides whether to publish the reviewed local range.** Before any push, inspect the complete
-   range from published `10b6ba3` through this documentation-only review closure; do not combine another M5 slice.
-2. **After separate approval, define the next bounded M5 release/ingestion slice.** Decide the single-use output
-   release and authorization-owned conversation-ingestion contract before any model byte or browser message enters
-   conversation state. No review acknowledgement authorizes that work.
-3. **Do not begin M6.** Empathy-trigger completion and capture remain gated on the remaining M5 work and separate
-   approval.
+1. **Review the M5.10 definition at one exact committed SHA.** Adversarially test message attribution, inherited
+   tags, conversation-version binding, single-use release, quarantine custody, replay/ambiguity, transcript
+   redaction, and every currentness/invalidation race against ADR-012 and the pinned Charter sources.
+2. **Implement M5.10 only after explicit approval of the reviewed definition.** Do not combine proposal
+   construction, empathy-trigger completion, broader ingestion, a live provider run, or another milestone.
+3. **Do not begin M6.** Capture remains gated on the remaining M5 work and separate approval.
 
 Substantive tranches are committed and reviewed at bounded integration points. A documentation-only status
 acknowledgement does not trigger a recursive review round; changes to ADRs, gates, invariants, ACLs,

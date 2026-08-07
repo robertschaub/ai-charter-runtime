@@ -104,6 +104,14 @@ configurations and keys as its exclusive child-environment custody, reuses only 
 call-begin, output-admission, and failure routes, and returns metadata-only disclosure status. `/messages`, output
 release, conversation ingestion, and every authority-bearing route remain closed.
 
+**Proposed amendment (M5.10 conversation ingestion and output release):** ADR-012 activates a message-bound
+two-step browser turn, authorization-owned `said` ingestion, an admission-issued single-use output release, and an
+authorization-produced transcript. The orchestrator transports raw content only between the exact case session,
+selected provider, quarantine, and authorization conversation store; it cannot assign tags/provenance, promote
+model text beyond `inferred`, or call an authority-changing endpoint. Handoff redemption binds a server-generated
+orchestrator session id into authorization-owned, maximum-15-minute provenance so caller headers cannot invent the
+`said` item's actor. Projection-only M5.9 calls remain sealed.
+
 ## Context
 
 Three OS processes make "the model proposes, a component outside the model decides, the executing service
@@ -240,7 +248,8 @@ no-store origin projection and unauthenticated fixed assets, respectively; the e
 wildcard shell. `POST /w/{w}/case-sessions/redeem`
 accepts only the single-use handoff in a strict same-origin body and is explicitly
 `authorityChanging: false, originGuarded: true`: it creates authentication state but no action authority.
-`POST /w/{w}/cases/{id}/messages`, `GET /w/{w}/cases/{id}/state`, `GET /w/{w}/models`,
+`POST /w/{w}/cases/{id}/message-preparations`, `POST /w/{w}/cases/{id}/messages`,
+`GET /w/{w}/cases/{id}/conversation`, `GET /w/{w}/cases/{id}/state`, `GET /w/{w}/models`,
 `GET /w/{w}/cases/{id}/model-selection`,
 `POST /w/{w}/cases/{id}/model-selection-preparations`,
 `POST /w/{w}/cases/{id}/model-selections`,
@@ -248,8 +257,9 @@ accepts only the single-use handoff in a strict same-origin body and is explicit
 `POST /w/{w}/cases/{id}/model-turns`, `GET /w/{w}/cases/{id}/model-turns/{turn_id}`,
 and `POST /w/{w}/case-sessions/close` require the
 dynamic case-session bearer and re-check its exact role/world/case/expiry binding. ADR-010's two selection
-mutations and ADR-011's two model-turn mutations additionally require a present exact orchestrator Origin; all
-other browser routes continue to reject a present foreign or opaque Origin. The bounded headless
+mutations, ADR-011's two model-turn mutations, and ADR-012's two message mutations additionally require a present
+exact orchestrator Origin; all other browser routes continue to reject a present foreign or opaque Origin. The
+bounded headless
 transport seam `POST /w/{w}/actions/execute` continues to accept only the derived
 `ORCHESTRATOR_TOKEN_CASE_OFFICER`; browser sessions are denied there, and the static derived credential is
 denied on every browser case route.
@@ -260,9 +270,10 @@ Services host: `POST /w/{w}/services/{service}/execute` `proc:orchestrator`;
 `commit-verify`, effect outcomes, and reconciliation probes carry both the current services-host boot id
 and the persistent services-ledger id; only absence under the same ledger id can release a commitment.
 
-**The orchestrator's process credential appears on exactly eleven gate/data routes plus the dedicated
-case-session-handoff redemption route.** The eleven are proposal submission, model-call begin,
-model-output admission, model-call failure,
+**The orchestrator's process credential appears on exactly fifteen gate/data routes plus the dedicated
+case-session-handoff redemption route.** The fifteen are proposal submission, model-call begin,
+model-output admission, model-call failure, conversation-message ingestion, model-output-release consumption,
+model-output-release status, conversation read,
 model-selection read, model-selection check, model selection, revised-proposal continuation, ruling read,
 approved-model read, and the read-only escalation mirror ADR-004
 §7 requires. Redemption
@@ -443,6 +454,13 @@ allowlist projection**, decided per route and per credential:
   access chain before return;
 - model-call failure → the terminal lifecycle binding plus `failed`, the fixed reason, `possible | confirmed`
   provider-disclosure state, and nullable served-model id. It contains no raw response or error detail;
+- conversation-message ingestion → the idempotent message/item ids, case conversation version, content digest,
+  ingress-profile id/digest, byte length, and recorded time. Raw text and assigned store fields are omitted;
+- model-output release consumption → the release/call/turn/item ids, consumed state, case conversation version,
+  output digest, and recorded time. The process-only release status is the same bounded metadata without content;
+- conversation read → the bounded ordered user/model transcript created by ADR-012, including text only on this
+  dedicated content-bearing process route. Fixture/dialogue/internal store items, tags, release references,
+  projections, and authority bindings are omitted;
 - model-selection read → the current authorization boot id plus the current transition and its latest confirmed
   observation, or explicit unselected state. The boot id is process-only and is redacted from the orchestrator's
   browser mirror; the response exposes no check history, raw output, or authority-bearing object;
@@ -553,6 +571,16 @@ Synthetic loopback coverage must show server-derived claimed-session provenance,
 race closure under a shared case-local selection/turn mutex, predecessor/session cleanup with honest `discarded`
 status, no automatic retry/fallback, branch-derived disclosure status, content-free responses, sealed quarantine,
 and the still-closed `/messages`, conversation-ingestion, release, and M6 paths.
+
+**Required with the M5.10 implementation.** Real-listener tests must prove exact session, path and Origin
+confinement for message preparation/use and transcript reads, and exact `proc:orchestrator` confinement for the
+four new authorization routes. Strict bodies cannot assert store, origin actor, tags, provenance, clearance,
+conversation version, model/currentness facts, release binding, authority, or retry. The authorization adapter's
+complete route matrix must deny the orchestrator every authority-changing route while access-recording bounded
+metadata for allowed ingestion/release/read operations. Browser schemas must be constructed field-by-field and
+exact-key tested so release ids, boot ids, tags, item ids, projections, and authority bindings never cross origins.
+Redemption/session tests must prove that message attribution resolves from the authorization-owned handoff receipt,
+not caller headers, and that mismatch, expiry, or a prior boot fails before storage.
 
 **Required with the browser handoff implementation.** Real-listener tests cover exact-origin/exact-window
 message acceptance and wrong/opaque origin or wrong-window refusal; mint-role confinement; absence from URLs,

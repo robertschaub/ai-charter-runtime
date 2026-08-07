@@ -107,6 +107,12 @@ The one exception is a terminal missing-mandate denial: it may bind `null` becau
 reservation, escalation, commitment, token, or effect. Schema refinements forbid `null` on `allow` or
 `escalate` rulings and records.
 
+ADR-012's proposed single-use model-output release adds one further use boundary. Release issue inherits the
+decision bound to the admitted model call; release consumption re-resolves the complete current decision and
+compares the exact bounded reference under the world lock. A transition eagerly invalidates outstanding releases,
+while the consume-time check is the lazy backstop. A released conversation item is historical evidence and is not
+rewritten if the decision later changes.
+
 The system-use prerequisite is necessary and never sufficient: resolving it returns no verdict, nonce,
 reservation, ruling, token, or effect capability.
 

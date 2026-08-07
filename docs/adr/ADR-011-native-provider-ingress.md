@@ -6,6 +6,9 @@ bounded implementation `e58d397` passed exact-SHA adversarial review with GO —
 **Spec:** §3 (orchestrator, model adapter, and case console), §4 (model-call and system-use bindings),
 §5 (entry boundary, model selection, and fail-closed provider behavior), §7 beats 14 and 19–21, and §10 M5.
 
+**Proposed follow-on (M5.10):** ADR-012 defines a separate message-bound call type and authorization-issued
+single-use release. Existing projection-only M5.9 calls receive no release reference and remain sealed.
+
 ## Context
 
 M5.5–M5.8 establish an authorization-owned model-call lifecycle, a current system-use prerequisite, governed
@@ -224,7 +227,6 @@ beats 20–21 over real loopback HTTP/process boundaries. It does not complete b
 interaction, because admitted bytes remain sealed and the browser cannot submit conversation content. Green tests
 demonstrate the mechanism, not provider quality, legal approval, independent assurance, or live endpoint behavior.
 
-The next separately approved definition must decide the single-use release and authorization-owned conversation
-ingestion contract before any model bytes or browser message can enter conversation state. Empathy-trigger
-completion follows that content boundary. M6 remains blocked until the remaining M5 work is implemented and
-reviewed.
+ADR-012 is the separately reviewed definition for single-use release and authorization-owned conversation
+ingestion. Its approval would not implement the path. Empathy-trigger completion follows that content boundary.
+M6 remains blocked until the remaining M5 work is implemented and reviewed.
