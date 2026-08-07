@@ -202,7 +202,8 @@ user-choice portion of beat
 evidence and fresh Submit/Verify outcomes. Beats 20–21 retain their existing deterministic coverage; no live probe
 or provider substitution test is added here.
 
-Deferred to separately approved slices: native provider ingress, admitted-output release and conversation
-ingestion, empathy-trigger completion, general multi-case binding, live provider runs, and M6 capture. The M5.8
+ADR-011's bounded native provider ingress at `e58d397` passed exact-SHA adversarial review with no findings.
+Still deferred to separately approved slices: admitted-output release and conversation ingestion,
+empathy-trigger completion, general multi-case binding, live provider runs, and M6 capture. The M5.8
 implementation may not run probes, generate or rotate keys, sign cards, edit generated/append-only production
 records, or move the pinned Charter provenance.

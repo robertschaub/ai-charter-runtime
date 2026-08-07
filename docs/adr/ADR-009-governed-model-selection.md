@@ -67,10 +67,10 @@ POST /w/{world_id}/cases/{case_id}/model-selections
 ```
 
 The fixed read returns the current transition and its latest confirmed observation, or an explicit unselected
-state. ADR-011's proposed M5.9 amendment also adds the current authorization boot id to this process-only envelope
-so a stale case session can be closed before call-open; the browser mirror redacts it. The read is the recovery path
-after either process restarts; clients never infer current selection from card order, environment, or their own
-cache. It is orchestrator-only, non-authorizing, Origin-guarded, and access-recorded.
+state. ADR-011's reviewed M5.9 implementation also adds the current authorization boot id to this process-only
+envelope so a stale case session can be closed before call-open; the browser mirror redacts it. The read is the
+recovery path after either process restarts; clients never infer current selection from card order, environment, or
+their own cache. It is orchestrator-only, non-authorizing, Origin-guarded, and access-recorded.
 
 The strict check request carries only:
 
@@ -167,7 +167,7 @@ Consumed rulings, bound commitments, effects, and historical records are never r
 arriving after the switch cannot be admitted because its call is terminal and its selection is stale. A held M5.4
 quarantine entry from the prior selection has no release path; the headless coordinator destroys it when it
 processes the successful transition, while authorization-side current-selection verification remains the safety
-boundary if local cleanup is interrupted. ADR-011's proposed native wiring serializes browser selection use and
+boundary if local cleanup is interrupted. ADR-011's reviewed native wiring serializes browser selection use and
 turn use under one case-local mutex, destroys predecessor quarantine before returning the switch, and projects
 destroyed local custody as `discarded` rather than retained.
 
@@ -237,8 +237,9 @@ lifecycle, not two competing notions of which model is current.
   non-orchestrator denial matrix.
 - The legacy helper, WAL op, state projection, and test-only history are absent. The exported M3 harness selects
   through check/select before provider use and cannot create a second lifecycle.
-- `runtime:start` still creates no model-turn coordinator or provider call; the browser message route remains
-  `501`; quarantine has no content reader; no conversation item or released output is produced.
+- At the reviewed M5.7 boundary, `runtime:start` created no model-turn coordinator or provider call. M5.9 now
+  constructs the coordinator and permits the separately reviewed projection-only run, while the browser message
+  route remains `501`; quarantine has no content reader; no conversation item or released output is produced.
 
 ## Consequences and deferred work
 
@@ -247,6 +248,7 @@ adds protocol state and invalidation work but no new authority and no new Charte
 specification already requires this behaviour.
 
 ADR-010 defines the reviewed dynamic browser-selection boundary; its bounded implementation at `ff9e438` passed
-exact-SHA adversarial review with no findings. Still deferred: native provider ingress, admitted-output release and conversation
-ingestion, empathy-trigger completion, general multi-case binding, live provider runs, and M6 capture. No M5.7
-operation runs probes, changes keys, signs cards, or edits generated/append-only production records.
+exact-SHA adversarial review with no findings. ADR-011's bounded native provider ingress at `e58d397` also passed
+exact-SHA adversarial review with no findings. Still deferred: admitted-output release and conversation ingestion,
+empathy-trigger completion, general multi-case binding, live provider runs, and M6 capture. No M5.7 operation runs
+probes, changes keys, signs cards, or edits generated/append-only production records.

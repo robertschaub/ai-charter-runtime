@@ -6,8 +6,8 @@ at an AI prompt, the action path **plan → prepare → check → decide → rev
 (**Authorize → Submit → Verify → Commit → Rely**) enforced *outside* the acting model — machine verdicts
 **allow / deny / escalate**, automatic escalation to a human console carrying a six-field intervention
 contract, two principal-approved acting-model evidence entries, an authorization-owned browser-initiated
-selection/switch protocol, a review-pending native selected-lane call into sealed quarantine, and hash-chained action records
-sealed before effect.
+selection/switch protocol, a reviewed native selected-lane call into sealed quarantine, and hash-chained action
+records sealed before effect.
 
 The authoritative build specification lives in the documentation repository:
 [runtime-gates-poc-spec.md](https://github.com/robertschaub/our-ai-charter/blob/main/docs/wip/runtime-gates-poc-spec.md).
@@ -31,13 +31,12 @@ The exact upstream revision, digest, reviewed runtime baseline, and remaining mi
   durable, metadata-only evidence for each attempt before disclosure and for its terminal admission or fixed failure.
   M5.6 is reviewed at `b57c01e`; it adds an authorization-owned, replayable system-use decision prerequisite and a
   principal-only read view. Approval is necessary for the synthetic use but never sufficient for an action.
-  The authorization gate and principal read view are wired into `runtime:start`. The M5.9 implementation candidate
+  The authorization gate and principal read view are wired into `runtime:start`. M5.9, reviewed at `e58d397`,
   adds a two-step, dynamic-session-only selected-lane call whose admitted bytes remain sealed and unreadable;
   browser message ingress and an output-release consumer are not implemented. M5.7, reviewed at `442397a`, adds replayable
   headless selection and switching through orchestrator-authenticated authorization routes. M5.8, reviewed at
   `ff9e438`, adds a dynamic-session-only browser caller with a two-minute, single-use preparation, redacted
-  recovery, and no model request as part of selection. The M5.9 candidate has not yet received exact-SHA
-  adversarial review. Empathy triggers are also inactive.
+  recovery, and no model request as part of selection. Empathy triggers are also inactive.
 - **A deterministic gate proves declared rules were applied** — not that the rules are lawful, fair, or legitimate.
 - **Commit-token window (interpretive choice).** Commitment binds at `commit-verify`; a revocation landing in the
   token's short TTL is too late for that action by definition. On the stricter reading of "authority in flight",
@@ -105,7 +104,8 @@ shows the mandate's signed-card evidence and current authorization-owned selecti
 gesture asks the orchestrator to derive the current predecessor and obtain a fresh authorization check; only the
 resulting process-private, maximum-two-minute preparation can be selected once. The browser receives neither the
   check id nor authorization-only bindings, stores no model target/selection preparation, and polls only authorization-owned
-  state. The M5.9 implementation candidate adds a separate prepare/run gesture over the current selection. It uses
+  state. The M5.9 implementation reviewed at `e58d397` adds a separate prepare/run gesture over the current
+  selection. It uses
   only authorization's current synthetic projection, fixes the output ceiling at 512 tokens, returns metadata-only
   disclosure status, and leaves admitted bytes in a process-private no-reader quarantine. It provides no message
   composer and no output display or release. A safe link opens the routed dialogue on the
@@ -143,7 +143,7 @@ terminal call evidence. M5.8, reviewed at `ff9e438`, connects that protocol only
 It keeps the authorization check and predecessor server-side, derives case-seat provenance from the session, and
 recovers only through a redacted current-selection read. It adds no native provider ingress, conversation
 ingestion, output release, live probe, or M6 path.
-The M5.9 candidate now constructs the two signed-card-bound adapters and coordinator before the orchestrator
+M5.9, reviewed at `e58d397`, constructs the two signed-card-bound adapters and coordinator before the orchestrator
 listener binds, gives provider configuration only to that child, and exposes single-use preparation/use/status
 routes to the dynamic case session. Startup itself makes no provider request, no live provider invocation was run
 for this tranche, and `/messages`, conversation ingestion, output release, empathy completion, and M6 remain closed.

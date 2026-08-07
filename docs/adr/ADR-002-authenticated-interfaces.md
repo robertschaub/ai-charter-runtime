@@ -95,7 +95,8 @@ for selection, and gate bindings stay server-held. Mutations require a present e
 authorization keep `proc:orchestrator` as the authenticated actor and record the server-derived case role/session
 only as `claimed_actor`, never as authority. Provider ingress, `/messages`, and output release remain closed.
 
-**Implementation candidate (M5.9 native provider ingress; definition `2a508ba`, correction `be01667`):** ADR-011 adds an orchestrator-origin,
+**Implemented and reviewed (M5.9 native provider ingress; definition `2a508ba`, correction `be01667`,
+implementation `e58d397`, 2026-08-07):** ADR-011 adds an orchestrator-origin,
 dynamic-session-only preparation/use/status protocol for one selected-lane call over authorization's existing
 synthetic projection. The browser supplies no message, prompt, turn/model/selection binding, or retry instruction;
 use is single and marked consuming before any dependency call. The native orchestrator receives the two provider

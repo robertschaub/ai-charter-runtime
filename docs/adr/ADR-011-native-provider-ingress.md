@@ -2,7 +2,7 @@
 # ADR-011 — Native provider ingress to sealed quarantine
 
 **Status:** definition reviewed at `2a508ba`; focused correction `be01667` reviewed GO with no open finding;
-implementation candidate awaiting exact-SHA adversarial review.
+bounded implementation `e58d397` passed exact-SHA adversarial review with GO — no findings (2026-08-07).
 **Spec:** §3 (orchestrator, model adapter, and case console), §4 (model-call and system-use bindings),
 §5 (entry boundary, model selection, and fail-closed provider behavior), §7 beats 14 and 19–21, and §10 M5.
 
@@ -219,10 +219,10 @@ commit token independently.
 
 ## Consequences and deferred work
 
-M5.9 will complete the native selected-lane ingress portion of beat 19 and exercise beats 20–21 over real loopback
-HTTP/process boundaries. It will not complete beat 19's user-visible model interaction, because admitted bytes remain
-sealed and the browser cannot submit conversation content. Green tests will demonstrate the mechanism, not provider
-quality, legal approval, independent assurance, or live endpoint behavior.
+The reviewed M5.9 implementation completes the native selected-lane ingress portion of beat 19 and exercises
+beats 20–21 over real loopback HTTP/process boundaries. It does not complete beat 19's user-visible model
+interaction, because admitted bytes remain sealed and the browser cannot submit conversation content. Green tests
+demonstrate the mechanism, not provider quality, legal approval, independent assurance, or live endpoint behavior.
 
 The next separately approved definition must decide the single-use release and authorization-owned conversation
 ingestion contract before any model bytes or browser message can enter conversation state. Empathy-trigger
