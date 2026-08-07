@@ -68,7 +68,7 @@ distinguish an uncommitted latest checkpoint from confirmed remote rollback or m
 | M2 — transactional core | Implemented and fault-tested | Authorization remains the single durable serialization point; authority defects fail closed. |
 | M3 — vertical slice | Implemented | Deterministic authorize → propose → rule → commit-verify → effect → receipt path, adapters, service ledger, and signed cards are present. |
 | M4 — escalation + governance console | **Complete** | Final exact-SHA review of `e326562` returned GO with no findings; the offline acceptance ledger preserves the remaining partial and not-assessed boundaries. |
-| M5 — screening + empathy + switching | **In progress** | M5.1 is reviewed at `c1b5eb0`; M5.2 at `1973515`; M5.3 at `1cc7fb2`, with its Low wording finding closed at `2b7b45a`; M5.4 at `b247d5b`; M5.5 durable call evidence at `1d992fa`; M5.6 system-use decisions at `b57c01e`; M5.7 headless governed selection at `442397a`; M5.8 browser initiation at `ff9e438`; and M5.9 native provider ingress at `e58d397`. The M5.10 release/ingestion definition awaits review; its implementation, empathy-trigger completion, and M6 remain incomplete. |
+| M5 — screening + empathy + switching | **In progress** | M5.1 is reviewed at `c1b5eb0`; M5.2 at `1973515`; M5.3 at `1cc7fb2`, with its Low wording finding closed at `2b7b45a`; M5.4 at `b247d5b`; M5.5 durable call evidence at `1d992fa`; M5.6 system-use decisions at `b57c01e`; M5.7 headless governed selection at `442397a`; M5.8 browser initiation at `ff9e438`; and M5.9 native provider ingress at `e58d397`. The initial M5.10 release/ingestion definition at `cb7d136` received NO-GO; its focused correction awaits re-review. Implementation, empathy-trigger completion, and M6 remain incomplete. |
 | M6–M7 | Not started | Full capture/publication work follows the implementation milestones. |
 
 These labels describe repository implementation status, not assurance, certification, or independent
@@ -512,7 +512,13 @@ published `51b408c` baseline but does not implement the path:
 - Proposal construction, dialogue-trigger completion, broader ingestion, retention/deletion propagation, live
   provider runs, and M6 capture remain closed.
 
-The definition awaits exact-SHA adversarial review. Approval of the definition would not authorize implementation.
+Exact-SHA review of the initial definition at `cb7d136` returned **NO-GO** on two bounded contract gaps: an expired
+but durably open call could permanently block later ingestion, and ADR-010/ADR-011 still carried unqualified M5.8
+and M5.9 statements that `/messages` remained unavailable and the browser never received model text. The focused
+correction makes only unexpired open calls block ingestion, preserves expired calls as indeterminate evidence while
+forbidding late release, adds the missing amendment notes, and refuses collisions with active session-provenance
+receipts. The correction awaits focused exact-SHA re-review. Approval of the definition would not authorize
+implementation.
 
 ## Resolved browser credential-handoff protocol
 
@@ -531,7 +537,8 @@ authorization route. The bounded handoff and session implementation was independ
 
 ## Ordered next slices
 
-1. **Review the M5.10 definition at one exact committed SHA.** Adversarially test message attribution, inherited
+1. **Re-review the focused M5.10 definition correction at one exact committed SHA.** Confirm the two NO-GO findings
+   are closed without weakening message attribution, inherited
    tags, conversation-version binding, single-use release, quarantine custody, replay/ambiguity, transcript
    redaction, and every currentness/invalidation race against ADR-012 and the pinned Charter sources.
 2. **Implement M5.10 only after explicit approval of the reviewed definition.** Do not combine proposal

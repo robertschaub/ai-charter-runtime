@@ -7,7 +7,10 @@ bounded implementation `e58d397` passed exact-SHA adversarial review with GO —
 §5 (entry boundary, model selection, and fail-closed provider behavior), §7 beats 14 and 19–21, and §10 M5.
 
 **Proposed follow-on (M5.10):** ADR-012 defines a separate message-bound call type and authorization-issued
-single-use release. Existing projection-only M5.9 calls receive no release reference and remain sealed.
+single-use release. It activates the bounded `/messages` path and changes `model_interaction_available` only for
+that path after the authorization service durably ingests the released output; the browser receives only
+authorization's exact-key transcript projection, never the prompt or raw provider response. Existing
+projection-only M5.9 calls receive no release reference and remain sealed.
 
 ## Context
 

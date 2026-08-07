@@ -81,6 +81,10 @@ session id, the handoff's authenticated role/world/case/origin/boot evidence, an
 minutes. The orchestrator must use that same id in its local session. No browser bearer or role token crosses to
 authorization, and the receipt is not returned to the browser.
 
+Redemption refuses a proposed session id already bound to any active provenance receipt. Collision cannot replace,
+merge, or select a receipt; the handoff remains unconsumed so the officer can retry the bounded exchange with a new
+server-generated id.
+
 Message ingestion treats the process-carried role/session headers only as lookup keys and requires an exact active
 authorization-owned receipt; it never treats them as self-authenticating claims. Missing, mismatched, expired, or
 prior-boot provenance fails before storage. Authorization records `proc:orchestrator` separately from the resolved
@@ -107,9 +111,11 @@ authorization result.
 In one WAL transaction authorization checks the bounded case-conversation capacity, appends the `said` item and a
 message-ingress event, advances a monotonic case conversation version, invalidates unresolved case rulings and
 releases their reservations, invalidates older outstanding output releases, and returns the new item id/version
-plus a content digest. It refuses ingestion while a model call for the case is still open. Raw text is stored only in
-the authorization-owned conversation WAL/store. Action and access records carry only ids, fixed classes, byte
-lengths, digests, actor provenance, and timestamps.
+plus a content digest. An unexpired open model call for the case blocks ingestion. Once its recorded TTL passes, the
+call no longer blocks ingestion but remains durable indeterminate evidence: time alone does not relabel or remove
+it, and only the existing selection-change path may terminalize it as `selection-invalidated`. A late result from
+that call receives no release. Raw text is stored only in the authorization-owned conversation WAL/store. Action
+and access records carry only ids, fixed classes, byte lengths, digests, actor provenance, and timestamps.
 
 The case conversation version is materialized deterministically by replay: it starts at zero and advances once for
 each transaction that changes the active case store, including fixture load and ADR-004 put/remove operations. Old
@@ -258,6 +264,8 @@ records, and test snapshots. Tests use synthetic content only.
 
 - Exact session/world/case and Origin tests cover all browser routes. Static, role, process, handoff, wrong-case,
   expired, closed, and prior-boot credentials fail. Strict bodies reject every caller-supplied binding or tag.
+- Handoff redemption refuses a session id already bound to an active provenance receipt without consuming the
+  handoff or changing either receipt. A fresh server-generated id can redeem the still-current handoff exactly once.
 - Preparation enforces byte/control-character bounds, one-per-session replacement, maximum-two-minute lifetime,
   domain separation, consuming-before-dependency, replay/concurrency refusal, and byte destruction on every burn.
 - Authorization assigns the fixed ingress profile; browser/process attempts to assert store, origin actor, tags,
@@ -265,6 +273,8 @@ records, and test snapshots. Tests use synthetic content only.
   not stored and causes no provider call.
 - Message ingestion is durable and idempotent by exact message/case/session/turn binding. It advances conversation
   version and invalidates unresolved rulings atomically. Changed-content replay fails.
+- An orchestrator crash after call-begin leaves an unexpired open call blocking ingestion. After the call TTL passes,
+  a new message can be ingested without rewriting the old indeterminate call, and no late result obtains a release.
 - Call-begin proves the new message is included whole and binds message, conversation version, ordered projection
   ids/digest, selection, mandate/card/model, system-use decision, and boot before synthetic provider disclosure.
 - Projection-only, withheld, failed, malformed, substituted, tool-calling, stale, and admission-refused calls
