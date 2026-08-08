@@ -18,6 +18,7 @@ import { AuthorizationReadSide } from './authorizationReadSide.js';
 import { CaseSessionHandoffService } from './caseSessionHandoff.js';
 import { CardRegistry } from './cardRegistry.js';
 import { ConversationProjectionService } from './conversationProjectionService.js';
+import { ConversationTransportService } from './conversationTransport.js';
 import {
   recordVerificationAccess,
   verifyRecords,
@@ -231,6 +232,15 @@ export async function startAuthorizationProcess(
     await systemUse.installFixture(systemUseFixture, { credential: 'proc:authz', claimed_role: null });
     await caseHandoffs.expireIssued();
     await servicesProbe.requireHealthy();
+    const conversationTransport = new ConversationTransportService({
+      store,
+      cards,
+      keyring,
+      systemUse,
+      caseId: demoCaseId,
+      authorizationBootId: bootId,
+    });
+    await conversationTransport.expireReleases({ credential: 'proc:authz', claimed_role: null });
     const conversationProjections = new ConversationProjectionService({
       store,
       cards,
@@ -239,6 +249,7 @@ export async function startAuthorizationProcess(
       authorizationBootId: bootId,
       screeningFixtures,
       systemUse,
+      conversationTransport,
     });
     const authorization = new AuthorizationCore({
       store,
@@ -271,6 +282,7 @@ export async function startAuthorizationProcess(
         probe: (idempotencyKey) => servicesProbe.probe(idempotencyKey),
       });
       await caseHandoffs.expireIssued();
+      await conversationTransport.expireReleases({ credential: 'proc:authz', claimed_role: null });
     };
     await maintain();
     const adapter = new AuthorizationHttpAdapter({
@@ -289,6 +301,7 @@ export async function startAuthorizationProcess(
     server = new AuthorizationHttpServer({
       authorization,
       conversationProjections,
+      conversationTransport,
       reads,
       adapter,
       keyring,

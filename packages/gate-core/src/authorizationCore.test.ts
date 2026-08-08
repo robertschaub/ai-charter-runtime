@@ -20,6 +20,7 @@ import { AuthorizationHttpServer } from './authorizationHttpServer.js';
 import type { AuthorizationReadSide } from './authorizationReadSide.js';
 import type { CaseSessionHandoffService } from './caseSessionHandoff.js';
 import type { ConversationProjectionService } from './conversationProjectionService.js';
+import type { ConversationTransportService } from './conversationTransport.js';
 import { digestFor } from './hash.js';
 import { Keyring, verifyEmbeddedMac } from './keyring.js';
 import { loadPolicyFile, type LoadedPolicy } from './policyLoader.js';
@@ -2594,6 +2595,7 @@ describe('M2 authorization transactions', () => {
     const server = new AuthorizationHttpServer({
       authorization: h.core,
       conversationProjections: {} as ConversationProjectionService,
+      conversationTransport: {} as ConversationTransportService,
       reads: {} as AuthorizationReadSide,
       adapter,
       keyring: h.keyring,

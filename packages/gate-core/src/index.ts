@@ -19,6 +19,8 @@ export * from './keyring.js';
 export * from './servedModel.js';
 export * from './conversationProjection.js';
 export * from './conversationProjectionService.js';
+export * from './conversationInvalidation.js';
+export * from './conversationTransport.js';
 export * from './modelOutputAdmission.js';
 export * from './screeningFixture.js';
 export * from './worldLock.js';

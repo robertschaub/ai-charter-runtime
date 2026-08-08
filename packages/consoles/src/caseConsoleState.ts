@@ -6,7 +6,7 @@ import { z } from 'zod';
 export const caseConsoleStateProjection = z
   .object({
     case_id: id,
-    model_interaction_available: z.literal(false),
+    model_interaction_available: z.boolean(),
     ruling: rulingProjection.nullable(),
     dialogue: z
       .object({
@@ -49,6 +49,7 @@ export class CaseConsoleStateStore {
     authorizationOriginInput: string,
     worldIdInput: string,
     currentRuling?: RulingProjection,
+    modelInteractionAvailable = false,
   ): CaseConsoleStateProjection {
     const caseId = id.parse(caseIdInput);
     const authorizationOrigin = browserOrigin.parse(authorizationOriginInput);
@@ -57,7 +58,7 @@ export class CaseConsoleStateStore {
     const escalationId = tracked?.escalationId ?? null;
     return caseConsoleStateProjection.parse({
       case_id: caseId,
-      model_interaction_available: false,
+      model_interaction_available: modelInteractionAvailable,
       ruling,
       dialogue:
         escalationId === null || ruling === null

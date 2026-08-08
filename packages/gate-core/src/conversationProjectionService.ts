@@ -60,6 +60,8 @@ import { mandateVersionKey, type WorldState } from './state.js';
 import type { TransactionActor, WalStore } from './walStore.js';
 import { SystemUseDecisionError, SystemUseDecisionService } from './systemUseDecision.js';
 import { compareServedId } from './servedModel.js';
+import { ConversationTransportService } from './conversationTransport.js';
+import { outputReleaseInvalidationOps } from './conversationInvalidation.js';
 
 export class ConversationProjectionServiceError extends Error {
   constructor(
@@ -83,8 +85,15 @@ export interface ScreeningProjectionInput {
   readonly caseId?: string;
 }
 
-export type ModelCallBeginInput = ModelCallBeginRequest & { readonly actor: TransactionActor };
-export type ModelCallCompletionInput = ModelCallAdmissionRequest & { readonly actor: TransactionActor };
+export type ModelCallBeginInput = Omit<ModelCallBeginRequest, 'ingress_binding'> & {
+  readonly ingress_binding?: ModelCallBeginRequest['ingress_binding'];
+  readonly sessionId?: string;
+  readonly actor: TransactionActor;
+};
+export type ModelCallCompletionInput = ModelCallAdmissionRequest & {
+  readonly sessionId?: string;
+  readonly actor: TransactionActor;
+};
 export type ModelCallFailureInput = ModelCallFailureRequest & { readonly actor: TransactionActor };
 
 type ModelCallCompletionTransaction =
@@ -102,6 +111,7 @@ export interface ConversationProjectionServiceOptions {
   readonly modelCallTtlMs?: number;
   readonly modelSelectionCheckTtlMs?: number;
   readonly systemUse: SystemUseDecisionService;
+  readonly conversationTransport?: ConversationTransportService;
 }
 
 interface ResolvedProjectionInput {
@@ -161,6 +171,7 @@ export class ConversationProjectionService {
   readonly #modelCallTtlMs: number;
   readonly #modelSelectionCheckTtlMs: number;
   readonly #systemUse: SystemUseDecisionService;
+  readonly #conversationTransport: ConversationTransportService | undefined;
 
   constructor(options: ConversationProjectionServiceOptions) {
     this.#store = options.store;
@@ -176,6 +187,7 @@ export class ConversationProjectionService {
       .max(300_000)
       .parse(options.modelSelectionCheckTtlMs ?? 300_000);
     this.#systemUse = options.systemUse;
+    this.#conversationTransport = options.conversationTransport;
   }
 
   #requireOrchestrator(actor: TransactionActor): void {
@@ -444,6 +456,12 @@ export class ConversationProjectionService {
           ops: [
             { op: 'model_selection_check.consume', check_id: check.check_id, consumed_at: at },
             ...invalidationOps,
+            ...outputReleaseInvalidationOps(
+              state,
+              (release) => release.case_id === this.#caseId,
+              'model-selection-changed',
+              at,
+            ),
             { op: 'model_selection.append', selection },
           ],
           result: { accepted: true, projection },
@@ -457,7 +475,7 @@ export class ConversationProjectionService {
   }
 
   async beginCall(input: ModelCallBeginInput): Promise<ModelCallStart> {
-    const { actor, ...requestInput } = input;
+    const { actor, sessionId, ...requestInput } = input;
     const request = modelCallBeginRequest.parse(requestInput);
     const callId = id.parse(`mcl_${randomUUID()}`);
     const completed = await this.#store.transactWithState<ModelCallStart>('model_call_begin', actor, (state, at) => {
@@ -490,6 +508,23 @@ export class ConversationProjectionService {
       if (canonicalize(resolved.systemUseDecision) !== canonicalize(selection.system_use_decision)) {
         throw new ConversationProjectionServiceError('system-use-unavailable', 'selection system-use decision is stale');
       }
+      if (request.ingress_binding !== null) {
+        if (this.#conversationTransport === undefined || sessionId === undefined) {
+          throw new ConversationProjectionServiceError('invalid-scope', 'message-bound call requires session provenance');
+        }
+        try {
+          this.#conversationTransport.assertIngressBinding(
+            state,
+            at,
+            request.ingress_binding,
+            request.turn_id,
+            sessionId,
+            resolved.projection,
+          );
+        } catch {
+          throw new ConversationProjectionServiceError('invalid-scope', 'message ingress binding is unavailable');
+        }
+      }
       if ([...state.modelCalls.values()].some((call) => call.case_id === this.#caseId && call.turn_id === request.turn_id)) {
         throw new ConversationProjectionServiceError('invalid-scope', 'model turn already has a durable call attempt');
       }
@@ -508,6 +543,9 @@ export class ConversationProjectionService {
         requested_id: selection.target.requested_id,
         projection_digest: digestFor('conversation-projection', resolved.projection),
         projection_item_count: resolved.projection.items.length,
+        projection_item_ids: resolved.projection.items.map((item) => item.id),
+        ingress_binding: request.ingress_binding,
+        session_id: request.ingress_binding === null ? null : id.parse(sessionId),
         system_use_decision: resolved.systemUseDecision,
         opened_at: at,
         expires_at: timestamp.parse(new Date(Date.parse(at) + this.#modelCallTtlMs).toISOString()),
@@ -659,7 +697,7 @@ export class ConversationProjectionService {
   }
 
   async completeCall(input: ModelCallCompletionInput): Promise<ModelCallAdmission> {
-    const { actor, ...requestInput } = input;
+    const { actor, sessionId, ...requestInput } = input;
     this.#requireOrchestrator(actor);
     const request = modelCallAdmissionRequest.parse(requestInput);
     const completed = await this.#store.transactWithState<ModelCallCompletionTransaction>(
@@ -667,6 +705,9 @@ export class ConversationProjectionService {
       actor,
       (state, at) => {
         const call = this.#openCall(state, request.call_id, at);
+        if (call.ingress_binding !== null && (sessionId === undefined || call.session_id !== id.parse(sessionId))) {
+          throw new ConversationProjectionServiceError('invalid-scope', 'message-bound call session does not match');
+        }
         if (!this.#callMatchesOutput(call, request.output)) {
           throw new ConversationProjectionServiceError('invalid-scope', 'model output does not match its call attempt');
         }
@@ -702,7 +743,23 @@ export class ConversationProjectionService {
             result: { kind: 'system-use-invalidated', failure },
           };
         }
-        const admission = modelCallAdmission.parse({ kind: 'model_call_admission', call_id: call.call_id, decision });
+        let release: ReturnType<ConversationTransportService['prepareRelease']> | null = null;
+        if (decision.disposition === 'admitted' && call.ingress_binding !== null) {
+          if (this.#conversationTransport === undefined) {
+            throw new ConversationProjectionServiceError('invalid-scope', 'conversation transport is unavailable');
+          }
+          try {
+            release = this.#conversationTransport.prepareRelease(state, at, call, decision);
+          } catch {
+            throw new ConversationProjectionServiceError('invalid-scope', 'output release currentness failed');
+          }
+        }
+        const admission = modelCallAdmission.parse({
+          kind: 'model_call_admission',
+          call_id: call.call_id,
+          decision,
+          release: release?.reference ?? null,
+        });
         return {
           ops: [
             {
@@ -721,6 +778,7 @@ export class ConversationProjectionService {
               at,
               decision.model_resolution,
             ),
+            ...(release === null ? [] : [release.op]),
           ],
           result: { kind: 'admission', admission },
         };

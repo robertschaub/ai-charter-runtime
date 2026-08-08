@@ -6,7 +6,9 @@ import { describe, expect, it } from 'vitest';
 
 import {
   acceptsHandoffTransfer,
+  parseBrowserConversation,
   parseBrowserCurrentSelection,
+  parseBrowserMessagePreparation,
   parseBrowserModelTurnPreparation,
   parseBrowserModelTurnStatus,
   parseBrowserSelectionPreparation,
@@ -100,8 +102,55 @@ describe('orchestrator-origin exact-window handoff client', () => {
     expect(shell).toContain('Find → check → select');
     expect(shell).toContain('Prepare model run');
     expect(shell).toContain('Run selected model');
-    expect(shell).not.toMatch(/<textarea\b/i);
+    expect(shell).toContain('<textarea id="case-message"');
+    expect(shell).toContain('Prepare message');
+    expect(shell).toContain('Send governed turn');
     expect(shell).not.toMatch(/<input\b/i);
+  });
+
+  it('accepts only exact message preparations and field-bounded conversation projections', () => {
+    const preparation = {
+      preparation_id: 'msgp_one',
+      message_id: 'msg_one',
+      turn_id: 'turn_message_one',
+      issued_at: '2026-08-07T09:00:00.000Z',
+      expires_at: '2026-08-07T09:02:00.000Z',
+    };
+    expect(parseBrowserMessagePreparation(preparation)).toEqual({
+      preparationId: 'msgp_one',
+      messageId: 'msg_one',
+      turnId: 'turn_message_one',
+    });
+    expect(parseBrowserMessagePreparation({ ...preparation, text: 'forbidden' })).toBeNull();
+    const conversation = {
+      case_id: 'case_demo',
+      conversation_version: 3,
+      events: [
+        {
+          speaker: 'case_officer',
+          message_id: 'msg_one',
+          turn_id: 'turn_message_one',
+          text: 'Synthetic question',
+          recorded_at: '2026-08-07T09:00:00.000Z',
+        },
+        {
+          speaker: 'model',
+          message_id: 'msg_one',
+          turn_id: 'turn_message_one',
+          text: 'Synthetic inference',
+          recorded_at: '2026-08-07T09:00:01.000Z',
+          requested_id: target.requested_id,
+          served_id: target.requested_id,
+          classification: 'inferred-unconfirmed',
+        },
+      ],
+    };
+    expect(parseBrowserConversation(conversation)).toEqual(conversation);
+    expect(parseBrowserConversation({ ...conversation, authorization_boot_id: 'forbidden' })).toBeNull();
+    expect(parseBrowserConversation({
+      ...conversation,
+      events: [{ ...conversation.events[0], session_id: 'forbidden' }],
+    })).toBeNull();
   });
 
   it('accepts only exact content-free model-turn preparation and status projections', () => {

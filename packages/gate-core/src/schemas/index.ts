@@ -9,6 +9,7 @@
 export * from './common.js';
 export * from './store.js';
 export * from './output.js';
+export * from './conversationTransport.js';
 export * from './modelCall.js';
 export * from './modelSelection.js';
 export * from './systemUseDecision.js';

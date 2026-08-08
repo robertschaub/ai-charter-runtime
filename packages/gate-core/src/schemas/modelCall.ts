@@ -3,6 +3,7 @@
 import { z } from 'zod';
 
 import { cardSlug, hexDigest, id, integer, modelId, timestamp, worldId } from './common.js';
+import { modelCallIngressBinding, outputReleaseReference } from './conversationTransport.js';
 import { modelOutputAdmission, modelOutputAdmissionRequest } from './output.js';
 import { systemUseDecisionReference } from './systemUseDecision.js';
 
@@ -24,6 +25,7 @@ export const modelCallBeginRequest = z
   .object({
     turn_id: id,
     selection_id: id,
+    ingress_binding: modelCallIngressBinding.nullable().default(null),
   })
   .strict();
 export type ModelCallBeginRequest = z.infer<typeof modelCallBeginRequest>;
@@ -43,6 +45,9 @@ const modelCallBinding = z.object({
   requested_id: modelId,
   projection_digest: hexDigest,
   projection_item_count: integer.min(0),
+  projection_item_ids: z.array(id).default([]),
+  ingress_binding: modelCallIngressBinding.nullable().default(null),
+  session_id: id.nullable().default(null),
   system_use_decision: systemUseDecisionReference,
   opened_at: timestamp,
   expires_at: timestamp,
@@ -171,6 +176,7 @@ export const modelCallAdmission = z
     kind: z.literal('model_call_admission'),
     call_id: id,
     decision: modelOutputAdmission,
+    release: outputReleaseReference.nullable().default(null),
   })
   .strict();
 export type ModelCallAdmission = z.infer<typeof modelCallAdmission>;

@@ -7,6 +7,10 @@ import { evaluatePolicy, escalationPatternRequiresNarrowing, type AuthorityDefec
 import { digestFor, sha256Hex, verifyDigest } from './hash.js';
 import { createEmbeddedMac, type Keyring, verifyEmbeddedMac } from './keyring.js';
 import {
+  conversationMutationInvalidationOps,
+  outputReleaseInvalidationOps,
+} from './conversationInvalidation.js';
+import {
   frozenProposal,
   gateRuling,
   accessEntry,
@@ -27,6 +31,7 @@ import {
   worldId,
   type CommitmentRecord,
   type ConversationStoreEntry,
+  type ConversationTransportAccessEvidence,
   type CredentialLabel,
   type CounterName,
   type EvidenceRef,
@@ -280,7 +285,10 @@ export interface RecordAccessInput {
   readonly httpStatus: number;
   readonly recorder: TransactionActor;
   readonly readLengths?: Readonly<Record<string, number>>;
-  readonly operationEvidence?: ModelCallAccessEvidence | ModelSelectionAccessEvidence;
+  readonly operationEvidence?:
+    | ModelCallAccessEvidence
+    | ModelSelectionAccessEvidence
+    | ConversationTransportAccessEvidence;
   readonly suppressedCount?: number;
   readonly suppressionWindowMs?: number;
   readonly suppressionFinal?: boolean;
@@ -987,6 +995,7 @@ export class AuthorizationCore {
           ? []
           : [
               ...invalidationOps(state, () => true, 'policy-reload'),
+              ...outputReleaseInvalidationOps(state, () => true, 'policy-reload', at),
               {
                 op: 'policy.reload' as const,
                 policy: {
@@ -1014,6 +1023,7 @@ export class AuthorizationCore {
           ? []
           : [
               ...invalidationOps(state, () => true, 'policy-reload'),
+              ...outputReleaseInvalidationOps(state, () => true, 'policy-reload', at),
               {
                 op: 'policy.reload' as const,
                 policy: {
@@ -1062,17 +1072,24 @@ export class AuthorizationCore {
       item: storeItem.parse(item),
     }));
     if (entries.length === 0) return;
-    await this.#store.transactWithState('conversation_items_put', input.actor, (state) => {
+    await this.#store.transactWithState('conversation_items_put', input.actor, (state, at) => {
       const ops: WalOp[] = [];
+      const changedCases = new Set<string>();
       for (const entry of entries) {
         const current = state.storeItems.get(entry.item.id);
-        if (current === undefined) ops.push({ op: 'store.put', entry });
+        if (current === undefined) {
+          ops.push({ op: 'store.put', entry });
+          changedCases.add(entry.case_id);
+        }
         else if (canonicalize(current) !== canonicalize(entry)) {
           throw new AuthorizationError(
             'proposal-conflict',
             `conversation item ${entry.item.id} is already bound to different content or scope`,
           );
         }
+      }
+      for (const changedCase of changedCases) {
+        ops.unshift(...conversationMutationInvalidationOps(state, changedCase, 'conversation-items-put', at));
       }
       return { ops, result: undefined };
     });
@@ -1097,6 +1114,12 @@ export class AuthorizationCore {
           (ruling) => ruling.binding.mandate_id === parsed.mandate_id,
           'mandate-amendment',
         ),
+        ...outputReleaseInvalidationOps(
+          state,
+          (release) => release.mandate_id === parsed.mandate_id,
+          'mandate-amendment',
+          at,
+        ),
         { op: 'mandate.amend', mandate: parsed },
       ],
       result: undefined };
@@ -1111,6 +1134,12 @@ export class AuthorizationCore {
           state,
           (ruling) => ruling.binding.mandate_id === mandateId && ruling.binding.mandate_version === version,
           'mandate-revocation',
+        ),
+        ...outputReleaseInvalidationOps(
+          state,
+          (release) => release.mandate_id === mandateId && release.mandate_version === version,
+          'mandate-revocation',
+          at,
         ),
         { op: 'mandate.revoke', mandate_id: mandateId, version, revoked_at: at },
       ],
@@ -1425,6 +1454,14 @@ export class AuthorizationCore {
               reason: 'escalation-pattern-narrowing',
             });
           }
+          ops.push(
+            ...outputReleaseInvalidationOps(
+              state,
+              (release) => release.mandate_id === defects.mandate?.mandate_id,
+              'escalation-pattern-narrowing',
+              at,
+            ),
+          );
           ops.push({
             op: 'mandate.amend',
             mandate: bindMandate(this.#keyring, {
@@ -1480,6 +1517,12 @@ export class AuthorizationCore {
         (candidate) =>
           candidate.ruling_id !== excludeRulingId && candidate.binding.mandate_id === pattern.mandate_id,
         'escalation-pattern-narrowing',
+      ),
+      ...outputReleaseInvalidationOps(
+        state,
+        (release) => release.mandate_id === pattern.mandate_id,
+        'escalation-pattern-narrowing',
+        at,
       ),
       {
         op: 'mandate.amend',
@@ -2027,6 +2070,16 @@ export class AuthorizationCore {
           }),
         });
         if (sourceEntry !== undefined && escalation.case_id !== null) {
+          ops.push(
+            ...conversationMutationInvalidationOps(
+              state,
+              escalation.case_id,
+              `dialogue-${disposition}`,
+              at,
+              undefined,
+              ruling.ruling_id,
+            ),
+          );
           const responderOrigin =
             responderRole === 'applicant' ? 'applicant' : responderRole === 'case_officer' ? 'officer' : null;
           if (responderOrigin === null) return refuse('invalid-response');

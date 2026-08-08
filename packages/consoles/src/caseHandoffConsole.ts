@@ -26,11 +26,17 @@ interface ActiveModelTurnPreparation {
   readonly target: BrowserModelTarget;
 }
 
+interface ActiveMessagePreparation {
+  readonly preparationId: string;
+  readonly messageId: string;
+  readonly turnId: string;
+}
+
 export interface BrowserModelTurnStatus {
   readonly turn_id: string;
   readonly selection_id: string;
   readonly target: BrowserModelTarget;
-  readonly state: 'prepared' | 'running' | 'quarantined' | 'withheld' | 'discarded' | 'failed';
+  readonly state: 'prepared' | 'running' | 'quarantined' | 'released' | 'withheld' | 'discarded' | 'failed';
   readonly provider_disclosure: 'none' | 'possible' | 'confirmed';
   readonly requested_id: string;
   readonly served_id: string | null;
@@ -43,6 +49,8 @@ let preparationRequestSequence = 0;
 let selectionOperationPending = false;
 let activeModelTurnPreparation: ActiveModelTurnPreparation | null = null;
 let modelTurnOperationPending = false;
+let activeMessagePreparation: ActiveMessagePreparation | null = null;
+let messageOperationPending = false;
 
 export interface RuntimeConsoleConfig {
   readonly authorization_origin: string;
@@ -419,7 +427,7 @@ export function parseBrowserModelTurnPreparation(value: unknown): ActiveModelTur
       };
 }
 
-const MODEL_TURN_STATES = new Set(['prepared', 'running', 'quarantined', 'withheld', 'discarded', 'failed']);
+const MODEL_TURN_STATES = new Set(['prepared', 'running', 'quarantined', 'released', 'withheld', 'discarded', 'failed']);
 const DISCLOSURE_STATES = new Set(['none', 'possible', 'confirmed']);
 const TERMINAL_REASONS = new Set([
   'authorization-refused',
@@ -530,6 +538,225 @@ function renderModelTurnStatus(value: BrowserModelTurnStatus): void {
     metadata.textContent = JSON.stringify(value, null, 2);
     metadata.hidden = false;
   }
+}
+
+export function parseBrowserMessagePreparation(value: unknown): ActiveMessagePreparation | null {
+  if (
+    !isRecord(value) ||
+    !hasExactKeys(value, ['preparation_id', 'message_id', 'turn_id', 'issued_at', 'expires_at']) ||
+    typeof value['preparation_id'] !== 'string' ||
+    !OPAQUE_ID.test(value['preparation_id']) ||
+    typeof value['message_id'] !== 'string' ||
+    !OPAQUE_ID.test(value['message_id']) ||
+    typeof value['turn_id'] !== 'string' ||
+    !OPAQUE_ID.test(value['turn_id']) ||
+    !validTimestamp(value['issued_at']) ||
+    !validTimestamp(value['expires_at']) ||
+    Date.parse(value['issued_at']) >= Date.parse(value['expires_at'])
+  ) {
+    return null;
+  }
+  return {
+    preparationId: value['preparation_id'],
+    messageId: value['message_id'],
+    turnId: value['turn_id'],
+  };
+}
+
+interface BrowserConversationEvent {
+  readonly speaker: 'case_officer' | 'model';
+  readonly message_id: string;
+  readonly turn_id: string;
+  readonly text: string;
+  readonly recorded_at: string;
+  readonly requested_id?: string;
+  readonly served_id?: string;
+  readonly classification?: 'inferred-unconfirmed';
+}
+
+interface BrowserConversation {
+  readonly case_id: string;
+  readonly conversation_version: number;
+  readonly events: readonly BrowserConversationEvent[];
+}
+
+export function parseBrowserConversation(value: unknown): BrowserConversation | null {
+  if (
+    !isRecord(value) ||
+    !hasExactKeys(value, ['case_id', 'conversation_version', 'events']) ||
+    typeof value['case_id'] !== 'string' ||
+    !OPAQUE_ID.test(value['case_id']) ||
+    !Number.isSafeInteger(value['conversation_version']) ||
+    (value['conversation_version'] as number) < 0 ||
+    !Array.isArray(value['events']) ||
+    value['events'].length > 128
+  ) {
+    return null;
+  }
+  const events: BrowserConversationEvent[] = [];
+  let bytes = 0;
+  for (const candidate of value['events']) {
+    if (!isRecord(candidate)) return null;
+    const speaker = candidate['speaker'];
+    const expectedKeys =
+      speaker === 'case_officer'
+        ? ['speaker', 'message_id', 'turn_id', 'text', 'recorded_at']
+        : ['speaker', 'message_id', 'turn_id', 'text', 'recorded_at', 'requested_id', 'served_id', 'classification'];
+    if (
+      !hasExactKeys(candidate, expectedKeys) ||
+      (speaker !== 'case_officer' && speaker !== 'model') ||
+      typeof candidate['message_id'] !== 'string' ||
+      !OPAQUE_ID.test(candidate['message_id']) ||
+      typeof candidate['turn_id'] !== 'string' ||
+      !OPAQUE_ID.test(candidate['turn_id']) ||
+      typeof candidate['text'] !== 'string' ||
+      !validTimestamp(candidate['recorded_at']) ||
+      (speaker === 'model' &&
+        (typeof candidate['requested_id'] !== 'string' ||
+          typeof candidate['served_id'] !== 'string' ||
+          candidate['classification'] !== 'inferred-unconfirmed'))
+    ) {
+      return null;
+    }
+    bytes += new TextEncoder().encode(candidate['text']).byteLength;
+    events.push(candidate as unknown as BrowserConversationEvent);
+  }
+  if (bytes > 256 * 1_024) return null;
+  return {
+    case_id: value['case_id'],
+    conversation_version: value['conversation_version'] as number,
+    events,
+  };
+}
+
+function renderConversation(value: BrowserConversation): void {
+  const target = document.getElementById('conversation-transcript');
+  if (target === null) return;
+  clearChildren(target);
+  for (const event of value.events) {
+    const item = text('article', '', `conversation-event ${event.speaker}`);
+    item.append(
+      text('h3', event.speaker === 'case_officer' ? 'Case officer' : 'Generated inference'),
+      text('p', event.text),
+      text(
+        'small',
+        event.speaker === 'model'
+          ? `${event.requested_id ?? 'unknown'} → ${event.served_id ?? 'unknown'} · inferred, unconfirmed`
+          : `Recorded ${event.recorded_at}`,
+      ),
+    );
+    target.append(item);
+  }
+  if (value.events.length === 0) target.append(text('p', 'No conversation messages have been ingested.'));
+  const version = document.getElementById('conversation-version');
+  if (version !== null) version.textContent = `Authorization conversation version ${value.conversation_version}.`;
+}
+
+async function refreshConversation(token: string, world: string, caseId: string): Promise<void> {
+  const parsed = parseBrowserConversation(
+    await sameOriginGet(`/w/${world}/cases/${caseId}/conversation`, token),
+  );
+  if (parsed === null || parsed.case_id !== caseId) throw new Error('invalid-conversation');
+  renderConversation(parsed);
+}
+
+function configureConversationControls(
+  available: boolean,
+  token: string,
+  world: string,
+  caseId: string,
+): void {
+  const input = document.getElementById('case-message');
+  const prepare = document.getElementById('prepare-message');
+  const send = document.getElementById('send-message');
+  const output = document.getElementById('message-status');
+  if (!(input instanceof HTMLTextAreaElement) || !(prepare instanceof HTMLButtonElement) || !(send instanceof HTMLButtonElement)) {
+    return;
+  }
+  if (!available) activeMessagePreparation = null;
+  input.disabled = !available || messageOperationPending;
+  prepare.disabled = !available || messageOperationPending;
+  send.disabled = !available || messageOperationPending || activeMessagePreparation === null;
+  input.oninput = () => {
+    if (activeMessagePreparation === null) return;
+    activeMessagePreparation = null;
+    send.disabled = true;
+    if (output !== null) output.textContent = 'Message changed. Prepare the revised text before sending.';
+  };
+  if (!available) {
+    if (output !== null) output.textContent = 'Select a configured model lane before preparing a message.';
+    return;
+  }
+  prepare.onclick = () => {
+    if (messageOperationPending) return;
+    messageOperationPending = true;
+    activeMessagePreparation = null;
+    input.disabled = true;
+    prepare.disabled = true;
+    send.disabled = true;
+    if (output !== null) output.textContent = 'Preparing the exact message for one bounded turn.';
+    void (async () => {
+      const parsed = parseBrowserMessagePreparation(
+        await sameOriginJson(
+          `/w/${world}/cases/${caseId}/message-preparations`,
+          { message: input.value },
+          token,
+        ),
+      );
+      if (parsed === null) throw new Error('invalid-message-preparation');
+      activeMessagePreparation = parsed;
+      if (output !== null) output.textContent = 'Message prepared. Confirm the second step to contact the selected provider.';
+    })()
+      .catch(() => {
+        if (output !== null) output.textContent = 'The message could not be prepared.';
+      })
+      .finally(() => {
+        messageOperationPending = false;
+        input.disabled = false;
+        prepare.disabled = false;
+        send.disabled = activeMessagePreparation === null;
+      });
+  };
+  send.onclick = () => {
+    const prepared = activeMessagePreparation;
+    if (messageOperationPending || prepared === null) return;
+    activeMessagePreparation = null;
+    messageOperationPending = true;
+    input.disabled = true;
+    prepare.disabled = true;
+    send.disabled = true;
+    if (output !== null) output.textContent = 'Running the governed message turn.';
+    void (async () => {
+      let raw: unknown;
+      try {
+        raw = await sameOriginJson(
+          `/w/${world}/cases/${caseId}/messages`,
+          { preparation_id: prepared.preparationId },
+          token,
+        );
+      } catch {
+        raw = await sameOriginGet(`/w/${world}/cases/${caseId}/model-turns/${prepared.turnId}`, token);
+      }
+      const result = parseBrowserModelTurnStatus(raw);
+      if (result === null || result.turn_id !== prepared.turnId) throw new Error('invalid-message-turn-status');
+      if (output !== null) {
+        output.textContent =
+          result.state === 'released'
+            ? 'The inferred response was durably ingested. Refreshing the authorization transcript.'
+            : `Turn ended as ${result.state}; no local provider text is displayed.`;
+      }
+      await refreshConversation(token, world, caseId);
+      input.value = '';
+    })()
+      .catch(() => {
+        if (output !== null) output.textContent = 'The turn outcome is unavailable. The provider was not retried.';
+      })
+      .finally(() => {
+        messageOperationPending = false;
+        input.disabled = false;
+        prepare.disabled = false;
+      });
+  };
 }
 
 function clearModelTurnSurface(message: string): void {
@@ -808,7 +1035,13 @@ export function shouldPollCaseState(value: unknown): boolean {
   );
 }
 
-function renderCaseState(value: unknown, config: RuntimeConsoleConfig): void {
+function renderCaseState(
+  value: unknown,
+  config: RuntimeConsoleConfig,
+  token?: string,
+  world?: string,
+  caseId?: string,
+): void {
   if (!isRecord(value)) throw new Error('invalid-case-state');
   const target = document.getElementById('case-state');
   const linkTarget = document.getElementById('dialogue-link');
@@ -849,6 +1082,14 @@ function renderCaseState(value: unknown, config: RuntimeConsoleConfig): void {
       : 'View the terminal dialogue in the governance console';
     linkTarget.append(link);
   }
+  if (
+    token !== undefined &&
+    world !== undefined &&
+    caseId !== undefined &&
+    typeof value['model_interaction_available'] === 'boolean'
+  ) {
+    configureConversationControls(value['model_interaction_available'], token, world, caseId);
+  }
 }
 
 async function loadCaseSurface(
@@ -865,9 +1106,10 @@ async function loadCaseSurface(
     renderModels(models, current, token, world, caseId, refreshModels);
   };
   await refreshModels();
+  await refreshConversation(token, world, caseId);
   const refresh = async (): Promise<void> => {
     const state = await sameOriginGet(`/w/${world}/cases/${caseId}/state`, token);
-    renderCaseState({ ...(isRecord(state) ? state : {}), world_id: world }, config);
+    renderCaseState({ ...(isRecord(state) ? state : {}), world_id: world }, config, token, world, caseId);
     if (shouldPollCaseState(state)) window.setTimeout(() => void refresh().catch(() => status('Case-state polling was refused.')), 2_000);
   };
   await refresh();
@@ -943,11 +1185,19 @@ async function mountCaseHandoffConsole(): Promise<void> {
       selectionOperationPending = true;
       activeModelTurnPreparation = null;
       modelTurnOperationPending = true;
+      activeMessagePreparation = null;
+      messageOperationPending = true;
       disableSelectionControls();
       const prepareRun = document.getElementById('prepare-model-turn');
       const useRun = document.getElementById('use-model-turn');
       if (prepareRun instanceof HTMLButtonElement) prepareRun.disabled = true;
       if (useRun instanceof HTMLButtonElement) useRun.disabled = true;
+      const messageInput = document.getElementById('case-message');
+      const prepareMessage = document.getElementById('prepare-message');
+      const sendMessage = document.getElementById('send-message');
+      if (messageInput instanceof HTMLTextAreaElement) messageInput.disabled = true;
+      if (prepareMessage instanceof HTMLButtonElement) prepareMessage.disabled = true;
+      if (sendMessage instanceof HTMLButtonElement) sendMessage.disabled = true;
       clearModelTurnSurface('Case session closed; no retained model output remains available.');
       status('Case session closed.');
       const button = document.getElementById('close-session');

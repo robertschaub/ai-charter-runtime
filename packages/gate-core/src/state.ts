@@ -6,8 +6,10 @@ import { canonicalize } from './canonicalize.js';
 import { digestFor, verifyDigest } from './hash.js';
 import type {
   CaseSessionHandoffRecord,
+  CaseSessionProvenanceReceipt,
   CommitmentRecord,
   ConversationStoreEntry,
+  ConversationIngressEvent,
   EffectRecord,
   EscalationRecord,
   FrozenProposal,
@@ -18,6 +20,7 @@ import type {
   ModelSelectionObservation,
   ModelSelectionTransition,
   NonceRecord,
+  OutputReleaseRecord,
   PatternEvent,
   PolicyActivation,
   RecordEntry,
@@ -29,6 +32,10 @@ import type {
 } from './schemas/index.js';
 import type { accessChainEntry } from './schemas/record.js';
 import { modelCallRecord } from './schemas/modelCall.js';
+import {
+  CASE_OFFICER_MESSAGE_PROFILE,
+  outputReleaseRecord,
+} from './schemas/conversationTransport.js';
 import { systemUseDecisionRecord } from './schemas/systemUseDecision.js';
 import { systemUseDecisionDigest } from './systemUseDecision.js';
 
@@ -65,6 +72,7 @@ export interface WorldState {
   readonly systemUseDecisions: Map<string, SystemUseDecisionRecord>;
   readonly systemUseDecisionStatus: Map<string, SystemUseDecisionRuntimeStatus>;
   readonly caseSessionHandoffs: Map<string, CaseSessionHandoffRecord>;
+  readonly caseSessionProvenance: Map<string, CaseSessionProvenanceReceipt>;
   readonly nonces: Map<string, NonceRecord>;
   readonly reservations: Map<string, ReservationRecord>;
   readonly rulings: Map<string, GateRuling>;
@@ -73,12 +81,15 @@ export interface WorldState {
   readonly effectByIdempotencyKey: Map<string, string>;
   readonly escalations: Map<string, EscalationRecord>;
   readonly storeItems: Map<string, ConversationStoreEntry>;
+  readonly conversationEvents: Map<string, ConversationIngressEvent>;
+  readonly conversationVersionByCase: Map<string, number>;
   readonly patternEvents: PatternEvent[];
   readonly modelSelectionChecks: Map<string, ModelSelectionCheckRecord>;
   readonly modelSelections: Map<string, ModelSelectionTransition>;
   readonly currentModelSelectionByCase: Map<string, string>;
   readonly modelSelectionObservations: Map<string, ModelSelectionObservation>;
   readonly modelCalls: Map<string, ModelCallRecord>;
+  readonly outputReleases: Map<string, OutputReleaseRecord>;
   readonly reviews: Map<string, ReviewObligation>;
   readonly actionRecords: RecordEntry[];
   readonly accessRecords: AccessChainValue[];
@@ -104,6 +115,7 @@ export function createWorldState(worldId: string): WorldState {
     systemUseDecisions: new Map(),
     systemUseDecisionStatus: new Map(),
     caseSessionHandoffs: new Map(),
+    caseSessionProvenance: new Map(),
     nonces: new Map(),
     reservations: new Map(),
     rulings: new Map(),
@@ -112,12 +124,15 @@ export function createWorldState(worldId: string): WorldState {
     effectByIdempotencyKey: new Map(),
     escalations: new Map(),
     storeItems: new Map(),
+    conversationEvents: new Map(),
+    conversationVersionByCase: new Map(),
     patternEvents: [],
     modelSelectionChecks: new Map(),
     modelSelections: new Map(),
     currentModelSelectionByCase: new Map(),
     modelSelectionObservations: new Map(),
     modelCalls: new Map(),
+    outputReleases: new Map(),
     reviews: new Map(),
     actionRecords: [],
     accessRecords: [],
@@ -136,6 +151,7 @@ export function cloneWorldState(state: WorldState): WorldState {
     systemUseDecisions: new Map(state.systemUseDecisions),
     systemUseDecisionStatus: new Map(state.systemUseDecisionStatus),
     caseSessionHandoffs: new Map(state.caseSessionHandoffs),
+    caseSessionProvenance: new Map(state.caseSessionProvenance),
     nonces: new Map(state.nonces),
     reservations: new Map(state.reservations),
     rulings: new Map(state.rulings),
@@ -144,12 +160,15 @@ export function cloneWorldState(state: WorldState): WorldState {
     effectByIdempotencyKey: new Map(state.effectByIdempotencyKey),
     escalations: new Map(state.escalations),
     storeItems: new Map(state.storeItems),
+    conversationEvents: new Map(state.conversationEvents),
+    conversationVersionByCase: new Map(state.conversationVersionByCase),
     patternEvents: [...state.patternEvents],
     modelSelectionChecks: new Map(state.modelSelectionChecks),
     modelSelections: new Map(state.modelSelections),
     currentModelSelectionByCase: new Map(state.currentModelSelectionByCase),
     modelSelectionObservations: new Map(state.modelSelectionObservations),
     modelCalls: new Map(state.modelCalls),
+    outputReleases: new Map(state.outputReleases),
     reviews: new Map(state.reviews),
     actionRecords: [...state.actionRecords],
     accessRecords: [...state.accessRecords],
@@ -357,6 +376,29 @@ export function applyWorldOp(state: WorldState, op: WalOp, transactionTimestamp:
         fail('illegal-transition', `case-session handoff ${op.handoff_id}: ${current.state} -> expired`);
       }
       state.caseSessionHandoffs.set(op.handoff_id, { ...current, state: 'expired' });
+      break;
+    }
+    case 'case_session_provenance.issue': {
+      requireWorld(state, op.receipt, 'case-session provenance receipt');
+      if (op.receipt.state !== 'active' || op.receipt.issued_at !== transactionTimestamp) {
+        fail('illegal-initial-state', 'a new case-session provenance receipt must be active and issued now');
+      }
+      if (state.caseSessionProvenance.get(op.receipt.session_id)?.state === 'active') {
+        fail('duplicate-state', `active case-session provenance receipt ${op.receipt.session_id} already exists`);
+      }
+      state.caseSessionProvenance.set(op.receipt.session_id, op.receipt);
+      break;
+    }
+    case 'case_session_provenance.expire': {
+      const current = requireValue(
+        state.caseSessionProvenance,
+        op.session_id,
+        `case-session provenance receipt ${op.session_id}`,
+      );
+      if (current.state !== 'active') {
+        fail('illegal-transition', `case-session provenance receipt ${op.session_id}: ${current.state} -> expired`);
+      }
+      state.caseSessionProvenance.set(op.session_id, { ...current, state: 'expired' });
       break;
     }
     case 'nonce.issue': {
@@ -744,6 +786,58 @@ export function applyWorldOp(state: WorldState, op: WalOp, transactionTimestamp:
       state.storeItems.delete(op.item_id);
       break;
     }
+    case 'conversation.event.append': {
+      requireWorld(state, op.event, 'conversation ingress event');
+      requireUnique(state.conversationEvents, op.event.event_id, `conversation event ${op.event.event_id}`);
+      const entry = requireValue(state.storeItems, op.event.item_id, `store item ${op.event.item_id}`);
+      if (
+        entry.case_id !== op.event.case_id ||
+        entry.item.turn !== op.event.turn_id ||
+        op.event.conversation_version !== (state.conversationVersionByCase.get(op.event.case_id) ?? 0) + 1 ||
+        !verifyDigest(
+          op.event.content_digest,
+          digestFor('conversation-item-content', {
+            case_id: op.event.case_id,
+            item_id: op.event.item_id,
+            text: entry.item.text,
+          }),
+        ) ||
+        Buffer.byteLength(entry.item.text, 'utf8') !== op.event.byte_length ||
+        (op.event.kind === 'message_ingress' &&
+          (entry.item.store !== 'said' ||
+            entry.item.origin_actor !== 'officer' ||
+            !verifyDigest(
+              op.event.ingress_profile_digest,
+              digestFor('conversation-ingress-profile', CASE_OFFICER_MESSAGE_PROFILE),
+            ) ||
+            canonicalize(entry.item.tags) !== canonicalize(CASE_OFFICER_MESSAGE_PROFILE.tags) ||
+            canonicalize(entry.item.provenance) !== canonicalize(CASE_OFFICER_MESSAGE_PROFILE.provenance))) ||
+        (op.event.kind === 'model_output_ingress' &&
+          (entry.item.store !== 'inferred' || entry.item.origin_actor !== undefined))
+      ) {
+        fail('binding-mismatch', `conversation event ${op.event.event_id} differs from its store item`);
+      }
+      if (
+        op.event.kind === 'message_ingress' &&
+        [...state.conversationEvents.values()].some(
+          (event) => event.kind === 'message_ingress' && event.message_id === op.event.message_id,
+        )
+      ) {
+        fail('duplicate-state', `conversation message ${op.event.message_id} already exists`);
+      }
+      if (op.event.kind === 'model_output_ingress') {
+        const releaseId = op.event.release_id;
+        if (
+          [...state.conversationEvents.values()].some(
+            (event) => event.kind === 'model_output_ingress' && event.release_id === releaseId,
+          )
+        ) {
+          fail('duplicate-state', `output release ${releaseId} already has a conversation event`);
+        }
+      }
+      state.conversationEvents.set(op.event.event_id, op.event);
+      break;
+    }
     case 'pattern.record':
       requireWorld(state, op.event, 'pattern event');
       if (state.patternEvents.some((event) => event.event_id === op.event.event_id)) {
@@ -877,6 +971,40 @@ export function applyWorldOp(state: WorldState, op: WalOp, transactionTimestamp:
       if ([...state.modelCalls.values()].some((call) => call.case_id === op.call.case_id && call.turn_id === op.call.turn_id)) {
         fail('duplicate-state', `model turn ${op.call.turn_id} already has a call`);
       }
+      // Pre-M5.10 projection-only WAL entries have no item-id array; message-bound calls never use that legacy form.
+      if (
+        (op.call.projection_item_count !== op.call.projection_item_ids.length &&
+          !(op.call.ingress_binding === null && op.call.projection_item_ids.length === 0)) ||
+        new Set(op.call.projection_item_ids).size !== op.call.projection_item_ids.length ||
+        (op.call.ingress_binding === null) !== (op.call.session_id === null)
+      ) {
+        fail('binding-mismatch', `model call ${op.call.call_id} has inconsistent projection or ingress bindings`);
+      }
+      if (op.call.ingress_binding !== null && op.call.session_id !== null) {
+        const ingress = op.call.ingress_binding;
+        const event = [...state.conversationEvents.values()].find(
+          (candidate) => candidate.kind === 'message_ingress' && candidate.message_id === ingress.message_id,
+        );
+        const receipt = state.caseSessionProvenance.get(op.call.session_id);
+        if (
+          event?.kind !== 'message_ingress' ||
+          event.case_id !== op.call.case_id ||
+          event.turn_id !== op.call.turn_id ||
+          event.item_id !== ingress.message_item_id ||
+          event.session_id !== op.call.session_id ||
+          event.conversation_version !== ingress.conversation_version ||
+          !verifyDigest(event.content_digest, ingress.message_digest) ||
+          (state.conversationVersionByCase.get(op.call.case_id) ?? 0) !== ingress.conversation_version ||
+          !op.call.projection_item_ids.includes(ingress.message_item_id) ||
+          receipt === undefined ||
+          receipt.state !== 'active' ||
+          receipt.case_id !== op.call.case_id ||
+          receipt.authorization_boot_id !== op.call.authorization_boot_id ||
+          transactionTimestamp >= receipt.expires_at
+        ) {
+          fail('binding-mismatch', `model call ${op.call.call_id} has stale message ingress evidence`);
+        }
+      }
       state.modelCalls.set(op.call.call_id, op.call);
       break;
     case 'model_call.complete': {
@@ -924,6 +1052,138 @@ export function applyWorldOp(state: WorldState, op: WalOp, transactionTimestamp:
           output_digest: null,
           failure_reason: op.failure_reason,
         }),
+      );
+      break;
+    }
+    case 'output_release.issue': {
+      requireWorld(state, op.release, 'output release');
+      if (
+        op.release.state !== 'issued' ||
+        op.release.issued_at !== transactionTimestamp ||
+        op.release.state_changed_at !== transactionTimestamp ||
+        op.release.consumption_result !== null ||
+        op.release.invalidation_reason !== null
+      ) {
+        fail('illegal-initial-state', 'a new output release must be issued now without a terminal result');
+      }
+      requireUnique(state.outputReleases, op.release.release_id, `output release ${op.release.release_id}`);
+      if ([...state.outputReleases.values()].some((release) => release.call_id === op.release.call_id)) {
+        fail('duplicate-state', `model call ${op.release.call_id} already has an output release`);
+      }
+      const call = requireValue(state.modelCalls, op.release.call_id, `model call ${op.release.call_id}`);
+      const selection = requireValue(
+        state.modelSelections,
+        op.release.selection_id,
+        `model selection ${op.release.selection_id}`,
+      );
+      const ingress = call.ingress_binding;
+      const receipt = state.caseSessionProvenance.get(op.release.session_id);
+      const messageEvent = [...state.conversationEvents.values()].find(
+        (event) => event.kind === 'message_ingress' && event.message_id === op.release.message_id,
+      );
+      if (
+        call.state !== 'terminal' ||
+        call.outcome !== 'admitted' ||
+        call.authorization_boot_id !== op.release.authorization_boot_id ||
+        call.case_id !== op.release.case_id ||
+        call.turn_id !== op.release.turn_id ||
+        call.session_id !== op.release.session_id ||
+        ingress === null ||
+        ingress.message_id !== op.release.message_id ||
+        ingress.message_item_id !== op.release.message_item_id ||
+        ingress.conversation_version !== op.release.conversation_version ||
+        call.selection_id !== op.release.selection_id ||
+        call.mandate_id !== op.release.mandate_id ||
+        call.mandate_version !== op.release.mandate_version ||
+        call.card_id !== op.release.card_id ||
+        call.card_version !== op.release.card_version ||
+        call.requested_id !== op.release.requested_id ||
+        call.served_id !== op.release.served_id ||
+        call.output_digest !== op.release.output_digest ||
+        call.projection_digest !== op.release.projection_digest ||
+        canonicalize(call.projection_item_ids) !== canonicalize(op.release.projection_item_ids) ||
+        canonicalize(call.system_use_decision) !== canonicalize(op.release.system_use_decision) ||
+        (state.conversationVersionByCase.get(op.release.case_id) ?? 0) !== op.release.conversation_version ||
+        selection.case_id !== op.release.case_id ||
+        selection.target.card_digest !== op.release.card_digest ||
+        selection.target.verifying_key_id !== op.release.verifying_key_id ||
+        state.policy === undefined ||
+        state.policy.policy_version !== op.release.policy_version ||
+        state.policy.policy_content_digest !== op.release.policy_content_digest ||
+        state.policy.evaluator_build_id !== op.release.evaluator_build_id ||
+        receipt === undefined ||
+        receipt.state !== 'active' ||
+        receipt.authorization_boot_id !== op.release.authorization_boot_id ||
+        receipt.case_id !== op.release.case_id ||
+        transactionTimestamp >= receipt.expires_at ||
+        messageEvent?.kind !== 'message_ingress' ||
+        messageEvent.session_id !== op.release.session_id ||
+        messageEvent.item_id !== op.release.message_item_id
+      ) {
+        fail('binding-mismatch', `output release ${op.release.release_id} differs from its admitted call`);
+      }
+      state.outputReleases.set(op.release.release_id, op.release);
+      break;
+    }
+    case 'output_release.consume': {
+      const current = requireValue(state.outputReleases, op.release_id, `output release ${op.release_id}`);
+      if (current.state !== 'issued') {
+        fail('illegal-transition', `output release ${op.release_id}: ${current.state} -> consumed`);
+      }
+      if (transactionTimestamp >= current.expires_at) {
+        fail('expired-state', `output release ${op.release_id} is expired`);
+      }
+      const event = requireValue(state.conversationEvents, op.result.event_id, `conversation event ${op.result.event_id}`);
+      if (
+        event.kind !== 'model_output_ingress' ||
+        event.release_id !== current.release_id ||
+        event.item_id !== op.result.item_id ||
+        event.conversation_version !== op.result.conversation_version ||
+        event.recorded_at !== op.result.recorded_at ||
+        op.result.recorded_at !== transactionTimestamp ||
+        op.result.conversation_version !== (state.conversationVersionByCase.get(current.case_id) ?? 0) + 1
+      ) {
+        fail('binding-mismatch', `output release ${op.release_id} consumption differs from its ingress event`);
+      }
+      state.outputReleases.set(
+        op.release_id,
+        outputReleaseRecord.parse({
+          ...current,
+          state: 'consumed',
+          state_changed_at: transactionTimestamp,
+          consumption_result: op.result,
+        }),
+      );
+      break;
+    }
+    case 'output_release.invalidate': {
+      const current = requireValue(state.outputReleases, op.release_id, `output release ${op.release_id}`);
+      if (current.state !== 'issued' || op.changed_at !== transactionTimestamp) {
+        fail('illegal-transition', `output release ${op.release_id}: ${current.state} -> invalidated`);
+      }
+      state.outputReleases.set(
+        op.release_id,
+        outputReleaseRecord.parse({
+          ...current,
+          state: 'invalidated',
+          state_changed_at: op.changed_at,
+          invalidation_reason: op.reason,
+        }),
+      );
+      break;
+    }
+    case 'output_release.expire': {
+      const current = requireValue(state.outputReleases, op.release_id, `output release ${op.release_id}`);
+      if (
+        current.state !== 'issued' ||
+        op.changed_at !== transactionTimestamp ||
+        (current.expires_at > op.changed_at && current.authorization_boot_id === op.authorization_boot_id)
+      ) {
+        fail('illegal-transition', `output release ${op.release_id}: ${current.state} -> expired`);
+      }
+      state.outputReleases.set(
+        op.release_id,
+        outputReleaseRecord.parse({ ...current, state: 'expired', state_changed_at: op.changed_at }),
       );
       break;
     }
@@ -1008,6 +1268,70 @@ export function applyWorldOp(state: WorldState, op: WalOp, transactionTimestamp:
 }
 
 function validateTransactionShape(state: WorldState, ops: readonly WalOp[], timestamp: string): void {
+  for (const receiptOp of ops.filter(
+    (op): op is Extract<WalOp, { op: 'case_session_provenance.issue' }> =>
+      op.op === 'case_session_provenance.issue',
+  )) {
+    const consume = ops.find(
+      (op): op is Extract<WalOp, { op: 'case_session_handoff.consume' }> =>
+        op.op === 'case_session_handoff.consume' && op.handoff_id === receiptOp.receipt.handoff_id,
+    );
+    if (consume === undefined || consume.consumed_at !== timestamp) {
+      fail('transaction-shape', 'case-session provenance must accompany handoff consumption');
+    }
+  }
+  for (const releaseOp of ops.filter(
+    (op): op is Extract<WalOp, { op: 'output_release.issue' }> => op.op === 'output_release.issue',
+  )) {
+    const completion = ops.find(
+      (op): op is Extract<WalOp, { op: 'model_call.complete' }> =>
+        op.op === 'model_call.complete' &&
+        op.call_id === releaseOp.release.call_id &&
+        op.outcome === 'admitted',
+    );
+    if (completion === undefined || completion.completed_at !== timestamp) {
+      fail('transaction-shape', 'output release issue must accompany admitted model-call completion');
+    }
+  }
+  for (const completion of ops.filter(
+    (op): op is Extract<WalOp, { op: 'model_call.complete' }> =>
+      op.op === 'model_call.complete' && op.outcome === 'admitted',
+  )) {
+    const call = state.modelCalls.get(completion.call_id);
+    if (
+      call?.state === 'open' &&
+      call.ingress_binding !== null &&
+      !ops.some(
+        (op) => op.op === 'output_release.issue' && op.release.call_id === completion.call_id,
+      )
+    ) {
+      fail('transaction-shape', 'admitted message-bound call must issue exactly one output release');
+    }
+  }
+  for (const eventOp of ops.filter(
+    (op): op is Extract<WalOp, { op: 'conversation.event.append' }> => op.op === 'conversation.event.append',
+  )) {
+    if (!ops.some((op) => op.op === 'store.put' && op.entry.item.id === eventOp.event.item_id)) {
+      fail('transaction-shape', 'conversation ingress event must accompany its store item');
+    }
+  }
+  for (const consumeOp of ops.filter(
+    (op): op is Extract<WalOp, { op: 'output_release.consume' }> => op.op === 'output_release.consume',
+  )) {
+    const event = ops.find(
+      (op): op is Extract<WalOp, { op: 'conversation.event.append' }> =>
+        op.op === 'conversation.event.append' &&
+        op.event.kind === 'model_output_ingress' &&
+        op.event.release_id === consumeOp.release_id,
+    );
+    if (
+      event === undefined ||
+      event.event.item_id !== consumeOp.result.item_id ||
+      event.event.event_id !== consumeOp.result.event_id
+    ) {
+      fail('transaction-shape', 'output release consumption must accompany its exact ingress event');
+    }
+  }
   const selections = ops.filter((op): op is Extract<WalOp, { op: 'model_selection.append' }> =>
     op.op === 'model_selection.append',
   );
@@ -1067,7 +1391,15 @@ export function applyWorldTransaction(state: WorldState, ops: readonly WalOp[], 
     fail('clock-regression', `transaction timestamp ${timestamp} precedes ${state.lastTimestamp}`);
   }
   validateTransactionShape(state, ops, timestamp);
+  const changedCases = new Set(
+    ops.flatMap((op) =>
+      op.op === 'store.put' ? [op.entry.case_id] : op.op === 'store.remove' ? [op.case_id] : [],
+    ),
+  );
   for (const op of ops) applyWorldOp(state, op, timestamp);
+  for (const caseId of changedCases) {
+    state.conversationVersionByCase.set(caseId, (state.conversationVersionByCase.get(caseId) ?? 0) + 1);
+  }
   state.lastTimestamp = timestamp;
   validateWorldState(state);
 }
@@ -1085,6 +1417,53 @@ export function validateWorldState(state: WorldState): void {
   for (const call of state.modelCalls.values()) {
     if (call.state === 'open' && state.currentModelSelectionByCase.get(call.case_id) !== call.selection_id) {
       fail('stale-open-call', `open model call ${call.call_id} is bound to a stale selection`);
+    }
+  }
+  for (const receipt of state.caseSessionProvenance.values()) {
+    const handoff = state.caseSessionHandoffs.get(receipt.handoff_id);
+    if (
+      handoff === undefined ||
+      handoff.state !== 'consumed' ||
+      handoff.world_id !== receipt.world_id ||
+      handoff.case_id !== receipt.case_id ||
+      handoff.role !== receipt.role ||
+      handoff.target_origin !== receipt.target_origin ||
+      handoff.authorization_boot_id !== receipt.authorization_boot_id
+    ) {
+      fail('orphan-state', `case-session provenance receipt ${receipt.session_id} has no matching handoff`);
+    }
+  }
+  for (const event of state.conversationEvents.values()) {
+    const item = state.storeItems.get(event.item_id);
+    if (item !== undefined && item.case_id !== event.case_id) {
+      fail('orphan-state', `conversation event ${event.event_id} has a cross-case store item`);
+    }
+  }
+  for (const release of state.outputReleases.values()) {
+    const call = state.modelCalls.get(release.call_id);
+    if (call === undefined || call.ingress_binding === null || call.case_id !== release.case_id) {
+      fail('orphan-state', `output release ${release.release_id} has no matching message-bound call`);
+    }
+    if (release.state === 'consumed') {
+      const result = release.consumption_result;
+      const event = result === null ? undefined : state.conversationEvents.get(result.event_id);
+      if (result === null || event?.kind !== 'model_output_ingress' || event.release_id !== release.release_id) {
+        fail('orphan-state', `consumed output release ${release.release_id} has no matching ingress event`);
+      }
+    }
+    if (release.state === 'issued') {
+      const mandateStatus = state.mandateStatus.get(release.mandate_id);
+      if (
+        state.currentModelSelectionByCase.get(release.case_id) !== release.selection_id ||
+        mandateStatus?.state !== 'active' ||
+        mandateStatus.version !== release.mandate_version ||
+        state.policy === undefined ||
+        state.policy.policy_version !== release.policy_version ||
+        state.policy.policy_content_digest !== release.policy_content_digest ||
+        state.policy.evaluator_build_id !== release.evaluator_build_id
+      ) {
+        fail('stale-output-release', `issued output release ${release.release_id} is not current`);
+      }
     }
   }
   for (const nonce of state.nonces.values()) {

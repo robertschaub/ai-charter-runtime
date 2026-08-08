@@ -104,7 +104,7 @@ configurations and keys as its exclusive child-environment custody, reuses only 
 call-begin, output-admission, and failure routes, and returns metadata-only disclosure status. `/messages`, output
 release, conversation ingestion, and every authority-bearing route remain closed.
 
-**Proposed amendment (M5.10 conversation ingestion and output release):** ADR-012 activates a message-bound
+**Implementation candidate amendment (M5.10 conversation ingestion and output release):** ADR-012 activates a message-bound
 two-step browser turn, authorization-owned `said` ingestion, an admission-issued single-use output release, and an
 authorization-produced transcript. The orchestrator transports raw content only between the exact case session,
 selected provider, quarantine, and authorization conversation store; it cannot assign tags/provenance, promote

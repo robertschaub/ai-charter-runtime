@@ -39,6 +39,29 @@
         <p id="model-turn-status" class="status" aria-live="polite">Select a model before preparing a run.</p>
         <pre id="model-turn-metadata" class="evidence" tabindex="0" hidden></pre>
 
+        <h2>Governed case conversation</h2>
+        <p>
+          Messages are ingested by authorization before provider contact. Generated text appears here only after
+          a single-use release is consumed into the authorization-owned inferred store.
+        </p>
+        <div id="conversation-transcript" class="collection" aria-live="polite">
+          <p>Loading the authorization transcript.</p>
+        </div>
+        <p id="conversation-version" class="status" aria-live="polite"></p>
+        <label for="case-message">Case-officer message</label>
+        <textarea id="case-message" rows="5" maxlength="8192" disabled></textarea>
+        <div class="model-actions">
+          <button id="prepare-message" type="button" disabled>Prepare message</button>
+          <button id="send-message" type="button" disabled>Send governed turn</button>
+        </div>
+        <p id="message-status" class="status" aria-live="polite">
+          Select a configured model lane before preparing a message.
+        </p>
+        <p class="boundary-note">
+          Generated inference is unconfirmed. Narrow admission checks do not make it fact, advice, authorization,
+          red-line clearance, independent review, or assurance.
+        </p>
+
         <h2>Case gate state</h2>
         <div id="case-state" class="state" aria-live="polite">
           <p>No ruling is currently mirrored for this case.</p>
@@ -46,8 +69,8 @@
         <div id="dialogue-link" class="dialogue-link" aria-live="polite"></div>
         <p class="boundary-note">
           Selection changes only the current principal-approved lane. It creates no action authority and sends no
-          model request. A separate two-step run may contact the selected provider, but output release and message
-          ingestion remain inactive.
+          model request. The separate two-step message flow may contact the configured selected provider; it still
+          creates no ruling, confirmation, permission, commitment, or effect.
         </p>
       </section>
       <button id="close-session" type="button" disabled>Close session</button>

@@ -601,7 +601,7 @@ describe('ADR-002 and ADR-010 real-listener browser boundary', () => {
         { message: 'Synthetic message.' },
         { token: created.session_token, requestOrigin: orchestratorOrigin },
       );
-      expect(messages.status).toBe(501);
+      expect(messages.status).toBe(422);
       expect(
         (
           await postJson(

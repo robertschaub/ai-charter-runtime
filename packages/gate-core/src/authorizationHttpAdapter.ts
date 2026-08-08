@@ -7,6 +7,7 @@ import {
   role,
   worldId,
   type CredentialLabel,
+  type ConversationTransportAccessEvidence,
   type ModelCallAccessEvidence,
   type ModelSelectionAccessEvidence,
 } from './schemas/index.js';
@@ -125,6 +126,42 @@ export const AUTHORIZATION_ROUTES = [
     id: 'conversation.admit-output',
     method: 'POST',
     template: '/w/{world_id}/model-outputs/admit',
+    allowed: ['proc:orchestrator'],
+    authorityChanging: false,
+    originGuarded: true,
+    accessLoggedOnServe: true,
+  },
+  {
+    id: 'conversation.message-ingress',
+    method: 'POST',
+    template: '/w/{world_id}/cases/{case_id}/conversation/messages',
+    allowed: ['proc:orchestrator'],
+    authorityChanging: false,
+    originGuarded: true,
+    accessLoggedOnServe: true,
+  },
+  {
+    id: 'output-release.consume',
+    method: 'POST',
+    template: '/w/{world_id}/model-output-releases/{id}/consume',
+    allowed: ['proc:orchestrator'],
+    authorityChanging: false,
+    originGuarded: true,
+    accessLoggedOnServe: true,
+  },
+  {
+    id: 'output-release.read',
+    method: 'GET',
+    template: '/w/{world_id}/model-output-releases/{id}',
+    allowed: ['proc:orchestrator'],
+    authorityChanging: false,
+    originGuarded: true,
+    accessLoggedOnServe: true,
+  },
+  {
+    id: 'conversation.read',
+    method: 'GET',
+    template: '/w/{world_id}/cases/{case_id}/conversation',
     allowed: ['proc:orchestrator'],
     authorityChanging: false,
     originGuarded: true,
@@ -283,6 +320,8 @@ export interface AuthorizationAdapterContext {
   readonly routeId: string;
   readonly worldId: string | null;
   readonly actor: TransactionActor | null;
+  /** Parsed process-carried lookup key; never self-authenticating authority. */
+  readonly sessionId: string | null;
   /** Named route parameters, schema-validated by the adapter; wildcard tails are excluded. */
   readonly params: Readonly<Record<string, string>>;
 }
@@ -291,7 +330,10 @@ export interface AuthorizationOperationResult<T> {
   readonly status: number;
   readonly body: T;
   readonly readLengths?: Readonly<Record<string, number>>;
-  readonly accessEvidence?: ModelCallAccessEvidence | ModelSelectionAccessEvidence;
+  readonly accessEvidence?:
+    | ModelCallAccessEvidence
+    | ModelSelectionAccessEvidence
+    | ConversationTransportAccessEvidence;
 }
 
 export interface AuthorizationAdapterResponse<T> {
@@ -490,7 +532,13 @@ export class AuthorizationHttpAdapter {
     await this.#rollUnauthenticatedWindow(now);
 
     if (route.allowed === 'open') {
-      const result = await operation({ routeId: route.id, worldId: null, actor: null, params: validatedParams });
+      const result = await operation({
+        routeId: route.id,
+        worldId: null,
+        actor: null,
+        sessionId: null,
+        params: validatedParams,
+      });
       return { status: result.status, body: result.body, routeId: route.id };
     }
 
@@ -543,7 +591,14 @@ export class AuthorizationHttpAdapter {
       return deny(403, 'forbidden');
     }
 
-    const result = await operation({ routeId: route.id, worldId: requestedWorld, actor, params: validatedParams });
+    const parsedSession = id.safeParse(request.sessionId);
+    const result = await operation({
+      routeId: route.id,
+      worldId: requestedWorld,
+      actor,
+      sessionId: parsedSession.success ? parsedSession.data : null,
+      params: validatedParams,
+    });
     if (result.status === 401 || result.status === 403 || result.status === 422 || route.accessLoggedOnServe === true) {
       await this.#authorization.recordAccess({
         route: routeLabel,

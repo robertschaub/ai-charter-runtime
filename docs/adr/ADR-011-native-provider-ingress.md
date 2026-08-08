@@ -6,7 +6,7 @@ bounded implementation `e58d397` passed exact-SHA adversarial review with GO —
 **Spec:** §3 (orchestrator, model adapter, and case console), §4 (model-call and system-use bindings),
 §5 (entry boundary, model selection, and fail-closed provider behavior), §7 beats 14 and 19–21, and §10 M5.
 
-**Proposed follow-on (M5.10):** ADR-012 defines a separate message-bound call type and authorization-issued
+**Implementation candidate follow-on (M5.10):** ADR-012 defines a separate message-bound call type and authorization-issued
 single-use release. It activates the bounded `/messages` path and changes `model_interaction_available` only for
 that path after the authorization service durably ingests the released output; the browser receives only
 authorization's exact-key transcript projection, never the prompt or raw provider response. Existing

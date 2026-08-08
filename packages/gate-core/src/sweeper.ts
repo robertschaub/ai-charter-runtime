@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto';
 
 import { bindMandate, type IdFactory } from './authorizationCore.js';
 import { escalationPatternRequiresNarrowing } from './evaluator.js';
+import { outputReleaseInvalidationOps } from './conversationInvalidation.js';
 import type { Keyring } from './keyring.js';
 import type { LoadedPolicy } from './policyLoader.js';
 import type { Disposition, GateRuling, Mandate, PatternEvent, RecordEntry, WalOp } from './schemas/index.js';
@@ -168,6 +169,14 @@ export async function runSweeper(
       for (const ruling of state.rulings.values()) {
         if (ruling.binding.mandate_id === mandateId) endIssuedRuling(ruling, 'mandate-expiry', true);
       }
+      ops.push(
+        ...outputReleaseInvalidationOps(
+          state,
+          (release) => release.mandate_id === mandateId && release.mandate_version === status.version,
+          'mandate-expiry',
+          at,
+        ),
+      );
       ops.push({ op: 'mandate.expire', mandate_id: mandateId, version: status.version, expired_at: at });
       expiredMandates += 1;
     }
@@ -192,6 +201,14 @@ export async function runSweeper(
           endIssuedRuling(ruling, 'escalation-pattern-narrowing', false);
         }
       }
+      ops.push(
+        ...outputReleaseInvalidationOps(
+          state,
+          (release) => release.mandate_id === mandateId,
+          'escalation-pattern-narrowing',
+          at,
+        ),
+      );
       ops.push({
         op: 'mandate.amend',
         mandate: bindMandate(keyring, {

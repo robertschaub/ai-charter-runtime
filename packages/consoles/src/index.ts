@@ -5,6 +5,7 @@ export * from './modelTurnCoordinator.js';
 export * from './caseSessionStore.js';
 export * from './caseModelSelection.js';
 export * from './caseModelTurn.js';
+export * from './caseConversation.js';
 export * from './nativeModelLanes.js';
 export * from './caseConsoleState.js';
 export * from './orchestratorHttpServer.js';

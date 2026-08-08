@@ -26,6 +26,12 @@ import {
   reviewObligation,
 } from './state.js';
 import { conversationStoreEntry } from './store.js';
+import {
+  caseSessionProvenanceReceipt,
+  conversationIngressEvent,
+  outputReleaseConsumptionResult,
+  outputReleaseRecord,
+} from './conversationTransport.js';
 import { systemUseDecisionRecord, systemUseDecisionStatus } from './systemUseDecision.js';
 
 const transitionReason = z.string().min(1);
@@ -47,6 +53,8 @@ export const walOp = z.discriminatedUnion('op', [
   z.object({ op: z.literal('case_session_handoff.issue'), handoff: caseSessionHandoffRecord }).strict(),
   z.object({ op: z.literal('case_session_handoff.consume'), handoff_id: id, consumed_at: timestamp }).strict(),
   z.object({ op: z.literal('case_session_handoff.expire'), handoff_id: id }).strict(),
+  z.object({ op: z.literal('case_session_provenance.issue'), receipt: caseSessionProvenanceReceipt }).strict(),
+  z.object({ op: z.literal('case_session_provenance.expire'), session_id: id }).strict(),
 
   z.object({ op: z.literal('nonce.issue'), nonce: nonceRecord }).strict(),
   z.object({ op: z.literal('nonce.consume'), nonce_id: id }).strict(),
@@ -123,6 +131,7 @@ export const walOp = z.discriminatedUnion('op', [
 
   z.object({ op: z.literal('store.put'), entry: conversationStoreEntry }).strict(),
   z.object({ op: z.literal('store.remove'), case_id: id, item_id: id, reason: transitionReason }).strict(),
+  z.object({ op: z.literal('conversation.event.append'), event: conversationIngressEvent }).strict(),
   z.object({ op: z.literal('pattern.record'), event: patternEvent }).strict(),
   z.object({ op: z.literal('model_selection_check.issue'), check: modelSelectionCheckRecord }).strict(),
   z
@@ -150,6 +159,30 @@ export const walOp = z.discriminatedUnion('op', [
       served_id: modelId.nullable(),
       failure_reason: modelCallFailureReason,
       completed_at: timestamp,
+    })
+    .strict(),
+  z.object({ op: z.literal('output_release.issue'), release: outputReleaseRecord }).strict(),
+  z
+    .object({
+      op: z.literal('output_release.consume'),
+      release_id: id,
+      result: outputReleaseConsumptionResult,
+    })
+    .strict(),
+  z
+    .object({
+      op: z.literal('output_release.invalidate'),
+      release_id: id,
+      reason: transitionReason,
+      changed_at: timestamp,
+    })
+    .strict(),
+  z
+    .object({
+      op: z.literal('output_release.expire'),
+      release_id: id,
+      authorization_boot_id: id,
+      changed_at: timestamp,
     })
     .strict(),
   z.object({ op: z.literal('review.open'), obligation: reviewObligation }).strict(),

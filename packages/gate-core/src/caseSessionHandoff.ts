@@ -5,6 +5,7 @@ import { randomBytes, randomUUID } from 'node:crypto';
 import { sha256Hex, verifyDigest } from './hash.js';
 import {
   browserOrigin,
+  caseSessionProvenanceReceipt,
   caseSessionHandoffRecord,
   id,
   worldId,
@@ -28,6 +29,7 @@ export interface CaseSessionHandoffServiceOptions {
   readonly ttlMs?: number;
   readonly randomCode?: () => string;
   readonly nextHandoffId?: () => string;
+  readonly provenanceTtlMs?: number;
 }
 
 export interface MintedCaseSessionHandoff {
@@ -49,6 +51,7 @@ export interface RedeemCaseSessionHandoffInput {
   readonly case_id: string;
   readonly target_origin: string;
   readonly authorization_boot_id: string;
+  readonly session_id: string;
 }
 
 export interface RedeemedCaseSessionClaim {
@@ -92,6 +95,23 @@ function expiryOps(
     .map((handoff) => ({ op: 'case_session_handoff.expire' as const, handoff_id: handoff.handoff_id }));
 }
 
+function provenanceExpiryOps(
+  receipts: ReadonlyMap<string, import('./schemas/index.js').CaseSessionProvenanceReceipt>,
+  bootId: string,
+  at: string,
+): WalOp[] {
+  return [...receipts.values()]
+    .filter(
+      (receipt) =>
+        receipt.state === 'active' &&
+        (receipt.authorization_boot_id !== bootId || receipt.expires_at <= at),
+    )
+    .map((receipt) => ({
+      op: 'case_session_provenance.expire' as const,
+      session_id: receipt.session_id,
+    }));
+}
+
 export class CaseSessionHandoffService {
   readonly #store: WalStore;
   readonly #worldId: string;
@@ -101,6 +121,7 @@ export class CaseSessionHandoffService {
   readonly #ttlMs: number;
   readonly #randomCode: () => string;
   readonly #nextHandoffId: () => string;
+  readonly #provenanceTtlMs: number;
 
   constructor(options: CaseSessionHandoffServiceOptions) {
     this.#store = options.store;
@@ -114,11 +135,18 @@ export class CaseSessionHandoffService {
     }
     this.#randomCode = options.randomCode ?? (() => randomBytes(32).toString('hex'));
     this.#nextHandoffId = options.nextHandoffId ?? (() => `handoff_${randomUUID().replaceAll('-', '')}`);
+    this.#provenanceTtlMs = options.provenanceTtlMs ?? 15 * 60 * 1_000;
+    if (!Number.isInteger(this.#provenanceTtlMs) || this.#provenanceTtlMs < 1 || this.#provenanceTtlMs > 15 * 60 * 1_000) {
+      throw new RangeError('case-session provenance TTL must be an integer from 1 through 900000 milliseconds');
+    }
   }
 
   async expireIssued(): Promise<number> {
     const completed = await this.#store.transactWithState('case_session_handoff_expire', MAINTENANCE_ACTOR, (state, at) => {
-      const ops = expiryOps(state.caseSessionHandoffs, this.#bootId, at);
+      const ops = [
+        ...expiryOps(state.caseSessionHandoffs, this.#bootId, at),
+        ...provenanceExpiryOps(state.caseSessionProvenance, this.#bootId, at),
+      ];
       return { ops, result: ops.length };
     });
     return completed.result;
@@ -150,7 +178,11 @@ export class CaseSessionHandoffService {
         state: 'issued',
       });
       return {
-        ops: [...expiryOps(state.caseSessionHandoffs, this.#bootId, at), { op: 'case_session_handoff.issue', handoff }],
+        ops: [
+          ...expiryOps(state.caseSessionHandoffs, this.#bootId, at),
+          ...provenanceExpiryOps(state.caseSessionProvenance, this.#bootId, at),
+          { op: 'case_session_handoff.issue', handoff },
+        ],
         result: undefined,
       };
     });
@@ -172,13 +204,17 @@ export class CaseSessionHandoffService {
   async redeem(input: RedeemCaseSessionHandoffInput, actor: TransactionActor): Promise<RedeemedCaseSessionClaim> {
     assertActor(actor, REDEEM_ACTOR);
     const handoffId = id.parse(input.handoff_id);
+    const sessionId = id.parse(input.session_id);
     const suppliedDigest = sha256Hex(input.handoff_code);
     const completed = await this.#store.transactWithState<
       | { readonly accepted: false }
       | { readonly accepted: true; readonly claim: RedeemedCaseSessionClaim }
     >('case_session_handoff_redeem', actor, (state, at) => {
       const current = state.caseSessionHandoffs.get(handoffId);
-      const ops = expiryOps(state.caseSessionHandoffs, this.#bootId, at);
+      const ops = [
+        ...expiryOps(state.caseSessionHandoffs, this.#bootId, at),
+        ...provenanceExpiryOps(state.caseSessionProvenance, this.#bootId, at),
+      ];
       const expiringTarget = ops.some(
         (op) => op.op === 'case_session_handoff.expire' && op.handoff_id === handoffId,
       );
@@ -195,6 +231,13 @@ export class CaseSessionHandoffService {
       ) {
         return { ops, result: { accepted: false } };
       }
+      const existingReceipt = state.caseSessionProvenance.get(sessionId);
+      const expiringReceipt = ops.some(
+        (op) => op.op === 'case_session_provenance.expire' && op.session_id === sessionId,
+      );
+      if (existingReceipt !== undefined && existingReceipt.state === 'active' && !expiringReceipt) {
+        return { ops, result: { accepted: false } };
+      }
       const claim: RedeemedCaseSessionClaim = {
         handoff_id: current.handoff_id,
         role: current.role,
@@ -205,7 +248,25 @@ export class CaseSessionHandoffService {
         consumed_at: at,
       };
       return {
-        ops: [...ops, { op: 'case_session_handoff.consume', handoff_id: handoffId, consumed_at: at }],
+        ops: [
+          ...ops,
+          { op: 'case_session_handoff.consume', handoff_id: handoffId, consumed_at: at },
+          {
+            op: 'case_session_provenance.issue',
+            receipt: caseSessionProvenanceReceipt.parse({
+              world_id: current.world_id,
+              session_id: sessionId,
+              handoff_id: current.handoff_id,
+              role: current.role,
+              case_id: current.case_id,
+              target_origin: current.target_origin,
+              authorization_boot_id: current.authorization_boot_id,
+              issued_at: at,
+              expires_at: new Date(Date.parse(at) + this.#provenanceTtlMs).toISOString(),
+              state: 'active',
+            }),
+          },
+        ],
         result: { accepted: true, claim },
       };
     });

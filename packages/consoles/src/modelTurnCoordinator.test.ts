@@ -12,8 +12,9 @@ import {
   AuthorizationReadSide,
   bindMandate,
   CardRegistry,
-  type CaseSessionHandoffService,
+  CaseSessionHandoffService,
   ConversationProjectionService,
+  ConversationTransportService,
   digestFor,
   Keyring,
   loadPolicyFile,
@@ -30,9 +31,10 @@ import {
   ModelOutputQuarantine,
   ModelTurnCoordinator,
   ModelTurnError,
+  type ModelTurnAuthorizationClient,
   type ModelTurnLaneConfig,
 } from './modelTurnCoordinator.js';
-import { OrchestratorAuthorizationHttpClient } from './runtimeHttpClients.js';
+import { OrchestratorAuthorizationHttpClient, RuntimeDependencyError } from './runtimeHttpClients.js';
 
 const ROOT = fileURLToPath(new URL('../../..', import.meta.url));
 const POLICY_FILE = join(ROOT, 'packages', 'gate-core', 'policy', 'v1.yaml');
@@ -49,6 +51,8 @@ const ROLE_TOKENS = {
 } as const;
 const AUTHZ = { credential: 'proc:authz', claimed_role: null } as const;
 const PRINCIPAL = { credential: 'role:principal', claimed_role: 'principal' } as const;
+const CASE_OFFICER = { credential: 'role:case_officer', claimed_role: 'case_officer' } as const;
+const ORCHESTRATOR = { credential: 'proc:orchestrator', claimed_role: null } as const;
 const roots: string[] = [];
 const stores: WalStore[] = [];
 const closeables: Array<() => Promise<void>> = [];
@@ -136,6 +140,7 @@ async function loopbackProvider(): Promise<LoopbackProvider> {
 async function authorizationHarness() {
   const root = mkdtempSync(join(tmpdir(), 'model-turn-coordinator-'));
   roots.push(root);
+  let at = '2026-08-01T09:00:00.000Z';
   const buildDigest = digestFor('evaluator-build', { package: 'runtime-consoles', test: 'model-turn-coordinator' });
   const policy = loadPolicyFile(POLICY_FILE, buildDigest);
   const keyring = new Keyring(new Map([[KEY_ID, KEY]]), KEY_ID);
@@ -147,7 +152,7 @@ async function authorizationHarness() {
     policyVersion: policy.policy.policy_version,
     policyContentDigest: policy.policyContentDigest,
     evaluatorBuildDigest: buildDigest,
-    now: () => '2026-08-01T09:00:00.000Z',
+    now: () => at,
   });
   stores.push(store);
   const systemUse = syntheticSystemUseForTests(store);
@@ -180,15 +185,38 @@ async function authorizationHarness() {
     origin_actor: 'applicant',
   };
   await core.putConversationItems({ caseId: 'case_demo', items: [...conversation, restricted], actor: AUTHZ });
+  const cards = CardRegistry.load(CARDS);
+  const conversationTransport = new ConversationTransportService({
+    store,
+    cards,
+    keyring,
+    systemUse,
+    caseId: 'case_demo',
+    authorizationBootId: 'authz_boot_model_turn_1',
+    now: () => at,
+  });
+  const handoffs = new CaseSessionHandoffService({
+    store,
+    worldId: 'w-demo',
+    authorizationBootId: 'authz_boot_model_turn_1',
+    targetOrigin: 'http://127.0.0.1:7802',
+    caseExists: (caseId) => caseId === 'case_demo',
+  });
+  const minted = await handoffs.mint('case_demo', CASE_OFFICER);
+  const { expires_at: ignoredHandoffExpiry, ...handoffInput } = minted;
+  void ignoredHandoffExpiry;
+  const sessionId = 'session_message_turn';
+  await handoffs.redeem({ ...handoffInput, session_id: sessionId }, ORCHESTRATOR);
   const projections = new ConversationProjectionService({
     store,
-    cards: CardRegistry.load(CARDS),
+    cards,
     keyring,
     caseId: 'case_demo',
     authorizationBootId: 'authz_boot_model_turn_1',
     screeningFixtures: [],
     systemUse,
-    now: () => '2026-08-01T09:00:00.000Z',
+    conversationTransport,
+    now: () => at,
   });
   const adapter = new AuthorizationHttpAdapter({
     authorization: core,
@@ -205,6 +233,7 @@ async function authorizationHarness() {
   const server = new AuthorizationHttpServer({
     authorization: core,
     conversationProjections: projections,
+    conversationTransport,
     reads: {} as AuthorizationReadSide,
     adapter,
     keyring,
@@ -241,6 +270,11 @@ async function authorizationHarness() {
     authorizationOrigin: address.origin,
     mandateBody,
     selectionId: selected.selection.selection_id,
+    sessionId,
+    conversationTransport,
+    setAt(value: string) {
+      at = value;
+    },
   };
 }
 
@@ -274,12 +308,16 @@ const turnBase = {
 } as const;
 
 describe('M5.4 containment with M5.5 durable model-call evidence', () => {
-  it('enforces the three selection routes on a real listener and access-records only bounded evidence', async () => {
+  it('enforces selection and conversation transport routes on a real listener with bounded access evidence', async () => {
     const h = await authorizationHarness();
     const routes = [
       { method: 'GET', path: '/w/w-demo/cases/case_demo/model-selection' },
       { method: 'POST', path: '/w/w-demo/cases/case_demo/model-selection-checks' },
       { method: 'POST', path: '/w/w-demo/cases/case_demo/model-selections' },
+      { method: 'POST', path: '/w/w-demo/cases/case_demo/conversation/messages', requiresSession: true },
+      { method: 'POST', path: '/w/w-demo/model-output-releases/rel_denied/consume', requiresSession: true },
+      { method: 'GET', path: '/w/w-demo/model-output-releases/rel_denied', requiresSession: true },
+      { method: 'GET', path: '/w/w-demo/cases/case_demo/conversation', requiresSession: true },
     ] as const;
     const nonOrchestratorTokens = [
       ROLE_TOKENS.principal,
@@ -303,6 +341,7 @@ describe('M5.4 containment with M5.5 durable model-call evidence', () => {
         expect((await request(route, token)).status, `${route.method} ${route.path}`).toBe(403);
       }
       expect((await request(route, ORCHESTRATOR_TOKEN, {}, 'http://foreign.invalid')).status).toBe(403);
+      if ('requiresSession' in route) expect((await request(route, ORCHESTRATOR_TOKEN)).status).toBe(403);
     }
 
     const read = await request(routes[0], ORCHESTRATOR_TOKEN);
@@ -899,5 +938,268 @@ describe('M5.4 containment with M5.5 durable model-call evidence', () => {
     });
     expect(JSON.stringify(h.store.snapshot().accessRecords)).not.toContain(toolContent);
     expect(JSON.stringify(h.store.snapshot().accessRecords)).not.toContain(bindingContent);
+  });
+
+  it('ingests one session-bound message and releases admitted bytes only through the durable transcript', async () => {
+    const h = await authorizationHarness();
+    const provider = await loopbackProvider();
+    const content = 'Synthetic released inference for the case officer.';
+    provider.enqueue({ model: h.mandateBody.default_acting_model.requested_id, content });
+    const coordinator = new ModelTurnCoordinator({
+      worldId: 'w-demo',
+      caseId: 'case_demo',
+      authorization: h.authorization,
+      lanes: [lane(provider)],
+    });
+    const message = 'Please summarize only the synthetic case evidence.';
+    const claim = { role: 'case_officer' as const, session_id: h.sessionId };
+    const outcome = await coordinator.runMessage(
+      {
+        messageId: 'msg_release_1',
+        text: message,
+        turnId: 'turn_release_1',
+        selectionId: h.selectionId,
+        cardId: h.mandateBody.default_acting_model.card_id,
+        cardVersion: h.mandateBody.default_acting_model.card_version,
+        requestedId: h.mandateBody.default_acting_model.requested_id,
+        maxOutputTokens: 256,
+      },
+      { onBehalfOf: claim },
+    );
+    expect(outcome.disposition).toBe('released');
+    expect(coordinator.quarantine.size).toBe(0);
+    expect(provider.requests).toHaveLength(1);
+    const snapshot = h.store.snapshot();
+    expect(snapshot.conversationVersionByCase.get('case_demo')).toBe(3);
+    expect([...snapshot.conversationEvents.values()].map((event) => event.kind)).toEqual([
+      'message_ingress',
+      'model_output_ingress',
+    ]);
+    expect([...snapshot.outputReleases.values()]).toHaveLength(1);
+    const release = [...snapshot.outputReleases.values()][0];
+    expect(release).toMatchObject({ state: 'consumed', session_id: h.sessionId, message_id: 'msg_release_1' });
+    const processProjection = await h.authorization.conversation('w-demo', 'case_demo', claim);
+    expect(processProjection.events).toEqual([
+      expect.objectContaining({ speaker: 'case_officer', message_id: 'msg_release_1', text: message }),
+      expect.objectContaining({
+        speaker: 'model',
+        message_id: 'msg_release_1',
+        text: content,
+        classification: 'inferred-unconfirmed',
+      }),
+    ]);
+    expect(JSON.stringify(snapshot.accessRecords)).not.toContain(message);
+    expect(JSON.stringify(snapshot.accessRecords)).not.toContain(content);
+    if (release === undefined || outcome.disposition !== 'released') throw new Error('expected consumed release');
+    await expect(
+      h.authorization.consumeOutputRelease('w-demo', release.release_id, content, claim),
+    ).resolves.toEqual(outcome.ingestion);
+    await expect(
+      h.authorization.consumeOutputRelease('w-demo', release.release_id, `${content} changed`, claim),
+    ).rejects.toBeInstanceOf(RuntimeDependencyError);
+    const replay = await h.authorization.ingestConversationMessage(
+      'w-demo',
+      'case_demo',
+      { message_id: 'msg_release_1', turn_id: 'turn_release_1', text: message },
+      claim,
+    );
+    expect(replay.conversation_version).toBe(2);
+    expect(h.store.snapshot().conversationVersionByCase.get('case_demo')).toBe(3);
+  });
+
+  it('allows new ingress after an open call expires while refusing its late admission and release', async () => {
+    const h = await authorizationHarness();
+    const claim = { role: 'case_officer' as const, session_id: h.sessionId };
+    const first = await h.authorization.ingestConversationMessage(
+      'w-demo',
+      'case_demo',
+      {
+        message_id: 'msg_expired_call_one',
+        turn_id: 'turn_expired_call_one',
+        text: 'Synthetic first message before the orchestrator stops.',
+      },
+      claim,
+    );
+    const started = await h.authorization.beginModelCall(
+      {
+        worldId: 'w-demo',
+        turnId: first.turn_id,
+        selectionId: h.selectionId,
+        ingressBinding: {
+          message_id: first.message_id,
+          message_item_id: first.message_item_id,
+          conversation_version: first.conversation_version,
+          message_digest: first.message_digest,
+        },
+      },
+      claim,
+    );
+    h.setAt(new Date(Date.parse(started.call.expires_at) + 1).toISOString());
+    await expect(
+      h.authorization.ingestConversationMessage(
+        'w-demo',
+        'case_demo',
+        {
+          message_id: 'msg_expired_call_two',
+          turn_id: 'turn_expired_call_two',
+          text: 'Synthetic second message after the first call TTL.',
+        },
+        claim,
+      ),
+    ).resolves.toMatchObject({ conversation_version: 3 });
+    await expect(
+      h.authorization.admitModelOutput(
+        'w-demo',
+        started.call.call_id,
+        {
+          turn_id: started.call.turn_id,
+          selection_id: started.call.selection_id,
+          mandate_id: started.call.mandate_id,
+          mandate_version: started.call.mandate_version,
+          card_id: started.call.card_id,
+          card_version: started.call.card_version,
+          requested_id: started.call.requested_id,
+          served_id: started.call.requested_id,
+          projection_digest: started.call.projection_digest,
+          content: 'Synthetic late output.',
+        },
+        claim,
+      ),
+    ).rejects.toMatchObject({ httpStatus: 422, responseCode: 'invalid-scope' });
+    expect(h.store.snapshot().modelCalls.get(started.call.call_id)).toMatchObject({
+      state: 'open',
+      outcome: 'indeterminate',
+    });
+    expect(h.store.snapshot().outputReleases.size).toBe(0);
+  });
+
+  it('recovers a lost consume response by status only, without retransmitting content or retrying the provider', async () => {
+    const h = await authorizationHarness();
+    const provider = await loopbackProvider();
+    const content = 'Synthetic output durably consumed before its HTTP response was lost.';
+    provider.enqueue({ model: h.mandateBody.default_acting_model.requested_id, content });
+    let dropConsumeResponse = true;
+    const lossyFetch: typeof fetch = async (input, init) => {
+      const response = await fetch(input, init);
+      const requested =
+        typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+      if (dropConsumeResponse && requested.endsWith('/consume')) {
+        dropConsumeResponse = false;
+        await response.arrayBuffer();
+        return new Response(JSON.stringify({ error: 'synthetic-post-commit-response-loss' }), {
+          status: 500,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      return response;
+    };
+    const lossyAuthorization = new OrchestratorAuthorizationHttpClient({
+      origin: h.authorizationOrigin,
+      token: ORCHESTRATOR_TOKEN,
+      fetchImplementation: lossyFetch,
+    });
+    const coordinator = new ModelTurnCoordinator({
+      worldId: 'w-demo',
+      caseId: 'case_demo',
+      authorization: lossyAuthorization,
+      lanes: [lane(provider)],
+    });
+    await expect(
+      coordinator.runMessage(
+        {
+          messageId: 'msg_lost_release_response',
+          text: 'Exercise status-only recovery with synthetic content.',
+          turnId: 'turn_lost_release_response',
+          selectionId: h.selectionId,
+          cardId: h.mandateBody.default_acting_model.card_id,
+          cardVersion: h.mandateBody.default_acting_model.card_version,
+          requestedId: h.mandateBody.default_acting_model.requested_id,
+          maxOutputTokens: 256,
+        },
+        { onBehalfOf: { role: 'case_officer', session_id: h.sessionId } },
+      ),
+    ).resolves.toMatchObject({ disposition: 'released', ingestion: { state: 'consumed' } });
+    expect(provider.requests).toHaveLength(1);
+    expect(coordinator.quarantine.size).toBe(0);
+    const releaseRoutes = h.store
+      .snapshot()
+      .accessRecords.filter(
+        (record): record is Extract<typeof record, { readonly route: string }> =>
+          'route' in record && record.route.includes('/model-output-releases/'),
+      );
+    expect(releaseRoutes.map((record) => record.route)).toEqual([
+      'POST /w/{world_id}/model-output-releases/{id}/consume',
+      'GET /w/{world_id}/model-output-releases/{id}',
+    ]);
+  });
+
+  it('fails closed without retransmission when conversation currentness changes after release issue', async () => {
+    const h = await authorizationHarness();
+    const provider = await loopbackProvider();
+    const content = 'Synthetic output that must never enter the inferred store.';
+    provider.enqueue({ model: h.mandateBody.default_acting_model.requested_id, content });
+    const authorization = new Proxy(h.authorization, {
+      get(target, property, receiver) {
+        if (property === 'admitModelOutput') {
+          return async (...args: Parameters<ModelTurnAuthorizationClient['admitModelOutput']>) => {
+            const result = await target.admitModelOutput(...args);
+            await h.core.putConversationItems({
+              caseId: 'case_demo',
+              items: [
+                {
+                  id: 'said_release_race',
+                  store: 'said',
+                  turn: 'turn_release_race_external',
+                  text: 'Synthetic authorization-owned mutation after release issue.',
+                  provenance: { derived_from: [], hops: [] },
+                  tags: ['conf:case', 'purpose:grant-assessment'],
+                  origin_actor: 'officer',
+                },
+              ],
+              actor: AUTHZ,
+            });
+            return result;
+          };
+        }
+        const value = Reflect.get(target, property, receiver) as unknown;
+        return typeof value === 'function' ? value.bind(target) : value;
+      },
+    }) as unknown as ModelTurnAuthorizationClient;
+    const coordinator = new ModelTurnCoordinator({
+      worldId: 'w-demo',
+      caseId: 'case_demo',
+      authorization,
+      lanes: [lane(provider)],
+    });
+    await expect(
+      coordinator.runMessage(
+        {
+          messageId: 'msg_release_race',
+          text: 'Trigger the synthetic currentness race.',
+          turnId: 'turn_release_race',
+          selectionId: h.selectionId,
+          cardId: h.mandateBody.default_acting_model.card_id,
+          cardVersion: h.mandateBody.default_acting_model.card_version,
+          requestedId: h.mandateBody.default_acting_model.requested_id,
+          maxOutputTokens: 256,
+        },
+        { onBehalfOf: { role: 'case_officer', session_id: h.sessionId } },
+      ),
+    ).rejects.toMatchObject({ code: 'authorization-refused', providerDisclosure: 'confirmed' });
+    expect(provider.requests).toHaveLength(1);
+    expect(coordinator.quarantine.size).toBe(0);
+    expect([...h.store.snapshot().outputReleases.values()]).toEqual([
+      expect.objectContaining({ state: 'invalidated', invalidation_reason: 'conversation-items-put' }),
+    ]);
+    expect([...h.store.snapshot().storeItems.values()].some((entry) => entry.item.text === content)).toBe(false);
+    const releaseRoutes = h.store
+      .snapshot()
+      .accessRecords.filter(
+        (record): record is Extract<typeof record, { readonly route: string }> =>
+          'route' in record && record.route.includes('/model-output-releases/'),
+      );
+    expect(releaseRoutes.map((record) => record.route)).toEqual([
+      'POST /w/{world_id}/model-output-releases/{id}/consume',
+    ]);
   });
 });

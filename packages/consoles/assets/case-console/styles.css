@@ -74,3 +74,23 @@ button {
 .dialogue-link {
   margin: 1rem 0;
 }
+
+textarea {
+  box-sizing: border-box;
+  width: 100%;
+  margin: 0.5rem 0 0.75rem;
+  padding: 0.75rem;
+  font: inherit;
+  resize: vertical;
+}
+
+.conversation-event {
+  padding: 0.85rem 1rem;
+  border: 1px solid color-mix(in srgb, CanvasText 18%, transparent);
+  border-radius: 0.5rem;
+}
+
+.conversation-event h3,
+.conversation-event p {
+  margin-top: 0;
+}

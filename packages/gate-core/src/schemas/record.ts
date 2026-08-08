@@ -24,6 +24,7 @@ import {
 import { disposition, interventionContract, standingClass } from './intervention.js';
 import { modelCallAccessEvidence } from './modelCall.js';
 import { modelSelectionAccessEvidence } from './modelSelection.js';
+import { conversationTransportAccessEvidence } from './conversationTransport.js';
 import { systemUseDecisionReference } from './systemUseDecision.js';
 
 export const EFFECT_OUTCOMES = ['success', 'failed', 'no-effect', 'unknown-reconciliation-required'] as const;
@@ -305,8 +306,10 @@ export const accessEntry = z
     suppression_final: z.boolean().optional(),
     /** ADR-003 step 6: verification records the lengths it read. */
     read_lengths: z.record(z.string(), integer.min(0)).optional(),
-    /** M5.3–M5.7: bounded lifecycle/selection metadata; raw provider material never enters the access chain. */
-    operation_evidence: z.union([modelCallAccessEvidence, modelSelectionAccessEvidence]).optional(),
+    /** Bounded lifecycle/selection/transport metadata; raw provider material never enters the access chain. */
+    operation_evidence: z
+      .union([modelCallAccessEvidence, modelSelectionAccessEvidence, conversationTransportAccessEvidence])
+      .optional(),
   })
   .strict()
   .superRefine((entry, ctx) => {
@@ -336,7 +339,15 @@ export const accessEntry = z
     if (entry.operation_evidence !== undefined) {
       const evidence = entry.operation_evidence;
       const expectedRoute =
-        evidence.kind === 'model_selection_read'
+        evidence.kind === 'conversation_message_ingress'
+          ? 'POST /w/{world_id}/cases/{case_id}/conversation/messages'
+          : evidence.kind === 'output_release_consumed'
+            ? 'POST /w/{world_id}/model-output-releases/{id}/consume'
+            : evidence.kind === 'output_release_status'
+              ? 'GET /w/{world_id}/model-output-releases/{id}'
+              : evidence.kind === 'conversation_read'
+                ? 'GET /w/{world_id}/cases/{case_id}/conversation'
+                : evidence.kind === 'model_selection_read'
           ? 'GET /w/{world_id}/cases/{case_id}/model-selection'
           : evidence.kind === 'model_selection_check'
             ? 'POST /w/{world_id}/cases/{case_id}/model-selection-checks'
@@ -344,9 +355,9 @@ export const accessEntry = z
               ? 'POST /w/{world_id}/cases/{case_id}/model-selections'
               : evidence.kind === 'model_call_admission'
                 ? 'POST /w/{world_id}/model-outputs/admit'
-                : evidence.outcome === 'indeterminate'
-                  ? 'POST /w/{world_id}/model-calls/begin'
-                  : 'POST /w/{world_id}/model-calls/failures';
+                  : evidence.outcome === 'indeterminate'
+                    ? 'POST /w/{world_id}/model-calls/begin'
+                    : 'POST /w/{world_id}/model-calls/failures';
       if (
         entry.route !== expectedRoute ||
         entry.authenticated_actor !== 'proc:orchestrator' ||

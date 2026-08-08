@@ -6,7 +6,7 @@ with GO — no findings (2026-08-06).
 **Spec:** §3 (case console and demo authentication), §5 (model navigation and **find → check → use**),
 §7 beats 19–21, and §10 M4–M5.
 
-**Proposed follow-on (M5.10):** ADR-012 activates the bounded `/messages` browser path and changes
+**Implementation candidate follow-on (M5.10):** ADR-012 activates the bounded `/messages` browser path and changes
 `model_interaction_available` only for a message-bound call whose output the authorization service has durably
 ingested. The browser still receives no prompt or raw provider response: it renders only authorization's exact-key
 transcript projection, with model text labelled `inferred-unconfirmed`.

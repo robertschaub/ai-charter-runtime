@@ -40,6 +40,12 @@ import {
   browserModelTurnUseRequest,
   CaseModelTurnStore,
 } from './caseModelTurn.js';
+import {
+  browserMessagePreparationRequest,
+  browserMessageUseRequest,
+  CaseConversationStore,
+  toBrowserConversation,
+} from './caseConversation.js';
 import { ModelTurnCoordinator, ModelTurnError } from './modelTurnCoordinator.js';
 
 const executeRequest = z
@@ -57,7 +63,6 @@ const caseSessionRedeemRequest = z
   })
   .strict();
 const closeSessionRequest = z.object({}).strict();
-const caseMessageRequest = z.object({ message: z.string().min(1).max(32_768) }).strict();
 
 async function readJson(request: IncomingMessage, maxBytes: number): Promise<unknown> {
   if (!request.headers['content-type']?.toLowerCase().startsWith('application/json')) throw new Error('json-required');
@@ -217,6 +222,7 @@ export interface OrchestratorHttpServerOptions {
   readonly caseSessions?: CaseSessionStore;
   readonly modelSelectionPreparations?: CaseModelSelectionPreparationStore;
   readonly modelTurns?: CaseModelTurnStore;
+  readonly caseConversations?: CaseConversationStore;
   readonly caseState?: CaseConsoleStateStore;
   readonly host: string;
   readonly port: number;
@@ -245,6 +251,7 @@ export class OrchestratorHttpServer {
     const sessions = options.caseSessions ?? new CaseSessionStore();
     const preparations = options.modelSelectionPreparations ?? new CaseModelSelectionPreparationStore();
     const modelTurns = options.modelTurns ?? new CaseModelTurnStore();
+    const conversations = options.caseConversations ?? new CaseConversationStore();
     const caseState = options.caseState ?? new CaseConsoleStateStore();
     const caseOperations = new CaseOperationMutex();
     const coordinator = options.modelTurnCoordinator;
@@ -255,7 +262,10 @@ export class OrchestratorHttpServer {
     this.#origin = options.port === 0 ? null : `http://${options.host}:${options.port}`;
     this.#cleanupTimer = coordinator === undefined
       ? null
-      : setInterval(() => modelTurns.expire(coordinator.quarantine), 1_000);
+      : setInterval(() => {
+          modelTurns.expire(coordinator.quarantine);
+          conversations.expire();
+        }, 1_000);
     this.#cleanupTimer?.unref();
     this.#cleanupRuntimeState = () => {
       if (coordinator === undefined) return;
@@ -263,6 +273,7 @@ export class OrchestratorHttpServer {
         modelTurns.discardSession(session.session_id, coordinator.quarantine);
       }
       coordinator.quarantine.clear();
+      conversations.clear();
     };
     this.#server = createServer((request, response) => {
       void (async () => {
@@ -319,8 +330,9 @@ export class OrchestratorHttpServer {
               return;
             }
             let claim;
+            const sessionId = sessions.generateSessionId();
             try {
-              claim = await options.authorization.redeemCaseSessionHandoff(parsed);
+              claim = await options.authorization.redeemCaseSessionHandoff({ ...parsed, session_id: sessionId });
             } catch {
               sendJson(response, 403, { error: 'handoff-refused' });
               return;
@@ -333,7 +345,7 @@ export class OrchestratorHttpServer {
               sendJson(response, 403, { error: 'handoff-refused' });
               return;
             }
-            sendJson(response, 201, sessions.create(claim));
+            sendJson(response, 201, sessions.create(claim, sessionId));
             return;
           }
           const closeMatch = /^\/w\/([^/]+)\/case-sessions\/close$/.exec(url.pathname);
@@ -361,6 +373,7 @@ export class OrchestratorHttpServer {
                 return;
               }
               preparations.burnForSession(session.session_id);
+              conversations.burnForSession(session.session_id);
               if (coordinator !== undefined) {
                 modelTurns.discardSession(session.session_id, coordinator.quarantine);
               }
@@ -387,7 +400,10 @@ export class OrchestratorHttpServer {
               return;
             }
             const presented = bearer(request.headers.authorization);
-            if (presented === null || sessions.authenticate(presented, configuredWorld, configuredCase) === null) {
+            const session = presented === null
+              ? null
+              : sessions.authenticate(presented, configuredWorld, configuredCase);
+            if (presented === null || session === null) {
               sendJson(response, 401, { error: 'unauthenticated' });
               return;
             }
@@ -396,7 +412,34 @@ export class OrchestratorHttpServer {
               tracked === null
                 ? undefined
                 : await options.authorization.rulingStatus(configuredWorld, tracked.rulingId);
-            sendJson(response, 200, caseState.project(configuredCase, authorizationOrigin, configuredWorld, current));
+            let modelInteractionAvailable = false;
+            if (coordinator !== undefined) {
+              try {
+                const selection = await options.authorization.currentModelSelection(configuredWorld, configuredCase);
+                assertCurrentSelectionBinding(selection, configuredWorld, configuredCase);
+                modelInteractionAvailable =
+                  selection.state === 'selected' &&
+                  selection.authorization_boot_id === session.authorization_boot_id &&
+                  coordinator.hasConfiguredLane(
+                    selection.selection.target.card_id,
+                    selection.selection.target.card_version,
+                    selection.selection.target.requested_id,
+                  );
+              } catch {
+                modelInteractionAvailable = false;
+              }
+            }
+            sendJson(
+              response,
+              200,
+              caseState.project(
+                configuredCase,
+                authorizationOrigin,
+                configuredWorld,
+                current,
+                modelInteractionAvailable,
+              ),
+            );
             return;
           }
           const modelsMatch = /^\/w\/([^/]+)\/models$/.exec(url.pathname);
@@ -456,6 +499,7 @@ export class OrchestratorHttpServer {
             if (dependencyCurrent.authorization_boot_id !== session.authorization_boot_id) {
               sessions.close(presented, configuredWorld);
               preparations.burnForSession(session.session_id);
+              conversations.burnForSession(session.session_id);
               if (coordinator !== undefined) {
                 modelTurns.discardSession(session.session_id, coordinator.quarantine);
               }
@@ -464,6 +508,11 @@ export class OrchestratorHttpServer {
             }
             const current = toBrowserCurrentModelSelection(dependencyCurrent);
             preparations.burnStaleForCase(
+              configuredWorld,
+              configuredCase,
+              current.selection?.selection_id ?? null,
+            );
+            conversations.burnStaleForCase(
               configuredWorld,
               configuredCase,
               current.selection?.selection_id ?? null,
@@ -539,6 +588,7 @@ export class OrchestratorHttpServer {
                 error.code === 'authorization-boot-mismatch'
               ) {
                 preparations.burnForSession(session.session_id);
+                conversations.burnForSession(session.session_id);
                 sessions.close(presented, configuredWorld);
                 if (coordinator !== undefined) {
                   modelTurns.discardSession(session.session_id, coordinator.quarantine);
@@ -604,6 +654,11 @@ export class OrchestratorHttpServer {
                   target: begun.target,
                 });
                 preparations.burnForCase(configuredWorld, configuredCase);
+                conversations.burnStaleForCase(
+                  configuredWorld,
+                  configuredCase,
+                  selected.selection.selection_id,
+                );
                 if (coordinator !== undefined && selected.selection.predecessor_selection_id !== null) {
                   modelTurns.discardSelection(
                     selected.selection.predecessor_selection_id,
@@ -666,6 +721,7 @@ export class OrchestratorHttpServer {
               if (current.authorization_boot_id !== session.authorization_boot_id) {
                 sessions.close(presented, configuredWorld);
                 preparations.burnForSession(session.session_id);
+                conversations.burnForSession(session.session_id);
                 modelTurns.discardSession(session.session_id, coordinator.quarantine);
                 sendJson(response, 401, { error: 'session-restart-required' });
                 return;
@@ -738,6 +794,7 @@ export class OrchestratorHttpServer {
               if (current.authorization_boot_id !== session.authorization_boot_id) {
                 sessions.close(presented, configuredWorld);
                 preparations.burnForSession(session.session_id);
+                conversations.burnForSession(session.session_id);
                 modelTurns.discardSession(session.session_id, coordinator.quarantine);
                 modelTurns.fail(begun.turnId, new ModelTurnError('authorization-refused'));
                 sendJson(response, 401, { error: 'session-restart-required' });
@@ -822,12 +879,83 @@ export class OrchestratorHttpServer {
               return;
             }
             modelTurns.expire(coordinator.quarantine);
-            const status = modelTurns.status(requestedTurn.data, session);
+            conversations.expire();
+            const status =
+              conversations.status(requestedTurn.data, session) ??
+              modelTurns.status(requestedTurn.data, session);
             if (status === null) {
               sendJson(response, 404, { error: 'not-found' });
               return;
             }
             sendJson(response, 200, status);
+            return;
+          }
+          const messagePreparationMatch = /^\/w\/([^/]+)\/cases\/([^/]+)\/message-preparations$/.exec(
+            url.pathname,
+          );
+          if (request.method === 'POST' && messagePreparationMatch !== null) {
+            const requestedWorld = worldId.safeParse(messagePreparationMatch[1]);
+            const requestedCase = id.safeParse(messagePreparationMatch[2]);
+            if (
+              !requestedWorld.success ||
+              requestedWorld.data !== configuredWorld ||
+              !requestedCase.success ||
+              requestedCase.data !== configuredCase
+            ) {
+              sendJson(response, 404, { error: 'not-found' });
+              return;
+            }
+            if (requestOrigin(request) !== ownOrigin) {
+              sendJson(response, 403, { error: 'forbidden' });
+              return;
+            }
+            const presented = bearer(request.headers.authorization);
+            const session = presented === null
+              ? null
+              : sessions.authenticate(presented, configuredWorld, configuredCase);
+            if (presented === null || session === null) {
+              sendJson(response, 401, { error: 'unauthenticated' });
+              return;
+            }
+            const parsed = browserMessagePreparationRequest.parse(await readJson(request, maxBodyBytes));
+            if (coordinator === undefined) {
+              sendJson(response, 503, { error: 'model-interaction-unavailable' });
+              return;
+            }
+            await caseOperations.run(async () => {
+              let current: CurrentModelSelectionProjection;
+              try {
+                current = await options.authorization.currentModelSelection(configuredWorld, configuredCase);
+                assertCurrentSelectionBinding(current, configuredWorld, configuredCase);
+              } catch {
+                sendJson(response, 409, { error: 'message-preparation-refused' });
+                return;
+              }
+              if (current.authorization_boot_id !== session.authorization_boot_id) {
+                sessions.close(presented, configuredWorld);
+                preparations.burnForSession(session.session_id);
+                conversations.burnForSession(session.session_id);
+                modelTurns.discardSession(session.session_id, coordinator.quarantine);
+                sendJson(response, 401, { error: 'session-restart-required' });
+                return;
+              }
+              if (
+                current.state !== 'selected' ||
+                !coordinator.hasConfiguredLane(
+                  current.selection.target.card_id,
+                  current.selection.target.card_version,
+                  current.selection.target.requested_id,
+                )
+              ) {
+                sendJson(response, 409, { error: 'message-preparation-refused' });
+                return;
+              }
+              try {
+                sendJson(response, 201, conversations.create(parsed.message, session, current));
+              } catch {
+                sendJson(response, 409, { error: 'message-preparation-refused' });
+              }
+            });
             return;
           }
           const messageMatch = /^\/w\/([^/]+)\/cases\/([^/]+)\/messages$/.exec(url.pathname);
@@ -843,18 +971,87 @@ export class OrchestratorHttpServer {
               sendJson(response, 404, { error: 'not-found' });
               return;
             }
+            if (requestOrigin(request) !== ownOrigin) {
+              sendJson(response, 403, { error: 'forbidden' });
+              return;
+            }
+            const presented = bearer(request.headers.authorization);
+            const session = presented === null
+              ? null
+              : sessions.authenticate(presented, configuredWorld, configuredCase);
+            if (presented === null || session === null) {
+              sendJson(response, 401, { error: 'unauthenticated' });
+              return;
+            }
+            const parsed = browserMessageUseRequest.parse(await readJson(request, maxBodyBytes));
+            if (coordinator === undefined) {
+              sendJson(response, 503, { error: 'model-interaction-unavailable' });
+              return;
+            }
+            await caseOperations.run(async () => {
+              const status = await conversations.use(
+                parsed.preparation_id,
+                session,
+                async (input) => {
+                  const current = await options.authorization.currentModelSelection(configuredWorld, configuredCase);
+                  assertCurrentSelectionBinding(current, configuredWorld, configuredCase);
+                  if (
+                    current.authorization_boot_id !== session.authorization_boot_id ||
+                    current.state !== 'selected' ||
+                    current.selection.selection_id !== input.selectionId ||
+                    current.selection.target.card_id !== input.cardId ||
+                    current.selection.target.card_version !== input.cardVersion ||
+                    current.selection.target.requested_id !== input.requestedId ||
+                    !coordinator.hasConfiguredLane(input.cardId, input.cardVersion, input.requestedId)
+                  ) {
+                    throw new ModelTurnError('authorization-refused');
+                  }
+                  return coordinator.runMessage(input, {
+                    onBehalfOf: { role: session.role, session_id: session.session_id },
+                  });
+                },
+                coordinator.quarantine,
+              );
+              if (status === null) {
+                sendJson(response, 409, { error: 'message-preparation-unavailable' });
+                return;
+              }
+              sendJson(response, 200, status);
+            });
+            return;
+          }
+          const conversationMatch = /^\/w\/([^/]+)\/cases\/([^/]+)\/conversation$/.exec(url.pathname);
+          if (request.method === 'GET' && conversationMatch !== null) {
+            const requestedWorld = worldId.safeParse(conversationMatch[1]);
+            const requestedCase = id.safeParse(conversationMatch[2]);
+            if (
+              !requestedWorld.success ||
+              requestedWorld.data !== configuredWorld ||
+              !requestedCase.success ||
+              requestedCase.data !== configuredCase
+            ) {
+              sendJson(response, 404, { error: 'not-found' });
+              return;
+            }
             const origin = requestOrigin(request);
             if (origin !== undefined && origin !== ownOrigin) {
               sendJson(response, 403, { error: 'forbidden' });
               return;
             }
             const presented = bearer(request.headers.authorization);
-            if (presented === null || sessions.authenticate(presented, configuredWorld, configuredCase) === null) {
+            const session = presented === null
+              ? null
+              : sessions.authenticate(presented, configuredWorld, configuredCase);
+            if (presented === null || session === null) {
               sendJson(response, 401, { error: 'unauthenticated' });
               return;
             }
-            caseMessageRequest.parse(await readJson(request, maxBodyBytes));
-            sendJson(response, 501, { error: 'model-interaction-not-active' });
+            const projection = await options.authorization.conversation(
+              configuredWorld,
+              configuredCase,
+              { role: session.role, session_id: session.session_id },
+            );
+            sendJson(response, 200, toBrowserConversation(projection));
             return;
           }
           const match = /^\/w\/([^/]+)\/actions\/execute$/.exec(url.pathname);

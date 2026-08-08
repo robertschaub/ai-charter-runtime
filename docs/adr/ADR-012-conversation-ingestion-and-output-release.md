@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: CC-BY-4.0 -->
 # ADR-012 — Authorization-owned conversation ingestion and single-use output release
 
-**Status:** proposed M5.10 definition; awaiting exact-SHA adversarial review.
+**Status:** accepted M5.10 definition at `a38d1ed`; implementation candidate awaiting exact-SHA adversarial review.
 **Spec:** §3 (case console, orchestrator, and authorization service), §4 (four-store items and model-call
 bindings), §5 (entry boundary, model navigation, and empathy layer), §7 beats 4 and 19–21, and §10 M5.
 
@@ -231,6 +231,11 @@ checks—not fact, advice, authorization, red-line clearance, independent review
 composer and the two-step turn gesture, but no proposal, filing, approval, confirmation, permission, or output-copy
 to an authority-bearing route.
 
+`model_interaction_available` is true only for an active dynamic case-officer session whose authorization boot is
+current and whose current selected card/version/requested-model tuple has a configured native orchestrator lane.
+It says only that the two-step message transport can be attempted; it is not provider health, output admission,
+authority, assurance, or a promise that the next currentness check will pass.
+
 ### 6. Race, invalidation, and restart behavior
 
 Message preparation/use, model selection, model-turn use, release consumption, session close, and transcript reads
@@ -306,4 +311,5 @@ silently promoted to `said`, `confirmed`, or `permitted`.
 
 Still deferred to separately approved slices: proposal construction from conversation state, semantic empathy
 trigger completion, broader ingestion sources/roles, retention and deletion propagation, live provider runs, and
-M6 capture. Approval of this definition does not authorize implementation.
+M6 capture. The present implementation candidate does not authorize another slice and is not a reviewed
+integration point until exact-SHA adversarial review returns GO.

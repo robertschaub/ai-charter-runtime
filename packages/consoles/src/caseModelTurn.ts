@@ -72,7 +72,7 @@ export const browserModelTurnStatus = z
     turn_id: id,
     selection_id: id,
     target: modelSelectionTarget,
-    state: z.enum(['prepared', 'running', 'quarantined', 'withheld', 'discarded', 'failed']),
+    state: z.enum(['prepared', 'running', 'quarantined', 'released', 'withheld', 'discarded', 'failed']),
     provider_disclosure: z.enum(['none', 'possible', 'confirmed']),
     requested_id: modelId,
     served_id: modelId.nullable(),
@@ -323,6 +323,7 @@ export class CaseModelTurnStore {
     if (record === undefined || record.state !== 'running') throw new Error('model-turn-state-invalid');
     const admission = outcome.admission;
     const bindingInvalid =
+      outcome.disposition === 'released' ||
       admission.disposition !== (outcome.disposition === 'quarantined' ? 'admitted' : 'withheld') ||
       admission.case_id !== record.case_id ||
       admission.turn_id !== record.turn_id ||
@@ -350,11 +351,13 @@ export class CaseModelTurnStore {
       record.provider_disclosure = 'confirmed';
       record.served_id = outcome.admission.served_id;
       record.terminal_reason = 'output-withheld';
-    } else {
+    } else if (outcome.disposition === 'quarantined') {
       record.state = 'quarantined';
       record.provider_disclosure = 'confirmed';
       record.served_id = outcome.admission.served_id;
       record.quarantine = publicQuarantine(outcome.quarantine);
+    } else {
+      throw new ModelTurnError('admission-binding-invalid', 'confirmed', admission.served_id);
     }
     if (record.discard_reason !== null) this.#discard(record, record.discard_reason, quarantine);
     return this.#project(record);

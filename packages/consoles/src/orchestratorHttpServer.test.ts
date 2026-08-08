@@ -4,10 +4,15 @@ import { ModelAdapterError } from 'model-adapters';
 import { describe, expect, it, vi } from 'vitest';
 
 import { CaseConsoleStateStore } from './caseConsoleState.js';
+import { CaseConversationStore } from './caseConversation.js';
 import { CaseModelSelectionPreparationStore } from './caseModelSelection.js';
 import { CaseModelTurnStore } from './caseModelTurn.js';
 import { CaseSessionStore } from './caseSessionStore.js';
-import { ModelTurnCoordinator, type ModelTurnAuthorizationClient } from './modelTurnCoordinator.js';
+import {
+  ModelOutputQuarantine,
+  ModelTurnCoordinator,
+  type ModelTurnAuthorizationClient,
+} from './modelTurnCoordinator.js';
 import { OrchestratorHttpServer } from './orchestratorHttpServer.js';
 import type { OrchestratorAuthorizationHttpClient, OrchestratorServicesHttpClient } from './runtimeHttpClients.js';
 
@@ -373,8 +378,8 @@ describe('orchestrator case-console routes', () => {
         },
         body: JSON.stringify({ message: 'Synthetic message.' }),
       });
-      expect(message.status).toBe(501);
-      await expect(message.json()).resolves.toEqual({ error: 'model-interaction-not-active' });
+      expect(message.status).toBe(422);
+      await expect(message.json()).resolves.toEqual({ error: 'invalid-request' });
     } finally {
       await server.close();
     }
@@ -683,7 +688,7 @@ describe('orchestrator case-console routes', () => {
         session_id: second.session_id,
       });
       expect((await post('/w/w-demo/cases/case_demo/messages', { message: 'still closed' }, second.session_token)).status)
-        .toBe(501);
+        .toBe(422);
       expect(provider).toHaveBeenCalledTimes(2);
 
       const third = sessions.create({
@@ -699,6 +704,209 @@ describe('orchestrator case-console routes', () => {
       expect((await post(preparationPath, {}, third.session_token)).status).toBe(401);
       expect((await post(preparationPath, {}, third.session_token)).status).toBe(401);
       expect(provider).toHaveBeenCalledTimes(2);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it('prepares, consumes, and reads a governed message turn only through its bound browser session', async () => {
+    const digest = 'e'.repeat(64);
+    const target = {
+      card_id: 'publicai-apertus-v1.5-70b',
+      card_version: 1,
+      requested_id: 'swiss-ai/apertus-v1.5-70b',
+    };
+    const current = {
+      state: 'selected' as const,
+      authorization_boot_id: 'authz_boot_message_listener',
+      case_id: 'case_demo',
+      selection: {
+        world_id: 'w-demo',
+        selection_id: 'sel_message_listener',
+        case_id: 'case_demo',
+        kind: 'initial' as const,
+        predecessor_selection_id: null,
+        mandate_id: 'mdt_demo_grant',
+        mandate_version: 1,
+        target: { ...target, card_digest: digest, verifying_key_id: 'card_test' },
+        system_use_decision: {
+          decision_id: 'sud_message_listener',
+          version: 1,
+          record_digest: digest,
+          status: 'approved' as const,
+          conditions: [],
+        },
+        check_id: 'msc_message_listener',
+        selected_at: '2026-08-07T09:00:00.000Z',
+        authority_effect: 'none' as const,
+      },
+      latest_observation: null,
+    };
+    const sessionToken = '7'.repeat(64);
+    const sessions = new CaseSessionStore({
+      randomToken: () => sessionToken,
+      nextSessionId: () => 'session_message_listener',
+      now: () => '2026-08-07T09:00:00.000Z',
+    });
+    const created = sessions.create({
+      handoff_id: 'handoff_message_listener',
+      role: 'case_officer',
+      world_id: 'w-demo',
+      case_id: 'case_demo',
+      target_origin: 'http://127.0.0.1:7802',
+      authorization_boot_id: 'authz_boot_message_listener',
+      consumed_at: '2026-08-07T09:00:00.000Z',
+    });
+    const conversation = vi.fn(async () => ({
+      case_id: 'case_demo',
+      conversation_version: 3,
+      events: [
+        {
+          speaker: 'case_officer' as const,
+          message_id: 'msg_listener',
+          turn_id: 'turn_listener',
+          text: 'Synthetic governed question.',
+          recorded_at: '2026-08-07T09:00:00.000Z',
+        },
+        {
+          speaker: 'model' as const,
+          message_id: 'msg_listener',
+          turn_id: 'turn_listener',
+          text: 'Synthetic unconfirmed inference.',
+          recorded_at: '2026-08-07T09:00:01.000Z',
+          requested_id: target.requested_id,
+          served_id: target.requested_id,
+          classification: 'inferred-unconfirmed' as const,
+        },
+      ],
+    }));
+    const authorization = {
+      currentModelSelection: vi.fn(async () => current),
+      conversation,
+      rulingStatus: vi.fn(),
+      approvedModels: vi.fn(),
+      redeemCaseSessionHandoff: vi.fn(),
+      ruleCommit: vi.fn(),
+    } as unknown as OrchestratorAuthorizationHttpClient;
+    const runMessage = vi.fn(async (input: { turnId: string }) => ({
+      disposition: 'released' as const,
+      admission: {
+        kind: 'model_output_control' as const,
+        disposition: 'admitted' as const,
+        authority_effect: 'none' as const,
+        case_id: 'case_demo',
+        turn_id: input.turnId,
+        selection_id: 'sel_message_listener',
+        mandate_id: 'mdt_demo_grant',
+        mandate_version: 1,
+        card_id: target.card_id,
+        card_version: target.card_version,
+        requested_id: target.requested_id,
+        served_id: target.requested_id,
+        model_resolution: 'exact' as const,
+        projection_digest: digest,
+        projection_item_count: 1,
+        output_digest: digest,
+        flags: [],
+        derived_tags: [],
+        reasons: [],
+      },
+      ingestion: {
+        kind: 'output_release_consumption_result' as const,
+        release_id: 'rel_listener',
+        state: 'consumed' as const,
+        event_id: 'event_listener_output',
+        item_id: 'item_listener_output',
+        conversation_version: 3,
+        recorded_at: '2026-08-07T09:00:01.000Z',
+      },
+    }));
+    const coordinator = {
+      quarantine: new ModelOutputQuarantine(),
+      hasConfiguredLane: () => true,
+      runMessage,
+    } as unknown as ModelTurnCoordinator;
+    const caseConversations = new CaseConversationStore({
+      now: () => '2026-08-07T09:00:00.000Z',
+      nextPreparationId: () => 'msgp_listener',
+      nextMessageId: () => 'msg_listener',
+      nextTurnId: () => 'turn_listener',
+    });
+    const server = new OrchestratorHttpServer({
+      authorization,
+      services: {} as OrchestratorServicesHttpClient,
+      modelTurnCoordinator: coordinator,
+      caseConversations,
+      worldId: 'w-demo',
+      demoCaseId: 'case_demo',
+      demoMandateId: 'mdt_demo_grant',
+      caseOfficerToken: '8'.repeat(64),
+      authorizationOrigin: 'http://127.0.0.1:7801',
+      caseConsoleAssets: { shell: '', script: '', stylesheet: '' },
+      caseSessions: sessions,
+      host: '127.0.0.1',
+      port: 0,
+    });
+    const address = await server.listen();
+    const post = (path: string, body: unknown, token = created.session_token, origin = address.origin) =>
+      fetch(`${address.origin}${path}`, {
+        method: 'POST',
+        headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json', origin },
+        body: JSON.stringify(body),
+      });
+    const preparationPath = '/w/w-demo/cases/case_demo/message-preparations';
+    const messagePath = '/w/w-demo/cases/case_demo/messages';
+    try {
+      expect((await post(preparationPath, { message: 'Synthetic governed question.' }, created.session_token, 'null')).status)
+        .toBe(403);
+      expect((await post(preparationPath, { message: 'Synthetic governed question.' }, '8'.repeat(64))).status)
+        .toBe(401);
+      const preparedResponse = await post(preparationPath, { message: 'Synthetic governed question.' });
+      expect(preparedResponse.status).toBe(201);
+      const prepared = (await preparedResponse.json()) as { preparation_id: string; turn_id: string };
+      expect(Object.keys(prepared).sort()).toEqual([
+        'expires_at',
+        'issued_at',
+        'message_id',
+        'preparation_id',
+        'turn_id',
+      ]);
+      expect(JSON.stringify(prepared)).not.toContain('Synthetic governed question.');
+      expect((await post(messagePath, { message: 'bypass' })).status).toBe(422);
+      expect(runMessage).not.toHaveBeenCalled();
+      const usedResponse = await post(messagePath, { preparation_id: prepared.preparation_id });
+      expect(usedResponse.status).toBe(200);
+      const used = await usedResponse.json();
+      expect(used).toMatchObject({
+        turn_id: prepared.turn_id,
+        state: 'released',
+        provider_disclosure: 'confirmed',
+        quarantine: null,
+      });
+      expect(JSON.stringify(used)).not.toContain('Synthetic unconfirmed inference.');
+      expect(runMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          messageId: 'msg_listener',
+          text: 'Synthetic governed question.',
+          turnId: 'turn_listener',
+          selectionId: 'sel_message_listener',
+        }),
+        { onBehalfOf: { role: 'case_officer', session_id: created.session_id } },
+      );
+      expect((await post(messagePath, { preparation_id: prepared.preparation_id })).status).toBe(409);
+      const foreignRead = await fetch(`${address.origin}/w/w-demo/cases/case_demo/conversation`, {
+        headers: { authorization: `Bearer ${created.session_token}`, origin: 'null' },
+      });
+      expect(foreignRead.status).toBe(403);
+      const read = await fetch(`${address.origin}/w/w-demo/cases/case_demo/conversation`, {
+        headers: { authorization: `Bearer ${created.session_token}` },
+      });
+      expect(read.status).toBe(200);
+      expect(await read.json()).toEqual(await conversation.mock.results[0]?.value);
+      expect(conversation).toHaveBeenCalledWith('w-demo', 'case_demo', {
+        role: 'case_officer',
+        session_id: created.session_id,
+      });
     } finally {
       await server.close();
     }

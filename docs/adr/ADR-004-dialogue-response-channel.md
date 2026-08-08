@@ -18,7 +18,7 @@ source proposal. The response event, ruling invalidation, escalation consumption
 operations are one WAL transaction. Historical M4 events without a scope remain replayable but cannot be
 used to create an M5 state transition.
 
-**Proposed amendment (M5.10 ordinary conversation ingress):** ADR-012 may attribute an authorization-ingested
+**Implementation candidate amendment (M5.10 ordinary conversation ingress):** ADR-012 may attribute an authorization-ingested
 case-console message to `origin_actor: officer` only as a `said` item under the fixed ingress profile. That route
 cannot answer or consume a dialogue escalation, create `confirmed` or `permitted` state, satisfy an evidence
 requirement, or inherit the responder authority of this direct role-token channel. Only this ADR's

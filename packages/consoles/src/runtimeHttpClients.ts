@@ -16,6 +16,13 @@ import {
   modelSelectionProjection,
   modelSelectionRequest,
   currentModelSelectionProjection,
+  conversationMessageIngressRequest,
+  conversationMessageIngressResult,
+  conversationProcessProjection,
+  modelCallIngressBinding,
+  outputReleaseConsumeRequest,
+  outputReleaseConsumeResult,
+  outputReleaseStatusProjection,
   approvedModelsProjection,
   proposalRulingProjection,
   rulingProjection,
@@ -37,6 +44,12 @@ import {
   type ModelSelectionProjection,
   type ModelSelectionRequest,
   type ModelOutputAdmissionRequest,
+  type ConversationMessageIngressRequest,
+  type ConversationMessageIngressResult,
+  type ConversationProcessProjection,
+  type ModelCallIngressBinding,
+  type OutputReleaseConsumeResult,
+  type OutputReleaseStatusProjection,
 } from 'gate-core';
 import type { ServicesHostExecution } from 'services-mock';
 import { z } from 'zod';
@@ -50,6 +63,7 @@ const handoffRedeemInput = z
     case_id: id,
     target_origin: browserOrigin,
     authorization_boot_id: id,
+    session_id: id,
   })
   .strict();
 const handoffClaim = z
@@ -153,11 +167,17 @@ abstract class JsonHttpClient {
     return parsed;
   }
 
-  protected async get(path: string): Promise<unknown> {
+  protected async get(path: string, onBehalfOf?: OnBehalfOfClaim): Promise<unknown> {
     let response: Response;
+    const claim = onBehalfOf === undefined ? undefined : onBehalfOfClaim.parse(onBehalfOf);
     try {
       response = await this.#fetch(new URL(path, this.#origin), {
-        headers: { authorization: `Bearer ${this.#token}` },
+        headers: {
+          authorization: `Bearer ${this.#token}`,
+          ...(claim === undefined
+            ? {}
+            : { 'x-on-behalf-of-role': claim.role, 'x-session-id': claim.session_id }),
+        },
         redirect: 'error',
         signal: AbortSignal.timeout(this.#timeoutMs),
       });
@@ -211,11 +231,14 @@ export class OrchestratorAuthorizationHttpClient extends JsonHttpClient {
     readonly worldId: string;
     readonly turnId: string;
     readonly selectionId: string;
+    readonly ingressBinding?: ModelCallIngressBinding;
   }, onBehalfOf?: OnBehalfOfClaim): Promise<ModelCallStart> {
     const world = worldId.parse(input.worldId);
     const request = modelCallBeginRequest.parse({
       turn_id: input.turnId,
       selection_id: id.parse(input.selectionId),
+      ingress_binding:
+        input.ingressBinding === undefined ? null : modelCallIngressBinding.parse(input.ingressBinding),
     });
     return modelCallStart.parse(await this.post(`/w/${world}/model-calls/begin`, request, onBehalfOf));
   }
@@ -240,6 +263,58 @@ export class OrchestratorAuthorizationHttpClient extends JsonHttpClient {
     const request = modelCallFailureRequest.parse(input);
     return modelCallFailedRecord.parse(
       await this.post(`/w/${world}/model-calls/failures`, request, onBehalfOf),
+    );
+  }
+
+  async ingestConversationMessage(
+    worldIdInput: string,
+    caseIdInput: string,
+    input: ConversationMessageIngressRequest,
+    onBehalfOf: OnBehalfOfClaim,
+  ): Promise<ConversationMessageIngressResult> {
+    const world = worldId.parse(worldIdInput);
+    const caseId = id.parse(caseIdInput);
+    const request = conversationMessageIngressRequest.parse(input);
+    return conversationMessageIngressResult.parse(
+      await this.post(`/w/${world}/cases/${caseId}/conversation/messages`, request, onBehalfOf),
+    );
+  }
+
+  async consumeOutputRelease(
+    worldIdInput: string,
+    releaseIdInput: string,
+    content: string,
+    onBehalfOf: OnBehalfOfClaim,
+  ): Promise<OutputReleaseConsumeResult> {
+    const world = worldId.parse(worldIdInput);
+    const releaseId = id.parse(releaseIdInput);
+    const request = outputReleaseConsumeRequest.parse({ content });
+    return outputReleaseConsumeResult.parse(
+      await this.post(`/w/${world}/model-output-releases/${releaseId}/consume`, request, onBehalfOf),
+    );
+  }
+
+  async outputReleaseStatus(
+    worldIdInput: string,
+    releaseIdInput: string,
+    onBehalfOf: OnBehalfOfClaim,
+  ): Promise<OutputReleaseStatusProjection> {
+    const world = worldId.parse(worldIdInput);
+    const releaseId = id.parse(releaseIdInput);
+    return outputReleaseStatusProjection.parse(
+      await this.get(`/w/${world}/model-output-releases/${releaseId}`, onBehalfOf),
+    );
+  }
+
+  async conversation(
+    worldIdInput: string,
+    caseIdInput: string,
+    onBehalfOf: OnBehalfOfClaim,
+  ): Promise<ConversationProcessProjection> {
+    const world = worldId.parse(worldIdInput);
+    const caseId = id.parse(caseIdInput);
+    return conversationProcessProjection.parse(
+      await this.get(`/w/${world}/cases/${caseId}/conversation`, onBehalfOf),
     );
   }
 

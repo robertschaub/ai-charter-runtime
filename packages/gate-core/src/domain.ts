@@ -26,6 +26,8 @@ export const DOMAIN_TAGS = [
   'model-card',
   'card-revocation',
   'conversation-projection',
+  'conversation-ingress-profile',
+  'conversation-item-content',
   'model-output',
   'system-use-decision',
   'system-use-configuration',

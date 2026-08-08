@@ -59,7 +59,7 @@ function setup(options: { readonly bootId?: string; readonly ttlMs?: number } = 
 function redeemInput(minted: Awaited<ReturnType<CaseSessionHandoffService['mint']>>) {
   const { expires_at: ignored, ...input } = minted;
   void ignored;
-  return input;
+  return { ...input, session_id: `session_${minted.handoff_id}` };
 }
 
 describe('ADR-002 durable case-session handoffs', () => {
@@ -126,6 +126,27 @@ describe('ADR-002 durable case-session handoffs', () => {
     ]);
     expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(1);
     expect(results.filter((result) => result.status === 'rejected')).toHaveLength(1);
+  });
+
+  it('does not consume a handoff when its requested session provenance id collides', async () => {
+    const { store, service } = setup();
+    const first = await service.mint('case_demo', CASE_OFFICER);
+    const second = await service.mint('case_demo', CASE_OFFICER);
+    const sessionId = 'session_collision';
+    await expect(service.redeem({ ...redeemInput(first), session_id: sessionId }, ORCHESTRATOR)).resolves.toMatchObject({
+      handoff_id: first.handoff_id,
+    });
+    await expect(
+      service.redeem({ ...redeemInput(second), session_id: sessionId }, ORCHESTRATOR),
+    ).rejects.toMatchObject({ code: 'handoff-refused' });
+    expect(store.snapshot().caseSessionHandoffs.get(second.handoff_id)).toMatchObject({
+      state: 'issued',
+      consumed_at: null,
+    });
+    expect(store.snapshot().caseSessionProvenance.get(sessionId)).toMatchObject({
+      handoff_id: first.handoff_id,
+      state: 'active',
+    });
   });
 
   it('expires elapsed handoffs lazily and prior-boot handoffs before a new listener can bind', async () => {

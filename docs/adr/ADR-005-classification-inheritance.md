@@ -29,7 +29,7 @@ from that selection; callers no longer choose the card tuple on model-call begin
 and every later admission, proposal, ruling, and commitment rejects the stale selection. The headless slice still
 persists no model output and opens no release consumer.
 
-**Proposed amendment (M5.10 conversation ingestion):** ADR-012 assigns every case-officer message from a fixed
+**Implementation candidate amendment (M5.10 conversation ingestion):** ADR-012 assigns every case-officer message from a fixed
 authorization-owned ingress profile and refuses it before storage/provider use unless those tags fit the current
 selected acting clearance. An admitted message-bound output can enter the store only through an authorization-
 issued single-use release. Authorization persists the exact call projection item ids and derived tag union, then

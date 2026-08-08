@@ -73,7 +73,16 @@ export class CaseSessionStore {
     }
   }
 
-  create(input: CaseSessionClaim): CreatedCaseSession {
+  generateSessionId(): string {
+    this.#expire(timestamp.parse(this.#now()));
+    const sessionId = id.parse(this.#nextSessionId());
+    if ([...this.#sessions.values()].some((session) => session.session_id === sessionId)) {
+      throw new Error('case-session identifier source repeated a value');
+    }
+    return sessionId;
+  }
+
+  create(input: CaseSessionClaim, sessionIdInput?: string): CreatedCaseSession {
     const claim = caseSessionClaim.parse(input);
     const at = timestamp.parse(this.#now());
     this.#expire(at);
@@ -83,7 +92,10 @@ export class CaseSessionStore {
     }
     const digest = sha256Hex(rawToken);
     if (this.#sessions.has(digest)) throw new Error('case-session token source repeated a value');
-    const sessionId = id.parse(this.#nextSessionId());
+    const sessionId = sessionIdInput === undefined ? this.generateSessionId() : id.parse(sessionIdInput);
+    if ([...this.#sessions.values()].some((session) => session.session_id === sessionId)) {
+      throw new Error('case-session identifier source repeated a value');
+    }
     const expiresAt = new Date(Date.parse(at) + this.#ttlMs).toISOString();
     this.#sessions.set(digest, {
       session_id: sessionId,

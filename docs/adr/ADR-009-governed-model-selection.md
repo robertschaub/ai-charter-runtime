@@ -13,7 +13,7 @@ an exact dynamic case session, a refreshed two-minute browser preparation, and a
 Authorization check ids remain hidden, and the browser cannot supply the predecessor used for selection;
 case-session provenance is recorded only as a caller claim and never participates in authority.
 
-**Proposed amendment (M5.10 output release):** ADR-012 binds every release to one exact selection. A switch
+**Implementation candidate amendment (M5.10 output release):** ADR-012 binds every release to one exact selection. A switch
 invalidates outstanding predecessor releases in the same authorization transaction, while the orchestrator's
 case-local mutex orders local quarantine destruction. If release consumes first, the durable inferred item remains
 and the successor selection re-projects it under its own clearance; if the switch appends first, release fails and

@@ -18,6 +18,10 @@ import {
   modelSelectionTarget,
   modelOutputAdmission,
   modelOutputAdmissionRequest,
+  modelCallIngressBinding,
+  conversationMessageIngressResult,
+  outputReleaseConsumeResult,
+  outputReleaseStatusProjection,
   sortedRestrictionTags,
   verifyDigest,
   worldId,
@@ -35,6 +39,11 @@ import {
   type ModelSelectionTarget,
   type ModelOutputAdmission,
   type ModelOutputAdmissionRequest,
+  type ConversationMessageIngressRequest,
+  type ConversationMessageIngressResult,
+  type ModelCallIngressBinding,
+  type OutputReleaseConsumeResult,
+  type OutputReleaseStatusProjection,
 } from 'gate-core';
 import {
   ModelAdapterError,
@@ -58,10 +67,17 @@ const modelTurnInput = z
   })
   .strict();
 
+const messageBoundModelTurnInput = modelTurnInput
+  .extend({
+    messageId: id,
+    text: z.string(),
+  })
+  .strict();
+
 const quarantinedModelOutputRef = z
   .object({
     kind: z.literal('quarantined_model_output'),
-    release_state: z.literal('sealed-no-release-path'),
+    release_state: z.enum(['sealed-no-release-path', 'sealed-release-pending']),
     call_id: id,
     case_id: id,
     turn_id: id,
@@ -101,6 +117,11 @@ export type ModelTurnOutcome =
   | {
       readonly disposition: 'withheld';
       readonly admission: WithheldOutput;
+    }
+  | {
+      readonly disposition: 'released';
+      readonly admission: AdmittedOutput;
+      readonly ingestion: OutputReleaseConsumeResult;
     };
 
 export type ModelTurnErrorCode =
@@ -124,6 +145,8 @@ export interface ModelTurnRunContext {
   readonly onBehalfOf?: ModelTurnCallerClaim;
   readonly onProviderAttempt?: () => void;
 }
+
+export type MessageBoundModelTurnInput = z.infer<typeof messageBoundModelTurnInput>;
 
 export class ModelTurnError extends Error {
   constructor(
@@ -188,6 +211,23 @@ export interface ModelTurnAuthorizationClient {
     input: ModelCallFailureRequest,
     onBehalfOf?: ModelTurnCallerClaim,
   ): Promise<ModelCallFailedRecord>;
+  ingestConversationMessage?(
+    worldIdInput: string,
+    caseIdInput: string,
+    input: ConversationMessageIngressRequest,
+    onBehalfOf: ModelTurnCallerClaim,
+  ): Promise<ConversationMessageIngressResult>;
+  consumeOutputRelease?(
+    worldIdInput: string,
+    releaseIdInput: string,
+    content: string,
+    onBehalfOf: ModelTurnCallerClaim,
+  ): Promise<OutputReleaseConsumeResult>;
+  outputReleaseStatus?(
+    worldIdInput: string,
+    releaseIdInput: string,
+    onBehalfOf: ModelTurnCallerClaim,
+  ): Promise<OutputReleaseStatusProjection>;
 }
 
 export interface ModelTurnCoordinatorOptions {
@@ -208,6 +248,7 @@ interface BoundLane {
 
 interface HeldOutput {
   readonly ref: QuarantinedModelOutputRef;
+  readonly releaseId: string | null;
   readonly bytes: Buffer;
 }
 
@@ -216,10 +257,18 @@ type QuarantineSealer = (
   request: ModelOutputAdmissionRequest,
   decision: AdmittedOutput,
   caseId: string,
+  releaseId: string | null,
 ) => QuarantinedModelOutputRef;
+
+type QuarantineConsumer = <T>(
+  turnId: string,
+  releaseId: string,
+  sink: (content: string) => Promise<T>,
+) => Promise<T>;
 
 /** Module-private capability: importers can inspect or destroy quarantine entries but cannot create one. */
 const quarantineSealers = new WeakMap<ModelOutputQuarantine, QuarantineSealer>();
+const quarantineConsumers = new WeakMap<ModelOutputQuarantine, QuarantineConsumer>();
 
 function laneKey(cardIdInput: string, cardVersionInput: number, requestedIdInput: string): string {
   return `${cardSlug.parse(cardIdInput)}@${integer.min(1).parse(cardVersionInput)}\n${modelId.parse(requestedIdInput)}`;
@@ -285,11 +334,10 @@ function protocolFailureEvidence(response: unknown): {
 }
 
 /**
- * Process-private holding area. M5.4 deliberately exposes metadata and destruction only:
- * no exported method can seal, read, or release the held bytes. Sealing is a module-private
- * coordinator capability, which provides structural confinement rather than cryptographic
- * proof of authorization provenance. A later reviewed slice must add a distinct, single-use
- * validated consumer rather than treating presence here as safety clearance.
+ * Process-private holding area. Importers receive metadata and destruction only: no exported
+ * method can seal, read, or release held bytes. M5.10's distinct module-private consumer removes
+ * a release-bound entry before passing one copy directly to authorization transport. This is
+ * structural confinement, not cryptographic proof or safety clearance.
  */
 export class ModelOutputQuarantine {
   readonly #held = new Map<string, HeldOutput>();
@@ -301,7 +349,10 @@ export class ModelOutputQuarantine {
   constructor(options: { readonly maxEntries?: number; readonly maxHeldBytes?: number } = {}) {
     this.#maxEntries = integer.min(1).parse(options.maxEntries ?? 8);
     this.#maxHeldBytes = integer.min(1).parse(options.maxHeldBytes ?? 1_048_576);
-    quarantineSealers.set(this, (callId, request, decision, caseId) => this.#seal(callId, request, decision, caseId));
+    quarantineSealers.set(this, (callId, request, decision, caseId, releaseId) =>
+      this.#seal(callId, request, decision, caseId, releaseId),
+    );
+    quarantineConsumers.set(this, (turnId, releaseId, sink) => this.#consume(turnId, releaseId, sink));
   }
 
   #seal(
@@ -309,18 +360,20 @@ export class ModelOutputQuarantine {
     requestInput: ModelOutputAdmissionRequest,
     decisionInput: AdmittedOutput,
     caseIdInput: string,
+    releaseIdInput: string | null,
   ): QuarantinedModelOutputRef {
     const request = modelOutputAdmissionRequest.parse(requestInput);
     const decision = modelOutputAdmission.parse(decisionInput);
     const callId = id.parse(callIdInput);
     const caseId = id.parse(caseIdInput);
+    const releaseId = releaseIdInput === null ? null : id.parse(releaseIdInput);
     if (decision.disposition !== 'admitted' || !bindingMatches(decision, request, caseId)) {
       throw new ModelTurnError('admission-binding-invalid');
     }
     if (this.#seen.has(request.turn_id)) throw new ModelTurnError('turn-replay');
     const ref = quarantinedModelOutputRef.parse({
       kind: 'quarantined_model_output',
-      release_state: 'sealed-no-release-path',
+      release_state: releaseId === null ? 'sealed-no-release-path' : 'sealed-release-pending',
       call_id: callId,
       case_id: caseId,
       turn_id: request.turn_id,
@@ -339,9 +392,27 @@ export class ModelOutputQuarantine {
       throw new ModelTurnError('quarantine-capacity');
     }
     this.#seen.add(request.turn_id);
-    this.#held.set(request.turn_id, { ref, bytes });
+    this.#held.set(request.turn_id, { ref, releaseId, bytes });
     this.#heldBytes += bytes.byteLength;
     return ref;
+  }
+
+  async #consume<T>(turnIdInput: string, releaseIdInput: string, sink: (content: string) => Promise<T>): Promise<T> {
+    const turnId = id.parse(turnIdInput);
+    const releaseId = id.parse(releaseIdInput);
+    const held = this.#held.get(turnId);
+    if (held === undefined || held.releaseId !== releaseId || held.ref.release_state !== 'sealed-release-pending') {
+      if (held !== undefined) this.destroy(turnId);
+      throw new ModelTurnError('admission-binding-invalid');
+    }
+    // The local capability is consumed before the first transport byte leaves this process.
+    this.#held.delete(turnId);
+    this.#heldBytes -= held.bytes.byteLength;
+    try {
+      return await sink(held.bytes.toString('utf8'));
+    } finally {
+      held.bytes.fill(0);
+    }
   }
 
   metadata(turnIdInput: string): QuarantinedModelOutputRef | null {
@@ -389,10 +460,22 @@ function sealQuarantinedOutput(
   request: ModelOutputAdmissionRequest,
   decision: AdmittedOutput,
   caseId: string,
+  releaseId: string | null,
 ): QuarantinedModelOutputRef {
   const seal = quarantineSealers.get(quarantine);
   if (seal === undefined) throw new ModelTurnError('invalid-configuration');
-  return seal(callId, request, decision, caseId);
+  return seal(callId, request, decision, caseId, releaseId);
+}
+
+async function consumeQuarantinedOutput<T>(
+  quarantine: ModelOutputQuarantine,
+  turnId: string,
+  releaseId: string,
+  sink: (content: string) => Promise<T>,
+): Promise<T> {
+  const consume = quarantineConsumers.get(quarantine);
+  if (consume === undefined) throw new ModelTurnError('invalid-configuration');
+  return consume(turnId, releaseId, sink);
 }
 
 function projectionPrompt(projection: ConversationProjection): ActingRequest['messages'] {
@@ -511,6 +594,56 @@ export class ModelTurnCoordinator {
   }
 
   async run(inputValue: ModelTurnInput, context: ModelTurnRunContext = {}): Promise<ModelTurnOutcome> {
+    return this.#run(inputValue, context, null);
+  }
+
+  async runMessage(
+    inputValue: MessageBoundModelTurnInput,
+    context: ModelTurnRunContext,
+  ): Promise<ModelTurnOutcome> {
+    const { messageId, text, ...input } = messageBoundModelTurnInput.parse(inputValue);
+    const claim = context.onBehalfOf;
+    if (
+      claim === undefined ||
+      this.#authorization.ingestConversationMessage === undefined ||
+      this.#authorization.consumeOutputRelease === undefined ||
+      this.#authorization.outputReleaseStatus === undefined
+    ) {
+      throw new ModelTurnError('invalid-configuration');
+    }
+    let ingress: ConversationMessageIngressResult;
+    try {
+      ingress = conversationMessageIngressResult.parse(
+        await this.#authorization.ingestConversationMessage(
+          this.#worldId,
+          this.#caseId,
+          { message_id: messageId, turn_id: input.turnId, text },
+          claim,
+        ),
+      );
+    } catch {
+      throw new ModelTurnError('authorization-refused');
+    }
+    if (ingress.message_id !== messageId || ingress.turn_id !== input.turnId) {
+      throw new ModelTurnError('authorization-refused');
+    }
+    return this.#run(
+      input,
+      context,
+      modelCallIngressBinding.parse({
+        message_id: ingress.message_id,
+        message_item_id: ingress.message_item_id,
+        conversation_version: ingress.conversation_version,
+        message_digest: ingress.message_digest,
+      }),
+    );
+  }
+
+  async #run(
+    inputValue: ModelTurnInput,
+    context: ModelTurnRunContext,
+    ingressBinding: ModelCallIngressBinding | null,
+  ): Promise<ModelTurnOutcome> {
     const input = modelTurnInput.parse(inputValue);
     const key = laneKey(input.cardId, input.cardVersion, input.requestedId);
     const lane = this.#lanes.get(key);
@@ -540,6 +673,7 @@ export class ModelTurnCoordinator {
               worldId: this.#worldId,
               turnId: input.turnId,
               selectionId: input.selectionId,
+              ...(ingressBinding === null ? {} : { ingressBinding }),
             },
             context.onBehalfOf,
           ),
@@ -557,6 +691,9 @@ export class ModelTurnCoordinator {
         call.card_version !== lane.cardVersion ||
         call.requested_id !== lane.requestedId ||
         call.projection_item_count !== projection.items.length ||
+        canonicalize(call.projection_item_ids) !== canonicalize(projection.items.map((item) => item.id)) ||
+        canonicalize(call.ingress_binding) !== canonicalize(ingressBinding) ||
+        call.session_id !== (ingressBinding === null ? null : (context.onBehalfOf?.session_id ?? null)) ||
         !verifyDigest(call.projection_digest, digestFor('conversation-projection', projection)) ||
         projection.world_id !== this.#worldId ||
         projection.case_id !== this.#caseId ||
@@ -662,17 +799,92 @@ export class ModelTurnCoordinator {
         return halt('admission-binding-invalid', 'confirmed', response.servedId);
       }
       if (admission.disposition === 'withheld') {
+        if (admissionEnvelope.release !== null) return halt('admission-binding-invalid', 'confirmed', response.servedId);
         this.#quarantine.destroy(input.turnId);
         this.#haltedLanes.add(key);
         return { disposition: 'withheld', admission };
       }
       try {
-        return {
-          disposition: 'quarantined',
+        if (ingressBinding === null) {
+          if (admissionEnvelope.release !== null) {
+            return halt('admission-binding-invalid', 'confirmed', response.servedId);
+          }
+          return {
+            disposition: 'quarantined',
+            admission,
+            quarantine: sealQuarantinedOutput(
+              this.#quarantine,
+              call.call_id,
+              request,
+              admission,
+              this.#caseId,
+              null,
+            ),
+          };
+        }
+        const release = admissionEnvelope.release;
+        const claim = context.onBehalfOf;
+        if (release === null || release.call_id !== call.call_id || claim === undefined) {
+          return halt('admission-binding-invalid', 'confirmed', response.servedId);
+        }
+        sealQuarantinedOutput(
+          this.#quarantine,
+          call.call_id,
+          request,
           admission,
-          quarantine: sealQuarantinedOutput(this.#quarantine, call.call_id, request, admission, this.#caseId),
-        };
+          this.#caseId,
+          release.release_id,
+        );
+        let ingestion: OutputReleaseConsumeResult;
+        try {
+          ingestion = outputReleaseConsumeResult.parse(
+            await consumeQuarantinedOutput(
+              this.#quarantine,
+              input.turnId,
+              release.release_id,
+              (content) =>
+                (this.#authorization.consumeOutputRelease as NonNullable<
+                  ModelTurnAuthorizationClient['consumeOutputRelease']
+                >)(this.#worldId, release.release_id, content, claim),
+            ),
+          );
+        } catch (error) {
+          if (
+            error instanceof RuntimeDependencyError &&
+            error.httpStatus >= 400 &&
+            error.httpStatus < 500
+          ) {
+            this.#haltedLanes.add(key);
+            throw new ModelTurnError('authorization-refused', 'confirmed', response.servedId);
+          }
+          let status: OutputReleaseStatusProjection;
+          try {
+            status = outputReleaseStatusProjection.parse(
+              await (this.#authorization.outputReleaseStatus as NonNullable<
+                ModelTurnAuthorizationClient['outputReleaseStatus']
+              >)(this.#worldId, release.release_id, claim),
+            );
+          } catch {
+            this.#haltedLanes.add(key);
+            throw new ModelTurnError('authorization-refused', 'confirmed', response.servedId);
+          }
+          if (status.state !== 'consumed' || status.consumption_result === null) {
+            this.#haltedLanes.add(key);
+            throw new ModelTurnError('authorization-refused', 'confirmed', response.servedId);
+          }
+          ingestion = outputReleaseConsumeResult.parse({
+            kind: 'output_release_consumption_result',
+            release_id: status.release_id,
+            state: 'consumed',
+            ...status.consumption_result,
+          });
+        }
+        if (ingestion.release_id !== release.release_id || ingestion.state !== 'consumed') {
+          return halt('admission-binding-invalid', 'confirmed', response.servedId);
+        }
+        return { disposition: 'released', admission, ingestion };
       } catch (error) {
+        if (error instanceof ModelTurnError) throw error;
         return halt(
           error instanceof ModelTurnError ? error.code : 'admission-binding-invalid',
           'confirmed',

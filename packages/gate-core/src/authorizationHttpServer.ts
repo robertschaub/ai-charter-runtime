@@ -29,6 +29,11 @@ import {
   ConversationProjectionServiceError,
 } from './conversationProjectionService.js';
 import {
+  CASE_OFFICER_MESSAGE_PROFILE_DIGEST,
+  ConversationTransportError,
+  type ConversationTransportService,
+} from './conversationTransport.js';
+import {
   CaseSessionHandoffError,
   type CaseSessionHandoffService,
 } from './caseSessionHandoff.js';
@@ -48,6 +53,8 @@ import {
   modelCallAdmissionRequest,
   modelCallBeginRequest,
   modelCallFailureRequest,
+  conversationMessageIngressRequest,
+  outputReleaseConsumeRequest,
   modelSelectionCheckRequest,
   modelSelectionRequest,
   timestamp,
@@ -125,6 +132,7 @@ const caseHandoffRedeemRequest = z
     case_id: id,
     target_origin: browserOrigin,
     authorization_boot_id: id,
+    session_id: id,
   })
   .strict();
 const runtimeConsoleConfig = z
@@ -276,6 +284,7 @@ type Handler = (
 export interface AuthorizationHttpServerOptions {
   readonly authorization: AuthorizationCore;
   readonly conversationProjections: ConversationProjectionService;
+  readonly conversationTransport: ConversationTransportService;
   readonly reads: AuthorizationReadSide;
   readonly adapter: AuthorizationHttpAdapter;
   readonly keyring: Keyring;
@@ -417,7 +426,11 @@ export class AuthorizationHttpServer {
       },
       'model-call.begin': async (request, context) => {
         const parsed = modelCallBeginRequest.parse(await body(request));
-        const started = await options.conversationProjections.beginCall({ ...parsed, actor: requireActor(context) });
+        const started = await options.conversationProjections.beginCall({
+          ...parsed,
+          actor: requireActor(context),
+          ...(context.sessionId === null ? {} : { sessionId: context.sessionId }),
+        });
         return {
           status: 200,
           body: started,
@@ -427,12 +440,92 @@ export class AuthorizationHttpServer {
       },
       'conversation.admit-output': async (request, context) => {
         const parsed = modelCallAdmissionRequest.parse(await body(request));
-        const admission = await options.conversationProjections.completeCall({ ...parsed, actor: requireActor(context) });
+        const admission = await options.conversationProjections.completeCall({
+          ...parsed,
+          actor: requireActor(context),
+          ...(context.sessionId === null ? {} : { sessionId: context.sessionId }),
+        });
         return {
           status: 200,
           body: admission,
           readLengths: { conversation_items: admission.decision.projection_item_count },
           accessEvidence: admission,
+        };
+      },
+      'conversation.message-ingress': async (request, context) => {
+        if (context.params['case_id'] !== configuredCaseId || context.sessionId === null) {
+          return { status: 403, body: { error: 'forbidden' } };
+        }
+        const parsed = conversationMessageIngressRequest.parse(await body(request));
+        const result = await options.conversationTransport.ingestMessage(
+          parsed,
+          requireActor(context),
+          context.sessionId,
+        );
+        return {
+          status: 200,
+          body: result,
+          accessEvidence: {
+            kind: 'conversation_message_ingress',
+            case_id: configuredCaseId,
+            message_id: result.message_id,
+            turn_id: result.turn_id,
+            item_id: result.message_item_id,
+            conversation_version: result.conversation_version,
+            content_digest: result.message_digest,
+            byte_length: Buffer.byteLength(parsed.text, 'utf8'),
+            ingress_profile_id: 'case-officer-message@1',
+            ingress_profile_digest: CASE_OFFICER_MESSAGE_PROFILE_DIGEST,
+            recorded_at: result.recorded_at,
+          },
+        };
+      },
+      'output-release.consume': async (request, context) => {
+        const releaseId = context.params['id'];
+        if (releaseId === undefined || context.sessionId === null) {
+          return { status: 403, body: { error: 'forbidden' } };
+        }
+        const parsed = outputReleaseConsumeRequest.parse(await body(request));
+        const result = await options.conversationTransport.consumeRelease(
+          releaseId,
+          parsed.content,
+          requireActor(context),
+          context.sessionId,
+        );
+        return {
+          status: 200,
+          body: result,
+          accessEvidence: options.conversationTransport.releaseConsumptionEvidence(releaseId, result),
+        };
+      },
+      'output-release.read': async (_request, context) => {
+        const releaseId = context.params['id'];
+        if (releaseId === undefined || context.sessionId === null) {
+          return { status: 403, body: { error: 'forbidden' } };
+        }
+        const result = options.conversationTransport.releaseStatus(
+          releaseId,
+          requireActor(context),
+          context.sessionId,
+        );
+        return { status: 200, body: result, accessEvidence: result };
+      },
+      'conversation.read': async (_request, context) => {
+        if (context.params['case_id'] !== configuredCaseId || context.sessionId === null) {
+          return { status: 403, body: { error: 'forbidden' } };
+        }
+        const result = options.conversationTransport.conversation(requireActor(context), context.sessionId);
+        return {
+          status: 200,
+          body: result,
+          readLengths: { conversation_events: result.events.length },
+          accessEvidence: {
+            kind: 'conversation_read',
+            case_id: result.case_id,
+            conversation_version: result.conversation_version,
+            event_count: result.events.length,
+            utf8_bytes: result.events.reduce((sum, event) => sum + Buffer.byteLength(event.text, 'utf8'), 0),
+          },
         };
       },
       'model-call.fail': async (request, context) => {
@@ -676,6 +769,17 @@ export class AuthorizationHttpServer {
             if (error instanceof ConversationProjectionServiceError) {
               return {
                 status: error.code === 'forbidden' ? 403 : error.code === 'invalid-scope' ? 422 : 409,
+                body: { error: error.code },
+              };
+            }
+            if (error instanceof ConversationTransportError) {
+              return {
+                status:
+                  error.code === 'forbidden'
+                    ? 403
+                    : error.code === 'invalid-message' || error.code === 'invalid-scope'
+                      ? 422
+                      : 409,
                 body: { error: error.code },
               };
             }
