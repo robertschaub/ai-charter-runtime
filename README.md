@@ -35,8 +35,9 @@ The exact upstream revision, digest, reviewed runtime baseline, and remaining mi
   The authorization gate and principal read view are wired into `runtime:start`. M5.9, reviewed at `e58d397`,
   adds a two-step, dynamic-session-only selected-lane call whose admitted bytes remain sealed and unreadable.
   M5.10, reviewed at `8a904f3`, adds a separate session-bound message preparation/use path, authorization-owned
-  `said`/`inferred` ingestion, and a short-lived single-use release with consume-time currentness checks. M5.7,
-  reviewed at `442397a`, adds replayable
+  `said`/`inferred` ingestion, and a short-lived single-use release with consume-time currentness checks. ADR-013
+  is only a review-pending M5.11 definition for governed proposal intake and pre-commit gates; no native proposal
+  path is implemented. M5.7, reviewed at `442397a`, adds replayable
   headless selection and switching through orchestrator-authenticated authorization routes. M5.8, reviewed at
   `ff9e438`, adds a dynamic-session-only browser caller with a two-minute, single-use preparation, redacted
   recovery, and no model request as part of selection. Empathy triggers are also inactive.
@@ -117,7 +118,8 @@ resulting process-private, maximum-two-minute preparation can be selected once. 
   authorization transcript. The browser receives neither raw provider response nor release reference. A safe link opens the routed dialogue on the
 authorization origin, where the responder's own role token reads the question/contract and posts the answer
 directly. Raw clients still face the same ACL, Origin guard, evidence resolution, and single-use state machine.
-This M5.10 path was reviewed at `8a904f3`; it does not complete M5. M4 acceptance
+This M5.10 path was reviewed at `8a904f3`; it does not complete M5. ADR-013 defines a possible next bounded
+proposal-intake path but is not an implementation or reviewed integration point. M4 acceptance
 is complete at reviewed runtime commit `e326562`; the M5.1 conversation-state and pure projection core was
 cross-model adversarially reviewed at `c1b5eb0` with no code findings. M5.2 was reviewed at `1973515`; it adds an
 access-recorded, orchestrator-only acting projection and offline screening fixtures keyed to an exact frozen
@@ -153,7 +155,8 @@ M5.9, reviewed at `e58d397`, constructs the two signed-card-bound adapters and c
 listener binds, gives provider configuration only to that child, and exposes single-use preparation/use/status
 routes to the dynamic case session. Startup itself makes no provider request, no live provider invocation was run
 for that tranche. M5.10, reviewed at `8a904f3`, adds the separately defined message-ingress, release, and transcript
-path without proposal construction, empathy completion, a live provider run, or M6 capture.
+path without proposal construction, empathy completion, a live provider run, or M6 capture. ADR-013 is the
+unreviewed M5.11 definition candidate for proposal construction; it changes none of those implementation limits.
 
 Offline and deterministic verification uses synthetic records and skips only the remote-presence step:
 
