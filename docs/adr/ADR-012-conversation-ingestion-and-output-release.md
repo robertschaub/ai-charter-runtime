@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: CC-BY-4.0 -->
 # ADR-012 — Authorization-owned conversation ingestion and single-use output release
 
-**Status:** accepted M5.10 definition at `a38d1ed`; implementation candidate awaiting exact-SHA adversarial review.
+**Status:** accepted M5.10 definition at `a38d1ed`; implementation reviewed GO at `8a904f3`.
 **Spec:** §3 (case console, orchestrator, and authorization service), §4 (four-store items and model-call
 bindings), §5 (entry boundary, model navigation, and empathy layer), §7 beats 4 and 19–21, and §10 M5.
 
@@ -300,9 +300,9 @@ records, and test snapshots. Tests use synthetic content only.
 
 ## Consequences and deferred work
 
-M5.10 would complete the bounded user-visible conversation transport portion of beat 19 while preserving the
-selection and substitution containment of beats 20–21. It would make authorization the durable owner of every new
-conversation item and make output release a single-use, currentness-checked transition rather than a quarantine
+M5.10 completes the bounded user-visible conversation transport portion of beat 19 while preserving the selection
+and substitution containment of beats 20–21. It makes authorization the durable owner of every new
+conversation item and makes output release a single-use, currentness-checked transition rather than a quarantine
 reader.
 
 The resulting transcript is still a synthetic POC surface, not a safe-chat, factuality, legal, assurance, or
@@ -311,5 +311,4 @@ silently promoted to `said`, `confirmed`, or `permitted`.
 
 Still deferred to separately approved slices: proposal construction from conversation state, semantic empathy
 trigger completion, broader ingestion sources/roles, retention and deletion propagation, live provider runs, and
-M6 capture. The present implementation candidate does not authorize another slice and is not a reviewed
-integration point until exact-SHA adversarial review returns GO.
+M6 capture. The reviewed implementation does not authorize another slice.

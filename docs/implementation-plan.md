@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: CC-BY-4.0 -->
 # Runtime implementation plan
 
-**Status date:** 2026-08-07
+**Status date:** 2026-08-08
 
 **Current milestone:** M4 complete; M5 implementation is in progress.
 
@@ -36,12 +36,13 @@ URLs, commit, paths, and digests above. A later upstream change does not silentl
 ## Reviewed implementation baseline
 
 The latest cross-model adversarially reviewed implementation is
-`e58d397c38ff00fe86f4c363cdb6dbcae9f707ed` (`e58d397`). Exact-SHA review of the bounded M5.9 native
-provider-ingress implementation returned **GO — no findings**. Validation reproduced `npm run typecheck`, 4 Git-safety
-hook tests, 344 Vitest tests across 40 files, `git diff --check`, and verification of both unchanged signed cards.
-That implementation and review did not move the Charter provenance baseline.
+`8a904f37bdee7b8f083ca92d35f6db474c14d8e2` (`8a904f3`). Exact-SHA review of the bounded M5.10 conversation
+ingestion and single-use output-release implementation returned **GO — no blocking findings**. Validation reproduced
+`npm run typecheck`, 4 Git-safety hook tests, 357 Vitest tests across 41 files, `git diff --check`, and verification
+of both unchanged signed cards. That implementation and review did not move the Charter provenance baseline.
 The published runtime head is `91bac64dede6a45b66e208e475127d46063176be` (`91bac64`). It contains the
-reviewed M5.3–M5.9 integration range and the documentation-only M5.9 review closure.
+reviewed M5.3–M5.9 integration range and the documentation-only M5.9 review closure. The M5.10 definition,
+correction, reviewed implementation, and this documentation-only acknowledgement remain local and unpushed.
 
 The M5.9 definition at `2a508ba7500d6f0775e4cb52b63a7ac222066f64` received one focused browser-redaction
 finding. Commit `be01667d169beb918ec4ceffb384edb8a526020e` bound field-by-field construction and exact-key
@@ -68,7 +69,7 @@ distinguish an uncommitted latest checkpoint from confirmed remote rollback or m
 | M2 — transactional core | Implemented and fault-tested | Authorization remains the single durable serialization point; authority defects fail closed. |
 | M3 — vertical slice | Implemented | Deterministic authorize → propose → rule → commit-verify → effect → receipt path, adapters, service ledger, and signed cards are present. |
 | M4 — escalation + governance console | **Complete** | Final exact-SHA review of `e326562` returned GO with no findings; the offline acceptance ledger preserves the remaining partial and not-assessed boundaries. |
-| M5 — screening + empathy + switching | **In progress** | M5.1 is reviewed at `c1b5eb0`; M5.2 at `1973515`; M5.3 at `1cc7fb2`, with its Low wording finding closed at `2b7b45a`; M5.4 at `b247d5b`; M5.5 durable call evidence at `1d992fa`; M5.6 system-use decisions at `b57c01e`; M5.7 headless governed selection at `442397a`; M5.8 browser initiation at `ff9e438`; and M5.9 native provider ingress at `e58d397`. The corrected M5.10 release/ingestion definition was reviewed GO at `a38d1ed`; its bounded implementation is now an unreviewed candidate. Empathy-trigger completion and M6 remain incomplete. |
+| M5 — screening + empathy + switching | **In progress** | M5.1 is reviewed at `c1b5eb0`; M5.2 at `1973515`; M5.3 at `1cc7fb2`, with its Low wording finding closed at `2b7b45a`; M5.4 at `b247d5b`; M5.5 durable call evidence at `1d992fa`; M5.6 system-use decisions at `b57c01e`; M5.7 headless governed selection at `442397a`; M5.8 browser initiation at `ff9e438`; M5.9 native provider ingress at `e58d397`; and M5.10 conversation ingestion and output release at `8a904f3`. Empathy-trigger completion and M6 remain incomplete. |
 | M6–M7 | Not started | Full capture/publication work follows the implementation milestones. |
 
 These labels describe repository implementation status, not assurance, certification, or independent
@@ -491,10 +492,10 @@ tests, 344 Vitest tests across 40 files, `git diff --check`, and verification of
 use synthetic adapters/fixtures only; no live provider call, probe, key operation, card signing, generated-record
 edit, push, output release, or M6 work was performed.
 
-### M5.10 reviewed definition and implementation candidate — conversation ingestion and single-use output release
+### M5.10 implemented and reviewed at `8a904f3` — conversation ingestion and single-use output release
 
 ADR-012 defines the bounded M5.10 contract. It moves both Charter provenance rows to the published `51b408c`
-baseline. The current implementation candidate realizes only this path:
+baseline. The reviewed implementation realizes only this path:
 
 - A case-session-only, two-step message preparation/use accepts one bounded case-officer message. Authorization
   assigns the fixed ingress profile, persists it as `said`, advances a case conversation version, and invalidates
@@ -520,17 +521,24 @@ forbidding late release, adds the missing amendment notes, and refuses collision
 receipts. Focused exact-SHA re-review of the correction at `a38d1ed` returned **GO — both findings closed; no new
 findings**. The maintainer then approved the bounded implementation slice.
 
-The candidate adds durable session-provenance receipts and replayable conversation/release state;
+The implementation adds durable session-provenance receipts and replayable conversation/release state;
 authorization-only ingress, consume/status and transcript routes; exact message/call/release binding; eager
 invalidation plus consume-time recheck; module-private quarantine transfer; and a dynamic-session-only browser
 preparation/use/transcript flow. Projection-only M5.9 calls remain sealed with no release path. It creates no
 proposal, ruling, commitment, effect, empathy completion, live probe, or M6 artifact.
 
-Local validation of the candidate passes `npm run typecheck`, 4 Git-safety hook tests, and 357 Vitest tests across
-41 files. The tests include real authorization/orchestrator listeners and synthetic loopback providers; they cover
+Exact-SHA adversarial review of `8a904f3` returned **GO — no blocking findings** and reproduced `npm run typecheck`,
+4 Git-safety hook tests, 357 Vitest tests across 41 files, `git diff --check`, and verification of both unchanged
+signed cards. The tests include real authorization/orchestrator listeners and synthetic loopback providers; they cover
 strict session/origin boundaries, provenance collision, bounded byte custody, exact replay, expired indeterminate
-calls, post-issue invalidation, and status-only recovery after a lost consume response. Both signed cards remain
-unchanged. These results make the candidate reviewable; they are not an exact-SHA adversarial review or assurance.
+calls, post-issue invalidation, and status-only recovery after a lost consume response. This is implementation
+evidence, not assurance or certification.
+
+The reviewer recorded two non-blocking hardening observations: the replay transaction-shape validator does not
+explicitly cap conversation events to one per case per transaction, and it enforces provenance-issue-with-consume
+but not the reverse pairing. Neither shape is emitted by an implemented composer; the first requires a forged WAL,
+and the second fails closed by leaving the resulting browser session unable to ingest. They are deferred rather
+than changing the exact reviewed implementation.
 
 ## Resolved browser credential-handoff protocol
 
@@ -549,13 +557,13 @@ authorization route. The bounded handoff and session implementation was independ
 
 ## Ordered next slices
 
-1. **Adversarially review the M5.10 implementation candidate at one exact committed SHA.** Verify lineage from
-   `a38d1ed`, the complete implementation delta, every ADR-012 acceptance boundary, retained M5.1–M5.9 semantics,
-   and the unchanged Charter provenance rows.
-2. **Close any review findings in one bounded correction.** A documentation-only acknowledgement after GO does not
-   require a recursive review; a code, protocol, ACL, provenance, or safety change does.
-3. **Do not begin another M5 slice or M6.** Proposal construction, empathy-trigger completion, broader ingestion,
-   live provider runs, and capture require separate approval after this implementation review.
+1. **The maintainer decides whether to publish the reviewed local range.** Before any push, inspect the complete
+   range from published `91bac64` through this documentation-only review acknowledgement; do not combine another
+   M5 slice.
+2. **Select and define the next bounded M5 slice only after separate approval.** Proposal construction,
+   empathy-trigger completion, broader ingestion, retention/deletion propagation, and live provider runs remain
+   separate choices; this review acknowledgement authorizes none of them.
+3. **Do not begin M6.** Capture remains gated on the remaining M5 work and separate approval.
 
 Substantive tranches are committed and reviewed at bounded integration points. A documentation-only status
 acknowledgement does not trigger a recursive review round; changes to ADRs, gates, invariants, ACLs,
