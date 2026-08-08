@@ -42,8 +42,9 @@ ingestion and single-use output-release implementation returned **GO — no bloc
 of both unchanged signed cards. That implementation and review did not move the Charter provenance baseline.
 The published runtime head is `5fdf79bb90aa4aa185ff6af5792d155e02f13d46` (`5fdf79b`). It contains the
 reviewed M5.3–M5.10 integration range and the documentation-only M5.10 review closure. The initial M5.11 definition
-review at `a39dafd` returned NO-GO on two Low contract-accuracy findings. Its local documentation-only correction
-is pending exact-SHA re-review; M5.11 remains unimplemented.
+review at `a39dafd` returned NO-GO on two Low contract-accuracy findings. The documentation-only correction at
+`fbc72cc70f4b360515ac777a20bc7a5b8f7064f3` (`fbc72cc`) received **GO — no findings**: both findings are closed,
+the ADR-002/ADR-013 contracts are mutually consistent, and M5.11 remains local, unpushed, and unimplemented.
 
 The M5.9 definition at `2a508ba7500d6f0775e4cb52b63a7ac222066f64` received one focused browser-redaction
 finding. Commit `be01667d169beb918ec4ceffb384edb8a526020e` bound field-by-field construction and exact-key
@@ -70,7 +71,7 @@ distinguish an uncommitted latest checkpoint from confirmed remote rollback or m
 | M2 — transactional core | Implemented and fault-tested | Authorization remains the single durable serialization point; authority defects fail closed. |
 | M3 — vertical slice | Implemented | Deterministic authorize → propose → rule → commit-verify → effect → receipt path, adapters, service ledger, and signed cards are present. |
 | M4 — escalation + governance console | **Complete** | Final exact-SHA review of `e326562` returned GO with no findings; the offline acceptance ledger preserves the remaining partial and not-assessed boundaries. |
-| M5 — screening + empathy + switching | **In progress** | M5.1 is reviewed at `c1b5eb0`; M5.2 at `1973515`; M5.3 at `1cc7fb2`, with its Low wording finding closed at `2b7b45a`; M5.4 at `b247d5b`; M5.5 durable call evidence at `1d992fa`; M5.6 system-use decisions at `b57c01e`; M5.7 headless governed selection at `442397a`; M5.8 browser initiation at `ff9e438`; M5.9 native provider ingress at `e58d397`; and M5.10 conversation ingestion and output release at `8a904f3`. M5.11 governed proposal intake is a definition correction pending re-review only. Empathy-trigger completion and M6 remain incomplete. |
+| M5 — screening + empathy + switching | **In progress** | M5.1 is reviewed at `c1b5eb0`; M5.2 at `1973515`; M5.3 at `1cc7fb2`, with its Low wording finding closed at `2b7b45a`; M5.4 at `b247d5b`; M5.5 durable call evidence at `1d992fa`; M5.6 system-use decisions at `b57c01e`; M5.7 headless governed selection at `442397a`; M5.8 browser initiation at `ff9e438`; M5.9 native provider ingress at `e58d397`; and M5.10 conversation ingestion and output release at `8a904f3`. The M5.11 governed-proposal definition is reviewed at `fbc72cc`; implementation is not approved or present. Empathy-trigger completion and M6 remain incomplete. |
 | M6–M7 | Not started | Full capture/publication work follows the implementation milestones. |
 
 These labels describe repository implementation status, not assurance, certification, or independent
@@ -545,8 +546,8 @@ than changing the exact reviewed implementation.
 
 ADR-013 proposes the next bounded bridge from the reviewed M5.10 conversation to the existing proposal/gate core.
 The initial definition review at `a39dafd` returned NO-GO because the precommit POST classification diverged from
-ADR-002 and ADR-002 lacked its companion M5.11 route amendment. The focused documentation correction is pending
-exact-SHA re-review; no implementation approval has been given:
+ADR-002 and ADR-002 lacked its companion M5.11 route amendment. The focused documentation correction at `fbc72cc`
+received GO with no findings. This is a reviewed definition only; no implementation approval has been given:
 
 - A dynamic-session-only, empty-body proposal preparation binds one explicit user gesture to the current
   authorization boot, conversation version, selection, signed-card model tuple, and case-session provenance.
@@ -588,14 +589,12 @@ authorization route. The bounded handoff and session implementation was independ
 
 ## Ordered next slices
 
-1. **Adversarially re-review the corrected M5.11 definition at one exact committed SHA.** Verify closure of the two
-   `a39dafd` contract-accuracy findings plus its Charter trace, separation
-   from M5.10 conversation release, authorization-owned proposal construction, fixed precommit order, browser
-   redaction, replay/currentness rules, and unchanged M5.1–M5.10 behavior.
-2. **Close any definition finding before implementation.** A correction remains documentation-only; do not mix it
-   with schemas, routes, WAL operations, UI, provider activity, or another M5 slice.
-3. **Implement M5.11 only after the definition returns GO and the maintainer separately approves implementation.**
-   Commit one bounded candidate for exact-SHA code review. M5.12 dialogue-trigger completion remains separate.
+1. **The maintainer separately decides whether to publish the reviewed M5.11 definition range.** A push is not
+   implementation approval and must not be combined with source changes.
+2. **Implement M5.11 only after separate explicit maintainer approval.** Build only the `fbc72cc` definition; do
+   not mix in M5.12 dialogue-trigger completion, dynamic Commit/effect initiation, live-provider work, or M6.
+3. **Commit the bounded implementation candidate for exact-SHA adversarial review.** Do not advance M5 status or
+   claim a usable proposal path before that review returns GO and any findings are closed.
 4. **Do not begin M6.** Live dual-model capture remains gated on the remaining reviewed M5 work and explicit
    approval.
 

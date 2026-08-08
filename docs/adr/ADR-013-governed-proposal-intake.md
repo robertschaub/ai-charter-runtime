@@ -2,8 +2,8 @@
 # ADR-013 — Governed proposal intake from admitted model output
 
 **Status:** proposed M5.11 definition; the initial review at `a39dafd` returned NO-GO on two documentation-contract
-findings. This focused correction requires exact-SHA adversarial re-review and separate maintainer approval before
-implementation.
+findings. The focused correction at `fbc72cc` received exact-SHA adversarial review GO with no findings.
+Implementation still requires separate maintainer approval.
 **Spec:** §3 (orchestrator proposes; authorization decides), §4 (structured proposal and gate-ruling contracts),
 §5 (entry boundary, model selection, transactional core, and empathy layer), §6 criteria 1–5, §7 beats 3–6 and
 19–21, and §10 M5.
