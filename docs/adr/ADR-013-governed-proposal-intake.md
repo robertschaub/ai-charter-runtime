@@ -1,8 +1,9 @@
 <!-- SPDX-License-Identifier: CC-BY-4.0 -->
 # ADR-013 — Governed proposal intake from admitted model output
 
-**Status:** proposed M5.11 definition; implementation requires exact-SHA adversarial review of this definition and
-separate maintainer approval.
+**Status:** proposed M5.11 definition; the initial review at `a39dafd` returned NO-GO on two documentation-contract
+findings. This focused correction requires exact-SHA adversarial re-review and separate maintainer approval before
+implementation.
 **Spec:** §3 (orchestrator proposes; authorization decides), §4 (structured proposal and gate-ruling contracts),
 §5 (entry boundary, model selection, transactional core, and empathy layer), §6 criteria 1–5, §7 beats 3–6 and
 19–21, and §10 M5.
@@ -198,12 +199,14 @@ POST /w/{world_id}/proposals/{proposal_id}/precommit
 GET  /w/{world_id}/proposals/{proposal_id}/precommit
 ```
 
-Only `proc:orchestrator` is accepted. Both routes are `authorityChanging: false`, Origin-guarded and access-recorded.
-The POST has a strict empty body: the caller cannot carry a proposal, select a gate, provide context/signals, skip
-a stage, name a service/action class, or request Commit. Authorization loads the exact stored proposal and origin
-sidecar and runs the existing gates in the fixed order Authorize, Submit, Verify. It stops at the first deny or
-escalate. It runs a later gate only after the previous allow is durably confirmed, and each gate remains idempotent
-for the exact proposal hash and gate.
+Only `proc:orchestrator` is accepted. The POST is conservatively `authorityChanging: true`, matching the existing
+`proposal.submit` classification because it can issue rulings and open an escalation; the read-only GET is
+`authorityChanging: false`. Both routes are Origin-guarded and access-recorded. The POST has a strict empty body:
+the caller cannot carry a proposal, select a gate, provide context/signals, skip a stage, name a service/action
+class, or request Commit. Authorization loads the exact stored proposal and origin sidecar and runs the existing
+gates in the fixed order Authorize, Submit, Verify. It stops at the first deny or escalate. It runs a later gate
+only after the previous allow is durably confirmed, and each gate remains idempotent for the exact proposal hash
+and gate.
 
 Before each gate authorization rechecks that the proposal-origin conversation version is current and every basis
 item remains active and exact. The existing gate path independently rechecks selection, mandate/card/model,
@@ -211,7 +214,8 @@ policy, system-use decision, screening evidence, and authority defects. An ambig
 the read-only precommit status; without durable proof of the prior allow, no later gate runs. No model call,
 proposal-content retransmission, or alternate lane is used to recover a gate response.
 
-The precommit endpoint applies existing authority but cannot change standing authority. It can issue only
+The classification tracks durable ruling/escalation mutation; it does not let the orchestrator decide the result
+or change standing authority. The precommit operation can issue only
 Authorize/Submit/Verify rulings and their records; it cannot issue a Commit ruling, reserve a counter, consume a
 nonce at commitment, mint a commit token, call a service, or create an effect. Dynamic browser sessions remain
 unable to use the static headless `/actions/execute` seam. The legacy full-proposal submission route remains a

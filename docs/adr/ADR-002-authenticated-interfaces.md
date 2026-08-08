@@ -112,6 +112,15 @@ model text beyond `inferred`, or call an authority-changing endpoint. Handoff re
 orchestrator session id into authorization-owned, maximum-15-minute provenance so caller headers cannot invent the
 `said` item's actor. Projection-only M5.9 calls remain sealed.
 
+**Proposed amendment (M5.11 governed proposal intake):** ADR-013 adds the dynamic-session browser routes
+`POST /cases/{case_id}/proposal-preparations`, `POST /cases/{case_id}/proposals`, and
+`GET /cases/{case_id}/proposal-runs/{proposal_run_id}`. Authorization adds process-only intake consume/status and
+case/run-status routes plus proposal precommit POST/status routes. All five accept only `proc:orchestrator`, are
+Origin-guarded and access-recorded, and expose strict projections. Intake consume and all three reads are
+`authorityChanging: false`; the precommit POST is `authorityChanging: true`, matching `proposal.submit`, because
+it can issue Authorize/Submit/Verify rulings and open an escalation. That classification does not let the
+orchestrator decide a ruling or reach Commit, reservation, token, service, or effect paths.
+
 ## Context
 
 Three OS processes make "the model proposes, a component outside the model decides, the executing service
@@ -201,6 +210,11 @@ Authorization service, all data routes under `/w/{world_id}/…`:
 | Route | Allowed |
 |---|---|
 | `POST /proposals` (submit frozen proposal → ruling) | `proc:orchestrator` |
+| `POST /proposal-intakes/{proposal_intake_id}/consume` (freeze one admitted draft) | `proc:orchestrator` only; `authorityChanging: false`, Origin-guarded, and access-recorded |
+| `GET /proposal-intakes/{proposal_intake_id}` (content-free intake status) | `proc:orchestrator` only; `authorityChanging: false`, Origin-guarded, and access-recorded |
+| `GET /cases/{case_id}/proposal-runs/{proposal_run_id}` (content-free proposal-run recovery) | `proc:orchestrator` only; `authorityChanging: false`, Origin-guarded, and access-recorded |
+| `POST /proposals/{proposal_id}/precommit` (fixed Authorize → Submit → Verify) | `proc:orchestrator` only; `authorityChanging: true`, Origin-guarded, and access-recorded |
+| `GET /proposals/{proposal_id}/precommit` (read-only precommit recovery) | `proc:orchestrator` only; `authorityChanging: false`, Origin-guarded, and access-recorded |
 | `POST /model-calls/begin` (durably bind one attempt, then return its authorization-resolved projection) | `proc:orchestrator` only; non-authorizing, Origin-guarded, and access-recorded |
 | `POST /model-outputs/admit` (consume the call reference and classify one bounded model result) | `proc:orchestrator` only; non-authorizing, Origin-guarded, and access-recorded |
 | `POST /model-calls/failures` (consume the call reference with fixed failure metadata) | `proc:orchestrator` only; non-authorizing, Origin-guarded, and access-recorded |
@@ -243,6 +257,13 @@ before their response. The exact config route precedes the wildcard console shel
 returns only `{authorization_origin, orchestrator_origin}` with `Cache-Control: no-store`, no CORS, and no
 caller-supplied override.
 
+ADR-013's intake consume follows the redemption classification: it freezes evidence and advances protocol state
+but changes no mandate, ruling, escalation, commitment, or effect, so all three intake routes are explicitly
+`authorityChanging: false`. The precommit POST instead follows `proposal.submit`: issuing a ruling or opening an
+escalation is a durable authority-record mutation and is conservatively `authorityChanging: true`, even though
+authorization alone decides the outcome and the operation cannot Commit or execute. Its companion status GET is
+read-only and `authorityChanging: false`. The independent `originGuarded: true` flag applies to all five routes.
+
 Orchestrator: exact `GET /console/runtime-config.json` and the remaining `GET /console/*` serve the same
 no-store origin projection and unauthenticated fixed assets, respectively; the exact route precedes the
 wildcard shell. `POST /w/{w}/case-sessions/redeem`
@@ -255,10 +276,13 @@ accepts only the single-use handoff in a strict same-origin body and is explicit
 `POST /w/{w}/cases/{id}/model-selections`,
 `POST /w/{w}/cases/{id}/model-turn-preparations`,
 `POST /w/{w}/cases/{id}/model-turns`, `GET /w/{w}/cases/{id}/model-turns/{turn_id}`,
+`POST /w/{w}/cases/{id}/proposal-preparations`, `POST /w/{w}/cases/{id}/proposals`,
+`GET /w/{w}/cases/{id}/proposal-runs/{proposal_run_id}`,
 and `POST /w/{w}/case-sessions/close` require the
 dynamic case-session bearer and re-check its exact role/world/case/expiry binding. ADR-010's two selection
-mutations, ADR-011's two model-turn mutations, and ADR-012's two message mutations additionally require a present
-exact orchestrator Origin; all other browser routes continue to reject a present foreign or opaque Origin. The
+mutations, ADR-011's two model-turn mutations, ADR-012's two message mutations, and ADR-013's two proposal
+mutations additionally require a present exact orchestrator Origin; all other browser routes continue to reject a
+present foreign or opaque Origin. The
 bounded headless
 transport seam `POST /w/{w}/actions/execute` continues to accept only the derived
 `ORCHESTRATOR_TOKEN_CASE_OFFICER`; browser sessions are denied there, and the static derived credential is
@@ -270,8 +294,9 @@ Services host: `POST /w/{w}/services/{service}/execute` `proc:orchestrator`;
 `commit-verify`, effect outcomes, and reconciliation probes carry both the current services-host boot id
 and the persistent services-ledger id; only absence under the same ledger id can release a commitment.
 
-**The orchestrator's process credential appears on exactly fifteen gate/data routes plus the dedicated
-case-session-handoff redemption route.** The fifteen are proposal submission, model-call begin,
+**The orchestrator's process credential appears on exactly twenty gate/data routes plus the dedicated
+case-session-handoff redemption route.** The twenty are proposal submission, proposal-intake consumption,
+proposal-intake status, proposal-run status, proposal precommit, proposal-precommit status, model-call begin,
 model-output admission, model-call failure, conversation-message ingestion, model-output-release consumption,
 model-output-release status, conversation read,
 model-selection read, model-selection check, model selection, revised-proposal continuation, ruling read,
@@ -442,6 +467,14 @@ allowlist projection**, decided per route and per credential:
 
 - proposal submission → `{ruling: {ruling_id, verdict, ux_class, reason, status,
   successor_ruling_id, validity_window}, escalation_id}`;
+- proposal-intake consumption → the idempotent content-free proposal/intake result carrying proposal/run ids,
+  terminal intake state, proposal hash, and recorded time. Intake status returns the same bounded lifecycle
+  metadata; neither returns draft content, store items, raw parse errors, prompt, or model output;
+- proposal-run status → the bounded process recovery binding needed to locate durable intake/proposal/precommit
+  progress without returning the private intake id or content;
+- proposal precommit → the fixed Authorize/Submit/Verify progress and each gate's ruling projection. The read-only
+  status returns only durably recorded progress; neither route exposes evidence refs, rationale, nonce,
+  reservation, commit token, credential, or executable capability;
 - ruling → `{ruling_id, verdict, ux_class, reason, status, successor_ruling_id, validity_window}`;
 - model-call begin → `{call, projection}` where `call` is the durable metadata-only open lifecycle binding and
   `projection` contains `{world_id, case_id, provider, role: "acting", items, summary}`. The case and role are
@@ -581,6 +614,17 @@ metadata for allowed ingestion/release/read operations. Browser schemas must be 
 exact-key tested so release ids, boot ids, tags, item ids, projections, and authority bindings never cross origins.
 Redemption/session tests must prove that message attribution resolves from the authorization-owned handoff receipt,
 not caller headers, and that mismatch, expiry, or a prior boot fails before storage.
+
+**Required with the M5.11 implementation.** Real-listener tests must prove the three orchestrator-origin proposal
+routes accept only the exact active dynamic case session; both browser mutations reject absent, foreign, and opaque
+Origin; and strict bodies cannot assert proposal/evidence content, schema/prompt, model/currentness, authority,
+gate, service/action class, or retry facts. The five authorization routes must accept only `proc:orchestrator`,
+reject present foreign/opaque Origin, and append bounded access evidence for success and refusal. Route-table tests
+must assert intake consume and all three reads are `authorityChanging: false`, while the precommit POST alone is
+`authorityChanging: true` and still permits no caller-selected gate, Commit, reservation, token, service, or
+effect. Intake ambiguity, single-use consumption, restart recovery by proposal-run id, exact-key browser/process
+projections, and fixed Authorize → Submit → Verify ordering must be covered without exposing content or private
+bindings. Existing dynamic sessions remain denied on the headless action-execution route.
 
 **Required with the browser handoff implementation.** Real-listener tests cover exact-origin/exact-window
 message acceptance and wrong/opaque origin or wrong-window refusal; mint-role confinement; absence from URLs,
