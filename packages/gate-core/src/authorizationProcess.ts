@@ -19,6 +19,8 @@ import { CaseSessionHandoffService } from './caseSessionHandoff.js';
 import { CardRegistry } from './cardRegistry.js';
 import { ConversationProjectionService } from './conversationProjectionService.js';
 import { ConversationTransportService } from './conversationTransport.js';
+import { ProposalIntakeService } from './proposalIntake.js';
+import { ProposalPrecommitService } from './proposalPrecommit.js';
 import {
   recordVerificationAccess,
   verifyRecords,
@@ -241,6 +243,15 @@ export async function startAuthorizationProcess(
       authorizationBootId: bootId,
     });
     await conversationTransport.expireReleases({ credential: 'proc:authz', claimed_role: null });
+    const proposalIntakes = new ProposalIntakeService({
+      store,
+      cards,
+      keyring,
+      systemUse,
+      caseId: demoCaseId,
+      authorizationBootId: bootId,
+    });
+    await proposalIntakes.expire();
     const conversationProjections = new ConversationProjectionService({
       store,
       cards,
@@ -250,6 +261,7 @@ export async function startAuthorizationProcess(
       screeningFixtures,
       systemUse,
       conversationTransport,
+      proposalIntakes,
     });
     const authorization = new AuthorizationCore({
       store,
@@ -266,6 +278,7 @@ export async function startAuthorizationProcess(
       resolveRegistryEvidence: (citation) => servicesProbe.resolveRegistryEvidence(citation),
     });
     await authorization.activatePolicy();
+    const proposalPrecommit = new ProposalPrecommitService({ store, authorization, proposalIntakes });
     const initialConversationItems = z.array(storeItem).parse(JSON.parse(readFileSync(conversationFixture, 'utf8')));
     await authorization.putConversationItems({
       caseId: demoCaseId,
@@ -283,6 +296,7 @@ export async function startAuthorizationProcess(
       });
       await caseHandoffs.expireIssued();
       await conversationTransport.expireReleases({ credential: 'proc:authz', claimed_role: null });
+      await proposalIntakes.expire();
     };
     await maintain();
     const adapter = new AuthorizationHttpAdapter({
@@ -302,6 +316,8 @@ export async function startAuthorizationProcess(
       authorization,
       conversationProjections,
       conversationTransport,
+      proposalIntakes,
+      proposalPrecommit,
       reads,
       adapter,
       keyring,

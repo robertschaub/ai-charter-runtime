@@ -23,6 +23,8 @@ import type {
   OutputReleaseRecord,
   PatternEvent,
   PolicyActivation,
+  ProposalIntakeRecord,
+  ProposalOriginRecord,
   RecordEntry,
   ReservationRecord,
   ReviewObligation,
@@ -32,6 +34,7 @@ import type {
 } from './schemas/index.js';
 import type { accessChainEntry } from './schemas/record.js';
 import { modelCallRecord } from './schemas/modelCall.js';
+import { proposalIntakeRecord } from './schemas/proposalIntake.js';
 import {
   CASE_OFFICER_MESSAGE_PROFILE,
   outputReleaseRecord,
@@ -69,6 +72,9 @@ export interface WorldState {
   readonly mandateStatus: Map<string, MandateRuntimeStatus>;
   readonly proposals: Map<string, FrozenProposal>;
   readonly proposalByHash: Map<string, string>;
+  readonly proposalOrigins: Map<string, ProposalOriginRecord>;
+  readonly proposalIntakes: Map<string, ProposalIntakeRecord>;
+  readonly proposalIntakeByRun: Map<string, string>;
   readonly systemUseDecisions: Map<string, SystemUseDecisionRecord>;
   readonly systemUseDecisionStatus: Map<string, SystemUseDecisionRuntimeStatus>;
   readonly caseSessionHandoffs: Map<string, CaseSessionHandoffRecord>;
@@ -112,6 +118,9 @@ export function createWorldState(worldId: string): WorldState {
     mandateStatus: new Map(),
     proposals: new Map(),
     proposalByHash: new Map(),
+    proposalOrigins: new Map(),
+    proposalIntakes: new Map(),
+    proposalIntakeByRun: new Map(),
     systemUseDecisions: new Map(),
     systemUseDecisionStatus: new Map(),
     caseSessionHandoffs: new Map(),
@@ -148,6 +157,9 @@ export function cloneWorldState(state: WorldState): WorldState {
     mandateStatus: new Map(state.mandateStatus),
     proposals: new Map(state.proposals),
     proposalByHash: new Map(state.proposalByHash),
+    proposalOrigins: new Map(state.proposalOrigins),
+    proposalIntakes: new Map(state.proposalIntakes),
+    proposalIntakeByRun: new Map(state.proposalIntakeByRun),
     systemUseDecisions: new Map(state.systemUseDecisions),
     systemUseDecisionStatus: new Map(state.systemUseDecisionStatus),
     caseSessionHandoffs: new Map(state.caseSessionHandoffs),
@@ -332,6 +344,190 @@ export function applyWorldOp(state: WorldState, op: WalOp, transactionTimestamp:
       }
       state.proposals.set(op.proposal.proposal_id, op.proposal);
       state.proposalByHash.set(op.proposal.proposal_hash, op.proposal.proposal_id);
+      break;
+    }
+    case 'proposal_origin.put': {
+      requireWorld(state, op.origin, 'proposal origin');
+      requireUnique(state.proposalOrigins, op.origin.proposal_id, `proposal origin ${op.origin.proposal_id}`);
+      const proposal = requireValue(state.proposals, op.origin.proposal_id, `proposal ${op.origin.proposal_id}`);
+      const intakeId = state.proposalIntakeByRun.get(op.origin.proposal_run_id);
+      const intake = intakeId === undefined ? undefined : state.proposalIntakes.get(intakeId);
+      const selection = state.modelSelections.get(op.origin.selection_id);
+      const mandate = state.mandates.get(mandateVersionKey(op.origin.mandate_id, op.origin.mandate_version));
+      if (
+        proposal.proposal_hash !== op.origin.proposal_hash ||
+        proposal.revision !== 1 ||
+        proposal.created_at !== op.origin.frozen_at ||
+        proposal.selection_id !== op.origin.selection_id ||
+        proposal.mandate_ref.mandate_id !== op.origin.mandate_id ||
+        proposal.mandate_ref.version !== op.origin.mandate_version ||
+        proposal.acting_model.card_id !== op.origin.card_id ||
+        proposal.acting_model.card_version !== op.origin.card_version ||
+        proposal.acting_model.requested_id !== op.origin.requested_id ||
+        proposal.acting_model.served_id !== op.origin.served_id ||
+        selection === undefined ||
+        selection.target.card_id !== op.origin.card_id ||
+        selection.target.card_version !== op.origin.card_version ||
+        selection.target.requested_id !== op.origin.requested_id ||
+        selection.target.card_digest !== op.origin.card_digest ||
+        selection.target.verifying_key_id !== op.origin.verifying_key_id ||
+        mandate === undefined ||
+        mandate.connected_service !== op.origin.service ||
+        mandate.action_class !== op.origin.action_class ||
+        state.policy === undefined ||
+        state.policy.evaluator_build_id !== op.origin.evaluator_build_id ||
+        intake === undefined ||
+        intake.state !== 'issued' ||
+        intake.call_id !== op.origin.call_id ||
+        intake.case_id !== op.origin.case_id ||
+        intake.session_id !== op.origin.session_id ||
+        intake.authorization_boot_id !== op.origin.authorization_boot_id ||
+        intake.conversation_version !== op.origin.conversation_version ||
+        intake.selection_id !== op.origin.selection_id ||
+        intake.mandate_id !== op.origin.mandate_id ||
+        intake.mandate_version !== op.origin.mandate_version ||
+        intake.card_id !== op.origin.card_id ||
+        intake.card_version !== op.origin.card_version ||
+        intake.requested_id !== op.origin.requested_id ||
+        intake.served_id !== op.origin.served_id ||
+        intake.projection_digest !== op.origin.projection_digest ||
+        intake.output_digest !== op.origin.output_digest ||
+        canonicalize(intake.projection_item_ids) !== canonicalize(op.origin.projection_item_ids) ||
+        canonicalize(intake.system_use_decision) !== canonicalize(op.origin.system_use_decision) ||
+        intake.policy_version !== op.origin.policy_version ||
+        intake.policy_content_digest !== op.origin.policy_content_digest ||
+        op.origin.frozen_at !== transactionTimestamp
+      ) {
+        fail('binding-mismatch', `proposal origin ${op.origin.proposal_id} differs from its intake or proposal`);
+      }
+      state.proposalOrigins.set(op.origin.proposal_id, op.origin);
+      break;
+    }
+    case 'proposal_intake.issue': {
+      requireWorld(state, op.intake, 'proposal intake');
+      if (
+        op.intake.state !== 'issued' ||
+        op.intake.issued_at !== transactionTimestamp ||
+        op.intake.state_changed_at !== transactionTimestamp ||
+        op.intake.proposal_id !== null ||
+        op.intake.refusal_reason !== null
+      ) {
+        fail('illegal-initial-state', 'a new proposal intake must be issued now without a terminal result');
+      }
+      requireUnique(state.proposalIntakes, op.intake.proposal_intake_id, `proposal intake ${op.intake.proposal_intake_id}`);
+      if (state.proposalIntakeByRun.has(op.intake.proposal_run_id)) {
+        fail('duplicate-state', `proposal run ${op.intake.proposal_run_id} already has an intake`);
+      }
+      if ([...state.proposalIntakes.values()].some((candidate) => candidate.call_id === op.intake.call_id)) {
+        fail('duplicate-state', `model call ${op.intake.call_id} already has a proposal intake`);
+      }
+      const call = requireValue(state.modelCalls, op.intake.call_id, `model call ${op.intake.call_id}`);
+      const binding = call.proposal_binding;
+      const receipt = state.caseSessionProvenance.get(op.intake.session_id);
+      if (
+        call.state !== 'terminal' ||
+        call.outcome !== 'admitted' ||
+        call.ingress_binding !== null ||
+        binding === null ||
+        binding.proposal_run_id !== op.intake.proposal_run_id ||
+        binding.conversation_version !== op.intake.conversation_version ||
+        binding.proposal_schema_digest !== op.intake.proposal_schema_digest ||
+        call.authorization_boot_id !== op.intake.authorization_boot_id ||
+        call.case_id !== op.intake.case_id ||
+        call.session_id !== op.intake.session_id ||
+        call.selection_id !== op.intake.selection_id ||
+        call.mandate_id !== op.intake.mandate_id ||
+        call.mandate_version !== op.intake.mandate_version ||
+        call.card_id !== op.intake.card_id ||
+        call.card_version !== op.intake.card_version ||
+        call.requested_id !== op.intake.requested_id ||
+        call.served_id !== op.intake.served_id ||
+        call.output_digest !== op.intake.output_digest ||
+        call.projection_digest !== op.intake.projection_digest ||
+        canonicalize(call.projection_item_ids) !== canonicalize(op.intake.projection_item_ids) ||
+        canonicalize(call.system_use_decision) !== canonicalize(op.intake.system_use_decision) ||
+        state.policy === undefined ||
+        state.policy.policy_version !== op.intake.policy_version ||
+        state.policy.policy_content_digest !== op.intake.policy_content_digest ||
+        receipt === undefined ||
+        receipt.state !== 'active' ||
+        receipt.case_id !== op.intake.case_id ||
+        receipt.authorization_boot_id !== op.intake.authorization_boot_id ||
+        transactionTimestamp >= receipt.expires_at
+      ) {
+        fail('binding-mismatch', `proposal intake ${op.intake.proposal_intake_id} differs from its admitted call`);
+      }
+      state.proposalIntakes.set(op.intake.proposal_intake_id, op.intake);
+      state.proposalIntakeByRun.set(op.intake.proposal_run_id, op.intake.proposal_intake_id);
+      break;
+    }
+    case 'proposal_intake.consume': {
+      const current = requireValue(
+        state.proposalIntakes,
+        op.proposal_intake_id,
+        `proposal intake ${op.proposal_intake_id}`,
+      );
+      const proposal = requireValue(state.proposals, op.proposal_id, `proposal ${op.proposal_id}`);
+      const origin = requireValue(state.proposalOrigins, op.proposal_id, `proposal origin ${op.proposal_id}`);
+      if (
+        current.state !== 'issued' ||
+        op.changed_at !== transactionTimestamp ||
+        transactionTimestamp >= current.expires_at ||
+        origin.proposal_run_id !== current.proposal_run_id ||
+        origin.call_id !== current.call_id ||
+        proposal.proposal_hash !== origin.proposal_hash
+      ) {
+        fail('illegal-transition', `proposal intake ${op.proposal_intake_id} cannot be consumed`);
+      }
+      state.proposalIntakes.set(
+        op.proposal_intake_id,
+        proposalIntakeRecord.parse({
+          ...current,
+          state: 'consumed',
+          state_changed_at: op.changed_at,
+          proposal_id: op.proposal_id,
+        }),
+      );
+      break;
+    }
+    case 'proposal_intake.refuse':
+    case 'proposal_intake.invalidate': {
+      const current = requireValue(
+        state.proposalIntakes,
+        op.proposal_intake_id,
+        `proposal intake ${op.proposal_intake_id}`,
+      );
+      if (current.state !== 'issued' || op.changed_at !== transactionTimestamp) {
+        fail('illegal-transition', `proposal intake ${op.proposal_intake_id} cannot become terminal`);
+      }
+      state.proposalIntakes.set(
+        op.proposal_intake_id,
+        proposalIntakeRecord.parse({
+          ...current,
+          state: op.op === 'proposal_intake.refuse' ? 'refused' : 'invalidated',
+          state_changed_at: op.changed_at,
+          refusal_reason: op.reason,
+        }),
+      );
+      break;
+    }
+    case 'proposal_intake.expire': {
+      const current = requireValue(
+        state.proposalIntakes,
+        op.proposal_intake_id,
+        `proposal intake ${op.proposal_intake_id}`,
+      );
+      if (
+        current.state !== 'issued' ||
+        op.changed_at !== transactionTimestamp ||
+        (current.expires_at > op.changed_at && current.authorization_boot_id === op.authorization_boot_id)
+      ) {
+        fail('illegal-transition', `proposal intake ${op.proposal_intake_id} cannot expire`);
+      }
+      state.proposalIntakes.set(
+        op.proposal_intake_id,
+        proposalIntakeRecord.parse({ ...current, state: 'expired', state_changed_at: op.changed_at }),
+      );
       break;
     }
     case 'case_session_handoff.issue': {
@@ -972,13 +1168,15 @@ export function applyWorldOp(state: WorldState, op: WalOp, transactionTimestamp:
         fail('duplicate-state', `model turn ${op.call.turn_id} already has a call`);
       }
       // Pre-M5.10 projection-only WAL entries have no item-id array; message-bound calls never use that legacy form.
+      const purposeCount = Number(op.call.ingress_binding !== null) + Number(op.call.proposal_binding !== null);
       if (
         (op.call.projection_item_count !== op.call.projection_item_ids.length &&
-          !(op.call.ingress_binding === null && op.call.projection_item_ids.length === 0)) ||
+          !(purposeCount === 0 && op.call.projection_item_ids.length === 0)) ||
         new Set(op.call.projection_item_ids).size !== op.call.projection_item_ids.length ||
-        (op.call.ingress_binding === null) !== (op.call.session_id === null)
+        purposeCount > 1 ||
+        (purposeCount === 0) !== (op.call.session_id === null)
       ) {
-        fail('binding-mismatch', `model call ${op.call.call_id} has inconsistent projection or ingress bindings`);
+        fail('binding-mismatch', `model call ${op.call.call_id} has inconsistent projection or purpose bindings`);
       }
       if (op.call.ingress_binding !== null && op.call.session_id !== null) {
         const ingress = op.call.ingress_binding;
@@ -1003,6 +1201,21 @@ export function applyWorldOp(state: WorldState, op: WalOp, transactionTimestamp:
           transactionTimestamp >= receipt.expires_at
         ) {
           fail('binding-mismatch', `model call ${op.call.call_id} has stale message ingress evidence`);
+        }
+      }
+      if (op.call.proposal_binding !== null && op.call.session_id !== null) {
+        const binding = op.call.proposal_binding;
+        const receipt = state.caseSessionProvenance.get(op.call.session_id);
+        if (
+          binding.conversation_version !== (state.conversationVersionByCase.get(op.call.case_id) ?? 0) ||
+          op.call.projection_item_ids.length === 0 ||
+          receipt === undefined ||
+          receipt.state !== 'active' ||
+          receipt.case_id !== op.call.case_id ||
+          receipt.authorization_boot_id !== op.call.authorization_boot_id ||
+          transactionTimestamp >= receipt.expires_at
+        ) {
+          fail('binding-mismatch', `model call ${op.call.call_id} has stale proposal-purpose evidence`);
         }
       }
       state.modelCalls.set(op.call.call_id, op.call);
@@ -1293,19 +1506,53 @@ function validateTransactionShape(state: WorldState, ops: readonly WalOp[], time
       fail('transaction-shape', 'output release issue must accompany admitted model-call completion');
     }
   }
+  for (const intakeOp of ops.filter(
+    (op): op is Extract<WalOp, { op: 'proposal_intake.issue' }> => op.op === 'proposal_intake.issue',
+  )) {
+    const completion = ops.find(
+      (op): op is Extract<WalOp, { op: 'model_call.complete' }> =>
+        op.op === 'model_call.complete' &&
+        op.call_id === intakeOp.intake.call_id &&
+        op.outcome === 'admitted',
+    );
+    if (completion === undefined || completion.completed_at !== timestamp) {
+      fail('transaction-shape', 'proposal intake issue must accompany admitted model-call completion');
+    }
+  }
   for (const completion of ops.filter(
     (op): op is Extract<WalOp, { op: 'model_call.complete' }> =>
       op.op === 'model_call.complete' && op.outcome === 'admitted',
   )) {
     const call = state.modelCalls.get(completion.call_id);
-    if (
-      call?.state === 'open' &&
-      call.ingress_binding !== null &&
-      !ops.some(
+    if (call?.state === 'open') {
+      const releaseCount = ops.filter(
         (op) => op.op === 'output_release.issue' && op.release.call_id === completion.call_id,
-      )
-    ) {
-      fail('transaction-shape', 'admitted message-bound call must issue exactly one output release');
+      ).length;
+      const intakeCount = ops.filter(
+        (op) => op.op === 'proposal_intake.issue' && op.intake.call_id === completion.call_id,
+      ).length;
+      if (
+        (call.ingress_binding !== null && (releaseCount !== 1 || intakeCount !== 0)) ||
+        (call.proposal_binding !== null && (intakeCount !== 1 || releaseCount !== 0)) ||
+        (call.ingress_binding === null && call.proposal_binding === null && (releaseCount !== 0 || intakeCount !== 0))
+      ) {
+        fail('transaction-shape', 'admitted model-call consumer does not match its purpose binding');
+      }
+    }
+  }
+  for (const consume of ops.filter(
+    (op): op is Extract<WalOp, { op: 'proposal_intake.consume' }> => op.op === 'proposal_intake.consume',
+  )) {
+    const freeze = ops.filter(
+      (op): op is Extract<WalOp, { op: 'proposal.freeze' }> =>
+        op.op === 'proposal.freeze' && op.proposal.proposal_id === consume.proposal_id,
+    );
+    const origin = ops.filter(
+      (op): op is Extract<WalOp, { op: 'proposal_origin.put' }> =>
+        op.op === 'proposal_origin.put' && op.origin.proposal_id === consume.proposal_id,
+    );
+    if (freeze.length !== 1 || origin.length !== 1 || consume.changed_at !== timestamp) {
+      fail('transaction-shape', 'proposal intake consumption must freeze one proposal with one origin');
     }
   }
   for (const eventOp of ops.filter(
@@ -1417,6 +1664,33 @@ export function validateWorldState(state: WorldState): void {
   for (const call of state.modelCalls.values()) {
     if (call.state === 'open' && state.currentModelSelectionByCase.get(call.case_id) !== call.selection_id) {
       fail('stale-open-call', `open model call ${call.call_id} is bound to a stale selection`);
+    }
+  }
+  for (const intake of state.proposalIntakes.values()) {
+    const call = state.modelCalls.get(intake.call_id);
+    if (
+      call === undefined ||
+      call.proposal_binding === null ||
+      call.ingress_binding !== null ||
+      call.case_id !== intake.case_id ||
+      call.proposal_binding.proposal_run_id !== intake.proposal_run_id
+    ) {
+      fail('orphan-state', `proposal intake ${intake.proposal_intake_id} has no matching proposal-purpose call`);
+    }
+    if (intake.state === 'consumed') {
+      const proposal = intake.proposal_id === null ? undefined : state.proposals.get(intake.proposal_id);
+      const origin = intake.proposal_id === null ? undefined : state.proposalOrigins.get(intake.proposal_id);
+      if (proposal === undefined || origin === undefined || proposal.proposal_hash !== origin.proposal_hash) {
+        fail('orphan-state', `consumed proposal intake ${intake.proposal_intake_id} has no frozen proposal origin`);
+      }
+    }
+  }
+  for (const origin of state.proposalOrigins.values()) {
+    const proposal = state.proposals.get(origin.proposal_id);
+    const intakeId = state.proposalIntakeByRun.get(origin.proposal_run_id);
+    const intake = intakeId === undefined ? undefined : state.proposalIntakes.get(intakeId);
+    if (proposal === undefined || intake?.proposal_id !== origin.proposal_id || intake.state !== 'consumed') {
+      fail('orphan-state', `proposal origin ${origin.proposal_id} has no consumed intake`);
     }
   }
   for (const receipt of state.caseSessionProvenance.values()) {

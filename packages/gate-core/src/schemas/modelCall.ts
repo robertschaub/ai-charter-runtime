@@ -5,6 +5,7 @@ import { z } from 'zod';
 import { cardSlug, hexDigest, id, integer, modelId, timestamp, worldId } from './common.js';
 import { modelCallIngressBinding, outputReleaseReference } from './conversationTransport.js';
 import { modelOutputAdmission, modelOutputAdmissionRequest } from './output.js';
+import { proposalCallBinding, proposalIntakeReference } from './proposalIntake.js';
 import { systemUseDecisionReference } from './systemUseDecision.js';
 
 export const MODEL_CALL_REPORTABLE_FAILURE_REASONS = [
@@ -26,8 +27,12 @@ export const modelCallBeginRequest = z
     turn_id: id,
     selection_id: id,
     ingress_binding: modelCallIngressBinding.nullable().default(null),
+    proposal_binding: proposalCallBinding.nullable().default(null),
   })
-  .strict();
+  .strict()
+  .refine((request) => request.ingress_binding === null || request.proposal_binding === null, {
+    message: 'model call purposes are mutually exclusive',
+  });
 export type ModelCallBeginRequest = z.infer<typeof modelCallBeginRequest>;
 
 const modelCallBinding = z.object({
@@ -47,11 +52,26 @@ const modelCallBinding = z.object({
   projection_item_count: integer.min(0),
   projection_item_ids: z.array(id).default([]),
   ingress_binding: modelCallIngressBinding.nullable().default(null),
+  proposal_binding: proposalCallBinding.nullable().default(null),
   session_id: id.nullable().default(null),
   system_use_decision: systemUseDecisionReference,
   opened_at: timestamp,
   expires_at: timestamp,
 });
+
+function refinePurposeBinding(
+  record: { ingress_binding: unknown | null; proposal_binding: unknown | null; session_id: string | null },
+  context: z.RefinementCtx,
+): void {
+  const purposeCount = Number(record.ingress_binding !== null) + Number(record.proposal_binding !== null);
+  if (purposeCount > 1 || (purposeCount === 0) !== (record.session_id === null)) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['session_id'],
+      message: 'model call purpose and session provenance are inconsistent',
+    });
+  }
+}
 
 export const modelCallOpenRecord = modelCallBinding
   .extend({
@@ -67,7 +87,8 @@ export const modelCallOpenRecord = modelCallBinding
   .refine((record) => record.opened_at <= record.expires_at, {
     path: ['expires_at'],
     message: 'model call expires before it opens',
-  });
+  })
+  .superRefine(refinePurposeBinding);
 
 const completedOutputCall = modelCallBinding.extend({
   state: z.literal('terminal'),
@@ -80,10 +101,12 @@ const completedOutputCall = modelCallBinding.extend({
 
 export const modelCallAdmittedRecord = completedOutputCall
   .extend({ outcome: z.literal('admitted') })
-  .strict();
+  .strict()
+  .superRefine(refinePurposeBinding);
 export const modelCallWithheldRecord = completedOutputCall
   .extend({ outcome: z.literal('withheld') })
-  .strict();
+  .strict()
+  .superRefine(refinePurposeBinding);
 export const modelCallFailedRecord = modelCallBinding
   .extend({
     state: z.literal('terminal'),
@@ -96,6 +119,7 @@ export const modelCallFailedRecord = modelCallBinding
   })
   .strict()
   .superRefine((record, ctx) => {
+    refinePurposeBinding(record, ctx);
     if (
       record.completed_at < record.opened_at ||
       (record.completed_at > record.expires_at && record.failure_reason !== 'selection-invalidated')
@@ -177,8 +201,18 @@ export const modelCallAdmission = z
     call_id: id,
     decision: modelOutputAdmission,
     release: outputReleaseReference.nullable().default(null),
+    proposal_intake: proposalIntakeReference.nullable().default(null),
   })
-  .strict();
+  .strict()
+  .superRefine((admission, context) => {
+    if (admission.release !== null && admission.proposal_intake !== null) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['proposal_intake'],
+        message: 'one model output cannot have two consumers',
+      });
+    }
+  });
 export type ModelCallAdmission = z.infer<typeof modelCallAdmission>;
 
 export const modelCallFailureRequest = z

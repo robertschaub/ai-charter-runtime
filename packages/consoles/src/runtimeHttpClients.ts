@@ -50,6 +50,16 @@ import {
   type ModelCallIngressBinding,
   type OutputReleaseConsumeResult,
   type OutputReleaseStatusProjection,
+  proposalCallBinding,
+  proposalIntakeConsumeResult,
+  proposalIntakeStatusProjection,
+  proposalRunProcessProjection,
+  proposalPrecommitProjection,
+  type ProposalCallBinding,
+  type ProposalIntakeConsumeResult,
+  type ProposalIntakeStatusProjection,
+  type ProposalRunProcessProjection,
+  type ProposalPrecommitProjection,
 } from 'gate-core';
 import type { ServicesHostExecution } from 'services-mock';
 import { z } from 'zod';
@@ -232,6 +242,7 @@ export class OrchestratorAuthorizationHttpClient extends JsonHttpClient {
     readonly turnId: string;
     readonly selectionId: string;
     readonly ingressBinding?: ModelCallIngressBinding;
+    readonly proposalBinding?: ProposalCallBinding;
   }, onBehalfOf?: OnBehalfOfClaim): Promise<ModelCallStart> {
     const world = worldId.parse(input.worldId);
     const request = modelCallBeginRequest.parse({
@@ -239,6 +250,8 @@ export class OrchestratorAuthorizationHttpClient extends JsonHttpClient {
       selection_id: id.parse(input.selectionId),
       ingress_binding:
         input.ingressBinding === undefined ? null : modelCallIngressBinding.parse(input.ingressBinding),
+      proposal_binding:
+        input.proposalBinding === undefined ? null : proposalCallBinding.parse(input.proposalBinding),
     });
     return modelCallStart.parse(await this.post(`/w/${world}/model-calls/begin`, request, onBehalfOf));
   }
@@ -315,6 +328,69 @@ export class OrchestratorAuthorizationHttpClient extends JsonHttpClient {
     const caseId = id.parse(caseIdInput);
     return conversationProcessProjection.parse(
       await this.get(`/w/${world}/cases/${caseId}/conversation`, onBehalfOf),
+    );
+  }
+
+  async consumeProposalIntake(
+    worldIdInput: string,
+    intakeIdInput: string,
+    content: string,
+    onBehalfOf: OnBehalfOfClaim,
+  ): Promise<ProposalIntakeConsumeResult | ProposalIntakeStatusProjection> {
+    const world = worldId.parse(worldIdInput);
+    const intakeId = id.parse(intakeIdInput);
+    const result = await this.post(`/w/${world}/proposal-intakes/${intakeId}/consume`, { content }, onBehalfOf);
+    const consumed = proposalIntakeConsumeResult.safeParse(result);
+    return consumed.success ? consumed.data : proposalIntakeStatusProjection.parse(result);
+  }
+
+  async proposalIntakeStatus(
+    worldIdInput: string,
+    intakeIdInput: string,
+    onBehalfOf: OnBehalfOfClaim,
+  ): Promise<ProposalIntakeStatusProjection> {
+    const world = worldId.parse(worldIdInput);
+    const intakeId = id.parse(intakeIdInput);
+    return proposalIntakeStatusProjection.parse(
+      await this.get(`/w/${world}/proposal-intakes/${intakeId}`, onBehalfOf),
+    );
+  }
+
+  async proposalRunStatus(
+    worldIdInput: string,
+    caseIdInput: string,
+    runIdInput: string,
+    onBehalfOf: OnBehalfOfClaim,
+  ): Promise<ProposalRunProcessProjection | ProposalPrecommitProjection> {
+    const world = worldId.parse(worldIdInput);
+    const caseId = id.parse(caseIdInput);
+    const runId = id.parse(runIdInput);
+    const result = await this.get(`/w/${world}/cases/${caseId}/proposal-runs/${runId}`, onBehalfOf);
+    const precommit = proposalPrecommitProjection.safeParse(result);
+    return precommit.success ? precommit.data : proposalRunProcessProjection.parse(result);
+  }
+
+  async runProposalPrecommit(
+    worldIdInput: string,
+    proposalIdInput: string,
+    onBehalfOf: OnBehalfOfClaim,
+  ): Promise<ProposalPrecommitProjection> {
+    const world = worldId.parse(worldIdInput);
+    const proposalId = id.parse(proposalIdInput);
+    return proposalPrecommitProjection.parse(
+      await this.post(`/w/${world}/proposals/${proposalId}/precommit`, {}, onBehalfOf),
+    );
+  }
+
+  async proposalPrecommitStatus(
+    worldIdInput: string,
+    proposalIdInput: string,
+    onBehalfOf: OnBehalfOfClaim,
+  ): Promise<ProposalPrecommitProjection> {
+    const world = worldId.parse(worldIdInput);
+    const proposalId = id.parse(proposalIdInput);
+    return proposalPrecommitProjection.parse(
+      await this.get(`/w/${world}/proposals/${proposalId}/precommit`, onBehalfOf),
     );
   }
 

@@ -9,6 +9,7 @@ import { createEmbeddedMac, type Keyring, verifyEmbeddedMac } from './keyring.js
 import {
   conversationMutationInvalidationOps,
   outputReleaseInvalidationOps,
+  proposalIntakeInvalidationOps,
 } from './conversationInvalidation.js';
 import {
   frozenProposal,
@@ -44,6 +45,7 @@ import {
   type Mandate,
   type ModelCallAccessEvidence,
   type ModelSelectionAccessEvidence,
+  type ProposalIntakeAccessEvidence,
   type PatternEvent,
   type RecordEntry,
   type ScreeningSignal,
@@ -288,7 +290,8 @@ export interface RecordAccessInput {
   readonly operationEvidence?:
     | ModelCallAccessEvidence
     | ModelSelectionAccessEvidence
-    | ConversationTransportAccessEvidence;
+    | ConversationTransportAccessEvidence
+    | ProposalIntakeAccessEvidence;
   readonly suppressedCount?: number;
   readonly suppressionWindowMs?: number;
   readonly suppressionFinal?: boolean;
@@ -996,6 +999,7 @@ export class AuthorizationCore {
           : [
               ...invalidationOps(state, () => true, 'policy-reload'),
               ...outputReleaseInvalidationOps(state, () => true, 'policy-reload', at),
+              ...proposalIntakeInvalidationOps(state, () => true, 'binding-invalidated', at),
               {
                 op: 'policy.reload' as const,
                 policy: {
@@ -1024,6 +1028,7 @@ export class AuthorizationCore {
           : [
               ...invalidationOps(state, () => true, 'policy-reload'),
               ...outputReleaseInvalidationOps(state, () => true, 'policy-reload', at),
+              ...proposalIntakeInvalidationOps(state, () => true, 'binding-invalidated', at),
               {
                 op: 'policy.reload' as const,
                 policy: {
@@ -1120,6 +1125,12 @@ export class AuthorizationCore {
           'mandate-amendment',
           at,
         ),
+        ...proposalIntakeInvalidationOps(
+          state,
+          (intake) => intake.mandate_id === parsed.mandate_id,
+          'binding-invalidated',
+          at,
+        ),
         { op: 'mandate.amend', mandate: parsed },
       ],
       result: undefined };
@@ -1139,6 +1150,12 @@ export class AuthorizationCore {
           state,
           (release) => release.mandate_id === mandateId && release.mandate_version === version,
           'mandate-revocation',
+          at,
+        ),
+        ...proposalIntakeInvalidationOps(
+          state,
+          (intake) => intake.mandate_id === mandateId && intake.mandate_version === version,
+          'binding-invalidated',
           at,
         ),
         { op: 'mandate.revoke', mandate_id: mandateId, version, revoked_at: at },
@@ -1167,6 +1184,34 @@ export class AuthorizationCore {
         at,
       ),
     );
+    return completed.result;
+  }
+
+  /** Internal M5.11 path: the caller supplies no governance facts; currentness is rechecked inside the ruling lock. */
+  async ruleProposalWithCurrentness(
+    input: RuleProposalInput,
+    assertCurrent: (state: WorldState, at: string) => void,
+  ): Promise<RuleProposalResult> {
+    if (input.actor.credential !== 'proc:orchestrator') {
+      throw new AuthorizationError('unauthorized-actor', 'only the orchestrator may submit a proposal for ruling');
+    }
+    const proposal = frozenProposal.parse(input.proposal);
+    verifyProposalHash(proposal);
+    const screening = await this.#screeningEvidence(proposal, input.gate, input.caseId);
+    const completed = await this.#store.transactWithState('native_precommit_ruling_issue', input.actor, (state, at) => {
+      assertCurrent(state, at);
+      return this.#buildRuling(
+        {
+          ...input,
+          proposal,
+          signals: screening.signals,
+          screeningPerformed: screening.performed,
+          screeningEvidenceRefs: screening.evidenceRefs,
+        },
+        state,
+        at,
+      );
+    });
     return completed.result;
   }
 
@@ -1461,6 +1506,12 @@ export class AuthorizationCore {
               'escalation-pattern-narrowing',
               at,
             ),
+            ...proposalIntakeInvalidationOps(
+              state,
+              (intake) => intake.mandate_id === defects.mandate?.mandate_id,
+              'binding-invalidated',
+              at,
+            ),
           );
           ops.push({
             op: 'mandate.amend',
@@ -1522,6 +1573,12 @@ export class AuthorizationCore {
         state,
         (release) => release.mandate_id === pattern.mandate_id,
         'escalation-pattern-narrowing',
+        at,
+      ),
+      ...proposalIntakeInvalidationOps(
+        state,
+        (intake) => intake.mandate_id === pattern.mandate_id,
+        'binding-invalidated',
         at,
       ),
       {

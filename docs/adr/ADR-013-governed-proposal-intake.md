@@ -1,9 +1,9 @@
 <!-- SPDX-License-Identifier: CC-BY-4.0 -->
 # ADR-013 — Governed proposal intake from admitted model output
 
-**Status:** proposed M5.11 definition; the initial review at `a39dafd` returned NO-GO on two documentation-contract
-findings. The focused correction at `fbc72cc` received exact-SHA adversarial review GO with no findings.
-Implementation still requires separate maintainer approval.
+**Status:** accepted M5.11 definition; the initial review at `a39dafd` returned NO-GO on two documentation-contract
+findings, and the focused correction at `fbc72cc` received exact-SHA adversarial review GO with no findings. The
+bounded implementation candidate is present and awaits exact-SHA adversarial review.
 **Spec:** §3 (orchestrator proposes; authorization decides), §4 (structured proposal and gate-ruling contracts),
 §5 (entry boundary, model selection, transactional core, and empathy layer), §6 criteria 1–5, §7 beats 3–6 and
 19–21, and §10 M5.
@@ -313,8 +313,9 @@ consequential effect still requires a separate executing service to verify a fre
 
 ## Consequences and deferred work
 
-M5.11 would replace the synthetic caller-carried proposal gap with a native, conversation-bound, model-proposed,
-authorization-frozen artifact and fixed pre-commit evidence sequence. It would not make a proposal true, safe,
+The M5.11 implementation candidate replaces the synthetic caller-carried proposal gap with a native,
+conversation-bound, model-proposed,
+authorization-frozen artifact and fixed pre-commit evidence sequence. It does not make a proposal true, safe,
 lawful, approved, committed, or executed, and it would not complete M5.
 
 Still deferred: semantic `unconfirmed_inference_as_fact` dialogue-trigger routing and response-driven proposal

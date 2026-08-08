@@ -332,6 +332,59 @@ describe('ADR-002 authorization HTTP adapter', () => {
     expect(store.snapshot().accessRecords).toHaveLength(0);
   });
 
+  it('fixes the M5.11 route classifications and confines all five routes to the orchestrator process', async () => {
+    const processRoutes = AUTHORIZATION_ROUTES.filter(
+      (route) => route.allowed !== 'open' && Array.from(route.allowed).some((allowed) => allowed === 'proc:orchestrator'),
+    );
+    expect(processRoutes.filter((route) => route.id !== 'case-handoff.redeem')).toHaveLength(20);
+    const expected = {
+      'proposal-intake.consume': false,
+      'proposal-intake.read': false,
+      'proposal-run.read': false,
+      'proposal-precommit.run': true,
+      'proposal-precommit.read': false,
+    } as const;
+    const paths = {
+      'proposal-intake.consume': '/w/w-demo/proposal-intakes/pint_one/consume',
+      'proposal-intake.read': '/w/w-demo/proposal-intakes/pint_one',
+      'proposal-run.read': '/w/w-demo/cases/case_demo/proposal-runs/prun_one',
+      'proposal-precommit.run': '/w/w-demo/proposals/prp_one/precommit',
+      'proposal-precommit.read': '/w/w-demo/proposals/prp_one/precommit',
+    } as const;
+    const { adapter, store } = setup();
+    const operation = vi.fn(async () => ({ status: 200, body: { ok: true }, readLengths: { entries: 0 } }));
+    for (const [routeId, authorityChanging] of Object.entries(expected)) {
+      const route = AUTHORIZATION_ROUTES.find((candidate) => candidate.id === routeId)!;
+      expect(route).toMatchObject({
+        allowed: ['proc:orchestrator'],
+        authorityChanging,
+        originGuarded: true,
+        accessLoggedOnServe: true,
+      });
+      for (const token of ['1', '2', '3', '5']) {
+        await expect(adapter.dispatch({
+          method: route.method,
+          pathname: paths[routeId as keyof typeof paths],
+          authorization: `Bearer ${token.repeat(64)}`,
+        }, operation)).resolves.toMatchObject({ status: 403, body: { error: 'forbidden' } });
+      }
+      await expect(adapter.dispatch({
+        method: route.method,
+        pathname: paths[routeId as keyof typeof paths],
+        authorization: `Bearer ${'4'.repeat(64)}`,
+        origin: 'null',
+      }, operation)).resolves.toMatchObject({ status: 403, body: { error: 'forbidden' } });
+      await expect(adapter.dispatch({
+        method: route.method,
+        pathname: paths[routeId as keyof typeof paths],
+        authorization: `Bearer ${'4'.repeat(64)}`,
+        origin: 'http://127.0.0.1:7801',
+      }, operation)).resolves.toMatchObject({ status: 200, body: { ok: true } });
+    }
+    expect(operation).toHaveBeenCalledTimes(5);
+    expect(store.snapshot().accessRecords.filter((record) => 'outcome' in record && record.outcome === 'served')).toHaveLength(5);
+  });
+
   it('begins a model call only for the orchestrator and records every attempt', async () => {
     const { adapter, store } = setup();
     const operation = vi.fn(async (context) => ({ status: 200, body: { actor: context.actor?.credential } }));

@@ -15,6 +15,8 @@ import {
   CaseSessionHandoffService,
   ConversationProjectionService,
   ConversationTransportService,
+  ProposalIntakeService,
+  ProposalPrecommitService,
   digestFor,
   Keyring,
   loadPolicyFile,
@@ -156,20 +158,16 @@ async function authorizationHarness() {
   });
   stores.push(store);
   const systemUse = syntheticSystemUseForTests(store);
+  const cards = CardRegistry.load(CARDS);
   const core = new AuthorizationCore({
     store,
     keyring,
     policy,
     systemUse,
     resolveAuthorizedAgent: (actor) => (actor.credential === 'proc:orchestrator' ? 'agent_demo' : undefined),
-    resolveScreening: () => ({ performed: false, signals: [], evidenceRefs: [] }),
-    validateScreeningResolution: () => false,
-    resolveModelEvidence: () => ({
-      servedModelAccepted: true,
-      cardStatus: 'current',
-      cardKeyId: 'card-test',
-      cardDigest: 'c'.repeat(64),
-    }),
+    resolveScreening: () => ({ performed: true, signals: [], evidenceRefs: [] }),
+    validateScreeningResolution: () => true,
+    resolveModelEvidence: (value) => cards.resolve(value),
   });
   await core.activatePolicy();
   const mandateBody = readJson(join(DEMO, 'mandate.json')) as Omit<Mandate, 'binding'>;
@@ -185,7 +183,6 @@ async function authorizationHarness() {
     origin_actor: 'applicant',
   };
   await core.putConversationItems({ caseId: 'case_demo', items: [...conversation, restricted], actor: AUTHZ });
-  const cards = CardRegistry.load(CARDS);
   const conversationTransport = new ConversationTransportService({
     store,
     cards,
@@ -207,6 +204,18 @@ async function authorizationHarness() {
   void ignoredHandoffExpiry;
   const sessionId = 'session_message_turn';
   await handoffs.redeem({ ...handoffInput, session_id: sessionId }, ORCHESTRATOR);
+  const proposalIntakes = new ProposalIntakeService({
+    store,
+    cards,
+    keyring,
+    systemUse,
+    caseId: 'case_demo',
+    authorizationBootId: 'authz_boot_model_turn_1',
+    now: () => at,
+    nextIntakeId: () => 'pint_test_native',
+    nextProposalId: () => 'prp_test_native',
+    nextActionId: () => 'act_test_native',
+  });
   const projections = new ConversationProjectionService({
     store,
     cards,
@@ -216,8 +225,10 @@ async function authorizationHarness() {
     screeningFixtures: [],
     systemUse,
     conversationTransport,
+    proposalIntakes,
     now: () => at,
   });
+  const proposalPrecommit = new ProposalPrecommitService({ store, authorization: core, proposalIntakes });
   const adapter = new AuthorizationHttpAdapter({
     authorization: core,
     ownOrigin: 'http://127.0.0.1:7801',
@@ -234,6 +245,8 @@ async function authorizationHarness() {
     authorization: core,
     conversationProjections: projections,
     conversationTransport,
+    proposalIntakes,
+    proposalPrecommit,
     reads: {} as AuthorizationReadSide,
     adapter,
     keyring,
@@ -249,7 +262,13 @@ async function authorizationHarness() {
     port: 0,
   });
   const address = await server.listen();
-  closeables.push(() => server.close());
+  let authorizationServerClosed = false;
+  const closeAuthorization = async () => {
+    if (authorizationServerClosed) return;
+    authorizationServerClosed = true;
+    await server.close();
+  };
+  closeables.push(closeAuthorization);
   const authorization = new OrchestratorAuthorizationHttpClient({
     origin: address.origin,
     token: ORCHESTRATOR_TOKEN,
@@ -266,12 +285,20 @@ async function authorizationHarness() {
     core,
     store,
     systemUse,
+    cards,
+    keyring,
     authorization,
     authorizationOrigin: address.origin,
     mandateBody,
     selectionId: selected.selection.selection_id,
     sessionId,
     conversationTransport,
+    proposalIntakes,
+    proposalPrecommit,
+    root,
+    policy,
+    buildDigest,
+    closeAuthorization,
     setAt(value: string) {
       at = value;
     },
@@ -306,6 +333,23 @@ const turnBase = {
   requestedId: 'swiss-ai/apertus-v1.5-70b',
   maxOutputTokens: 256,
 } as const;
+
+function nativeProposalContent(overrides: Record<string, unknown> = {}): string {
+  return JSON.stringify({
+    declared_objective: 'File the synthetic grant application.',
+    proposed_action: 'Submit the synthetic grant filing.',
+    target: { recipient: 'grant-office', resource: 'application-42' },
+    exact_parameters: { amount_minor_units: 5000, reference: 'screening-fixture' },
+    material_input_ids: ['said_public'],
+    derived_claim_ids: [],
+    data_to_be_disclosed: ['applicant_name'],
+    cost_obligation: { amount_minor_units: 5000, description: 'Synthetic grant amount.' },
+    material_consequences: ['Creates a synthetic public-funds commitment.'],
+    reversibility_class: 'partially-reversible',
+    commercial_influence: { applicable: false, note: 'Not applicable.' },
+    ...overrides,
+  });
+}
 
 describe('M5.4 containment with M5.5 durable model-call evidence', () => {
   it('enforces selection and conversation transport routes on a real listener with bounded access evidence', async () => {
@@ -1005,6 +1049,237 @@ describe('M5.4 containment with M5.5 durable model-call evidence', () => {
     );
     expect(replay.conversation_version).toBe(2);
     expect(h.store.snapshot().conversationVersionByCase.get('case_demo')).toBe(3);
+  });
+
+  it('uses native JSON schema for one proposal-purpose call, freezes through the distinct intake, and stops before Commit', async () => {
+    const h = await authorizationHarness();
+    const provider = await loopbackProvider();
+    const content = nativeProposalContent();
+    provider.enqueue({ model: h.mandateBody.default_acting_model.requested_id, content });
+    const coordinator = new ModelTurnCoordinator({
+      worldId: 'w-demo',
+      caseId: 'case_demo',
+      authorization: h.authorization,
+      lanes: [lane(provider)],
+    });
+    const claim = { role: 'case_officer' as const, session_id: h.sessionId };
+    const outcome = await coordinator.runProposal(
+      {
+        proposalRunId: 'prun_native_test',
+        conversationVersion: h.store.snapshot().conversationVersionByCase.get('case_demo') ?? 0,
+        turnId: 'turn_native_proposal',
+        selectionId: h.selectionId,
+        cardId: h.mandateBody.default_acting_model.card_id,
+        cardVersion: h.mandateBody.default_acting_model.card_version,
+        requestedId: h.mandateBody.default_acting_model.requested_id,
+      },
+      { onBehalfOf: claim },
+    );
+    expect(outcome).toMatchObject({
+      disposition: 'proposal-frozen',
+      proposal: { proposal_run_id: 'prun_native_test', proposal_id: 'prp_test_native', state: 'consumed' },
+    });
+    expect(coordinator.quarantine.size).toBe(0);
+    expect(provider.requests).toHaveLength(1);
+    expect(provider.requests[0]).toMatchObject({
+      max_tokens: 512,
+      response_format: { type: 'json_schema', json_schema: { name: 'proposal_draft_v1', strict: true } },
+    });
+    expect(provider.requests[0]).not.toHaveProperty('tools');
+    const snapshotAfterFreeze = h.store.snapshot();
+    expect([...snapshotAfterFreeze.proposalIntakes.values()]).toEqual([
+      expect.objectContaining({ state: 'consumed', proposal_id: 'prp_test_native', proposal_run_id: 'prun_native_test' }),
+    ]);
+    expect(snapshotAfterFreeze.proposalOrigins.get('prp_test_native')).toMatchObject({
+      proposal_run_id: 'prun_native_test',
+      case_id: 'case_demo',
+      service: h.mandateBody.connected_service,
+      action_class: h.mandateBody.action_class,
+    });
+    expect(snapshotAfterFreeze.outputReleases.size).toBe(0);
+    await expect(
+      h.authorization.consumeProposalIntake('w-demo', 'pint_test_native', content, claim),
+    ).resolves.toEqual(outcome.proposal);
+    await expect(
+      h.authorization.consumeProposalIntake('w-demo', 'pint_test_native', `${content} `, claim),
+    ).rejects.toBeInstanceOf(RuntimeDependencyError);
+
+    const intakeStatus = await h.authorization.proposalIntakeStatus('w-demo', 'pint_test_native', claim);
+    expect(Object.keys(intakeStatus).sort()).toEqual([
+      'call_id', 'case_id', 'expires_at', 'issued_at', 'kind', 'proposal_id', 'proposal_intake_id',
+      'proposal_run_id', 'refusal_reason', 'state', 'state_changed_at',
+    ]);
+    expect(JSON.stringify(intakeStatus)).not.toContain(content);
+    const callerSelectedGate = await fetch(
+      `${h.authorizationOrigin}/w/w-demo/proposals/${outcome.proposal.proposal_id}/precommit`,
+      {
+        method: 'POST',
+        headers: {
+          authorization: `Bearer ${ORCHESTRATOR_TOKEN}`,
+          origin: 'http://127.0.0.1:7801',
+          'content-type': 'application/json',
+          'x-on-behalf-of-role': claim.role,
+          'x-session-id': claim.session_id,
+        },
+        body: JSON.stringify({ gate: 'commit' }),
+      },
+    );
+    expect(callerSelectedGate.status).toBe(422);
+    expect(h.store.snapshot().rulings.size).toBe(0);
+
+    const precommit = await h.authorization.runProposalPrecommit('w-demo', outcome.proposal.proposal_id, claim);
+    expect(precommit.proposal_run_id).toBe('prun_native_test');
+    expect(precommit.state).toBe('verified');
+    expect(precommit.gates.map((entry) => entry.gate)).toEqual(['authorize', 'submit', 'verify']);
+    const final = h.store.snapshot();
+    expect([...final.rulings.values()].some((ruling) => ruling.gate === 'commit')).toBe(false);
+    expect(final.reservations.size).toBe(0);
+    expect(final.commitments.size).toBe(0);
+    expect(final.effects.size).toBe(0);
+    expect(JSON.stringify(final.accessRecords)).not.toContain(content);
+    await expect(
+      h.authorization.proposalRunStatus('w-demo', 'case_demo', 'prun_native_test', claim),
+    ).resolves.toEqual(precommit);
+
+    await h.closeAuthorization();
+    h.store.close();
+    const reopened = WalStore.open({
+      recordsRoot: h.root,
+      worldId: 'w-demo',
+      runId: 'run_model_turn_replay',
+      bootId: 'authz_boot_model_turn_replay',
+      policyVersion: h.policy.policy.policy_version,
+      policyContentDigest: h.policy.policyContentDigest,
+      evaluatorBuildDigest: h.buildDigest,
+      now: () => '2026-08-01T09:00:00.000Z',
+    });
+    stores.push(reopened);
+    const replayed = reopened.snapshot();
+    expect(replayed.proposalIntakes.get('pint_test_native')).toMatchObject({
+      state: 'consumed',
+      proposal_id: 'prp_test_native',
+      proposal_run_id: 'prun_native_test',
+    });
+    expect(replayed.proposals.get('prp_test_native')).toEqual(final.proposals.get('prp_test_native'));
+    expect(replayed.proposalOrigins.get('prp_test_native')).toEqual(final.proposalOrigins.get('prp_test_native'));
+    expect([...replayed.rulings.values()].filter(
+      (ruling) => ruling.binding.frozen_proposal_hash === final.proposals.get('prp_test_native')?.proposal_hash,
+    ).map((ruling) => ruling.gate)).toEqual(['authorize', 'submit', 'verify']);
+    const restartedIntakes = new ProposalIntakeService({
+      store: reopened,
+      cards: h.cards,
+      keyring: h.keyring,
+      systemUse: syntheticSystemUseForTests(reopened),
+      caseId: 'case_demo',
+      authorizationBootId: 'authz_boot_model_turn_replay',
+    });
+    await expect(restartedIntakes.expire()).resolves.toBe(3);
+    expect([...reopened.snapshot().rulings.values()].filter(
+      (ruling) => ruling.binding.frozen_proposal_hash === final.proposals.get('prp_test_native')?.proposal_hash,
+    ).map((ruling) => ruling.status)).toEqual(['invalidated', 'invalidated', 'invalidated']);
+  });
+
+  it('refuses malformed admitted proposal bytes atomically and exposes no proposal or conversation release', async () => {
+    const h = await authorizationHarness();
+    const provider = await loopbackProvider();
+    const content = nativeProposalContent().replace(
+      '"declared_objective":',
+      '"declared_objective":"duplicate","declared_objective":',
+    );
+    provider.enqueue({ model: h.mandateBody.default_acting_model.requested_id, content });
+    const coordinator = new ModelTurnCoordinator({
+      worldId: 'w-demo',
+      caseId: 'case_demo',
+      authorization: h.authorization,
+      lanes: [lane(provider)],
+    });
+    await expect(coordinator.runProposal({
+      proposalRunId: 'prun_malformed_test',
+      conversationVersion: h.store.snapshot().conversationVersionByCase.get('case_demo') ?? 0,
+      turnId: 'turn_malformed_proposal',
+      selectionId: h.selectionId,
+      cardId: h.mandateBody.default_acting_model.card_id,
+      cardVersion: h.mandateBody.default_acting_model.card_version,
+      requestedId: h.mandateBody.default_acting_model.requested_id,
+    }, { onBehalfOf: { role: 'case_officer', session_id: h.sessionId } })).rejects.toMatchObject({
+      code: 'authorization-refused',
+      providerDisclosure: 'confirmed',
+    });
+    const snapshot = h.store.snapshot();
+    expect([...snapshot.proposalIntakes.values()]).toEqual([
+      expect.objectContaining({ state: 'refused', refusal_reason: 'invalid-content', proposal_id: null }),
+    ]);
+    expect(snapshot.proposals.size).toBe(0);
+    expect(snapshot.proposalOrigins.size).toBe(0);
+    expect(snapshot.outputReleases.size).toBe(0);
+    expect(coordinator.quarantine.size).toBe(0);
+    expect(provider.requests).toHaveLength(1);
+    expect(JSON.stringify(snapshot.accessRecords)).not.toContain(content);
+  });
+
+  it('refuses a projected item used under the wrong proposal-evidence standing', async () => {
+    const h = await authorizationHarness();
+    const provider = await loopbackProvider();
+    provider.enqueue({
+      model: h.mandateBody.default_acting_model.requested_id,
+      content: nativeProposalContent({ material_input_ids: [], derived_claim_ids: ['said_public'] }),
+    });
+    const coordinator = new ModelTurnCoordinator({
+      worldId: 'w-demo',
+      caseId: 'case_demo',
+      authorization: h.authorization,
+      lanes: [lane(provider)],
+    });
+    await expect(coordinator.runProposal({
+      proposalRunId: 'prun_wrong_standing',
+      conversationVersion: h.store.snapshot().conversationVersionByCase.get('case_demo') ?? 0,
+      turnId: 'turn_wrong_standing',
+      selectionId: h.selectionId,
+      cardId: h.mandateBody.default_acting_model.card_id,
+      cardVersion: h.mandateBody.default_acting_model.card_version,
+      requestedId: h.mandateBody.default_acting_model.requested_id,
+    }, { onBehalfOf: { role: 'case_officer', session_id: h.sessionId } })).rejects.toMatchObject({
+      code: 'authorization-refused',
+    });
+    expect([...h.store.snapshot().proposalIntakes.values()]).toEqual([
+      expect.objectContaining({ state: 'refused', refusal_reason: 'invalid-evidence', proposal_id: null }),
+    ]);
+    expect(h.store.snapshot().proposals.size).toBe(0);
+    expect(h.store.snapshot().proposalOrigins.size).toBe(0);
+  });
+
+  it('refuses the first precommit gate after the authorization conversation changes', async () => {
+    const h = await authorizationHarness();
+    const provider = await loopbackProvider();
+    provider.enqueue({ model: h.mandateBody.default_acting_model.requested_id, content: nativeProposalContent() });
+    const coordinator = new ModelTurnCoordinator({
+      worldId: 'w-demo',
+      caseId: 'case_demo',
+      authorization: h.authorization,
+      lanes: [lane(provider)],
+    });
+    const claim = { role: 'case_officer' as const, session_id: h.sessionId };
+    const frozen = await coordinator.runProposal({
+      proposalRunId: 'prun_stale_test',
+      conversationVersion: h.store.snapshot().conversationVersionByCase.get('case_demo') ?? 0,
+      turnId: 'turn_stale_proposal',
+      selectionId: h.selectionId,
+      cardId: h.mandateBody.default_acting_model.card_id,
+      cardVersion: h.mandateBody.default_acting_model.card_version,
+      requestedId: h.mandateBody.default_acting_model.requested_id,
+    }, { onBehalfOf: claim });
+    await h.authorization.ingestConversationMessage('w-demo', 'case_demo', {
+      message_id: 'msg_after_proposal',
+      turn_id: 'turn_after_proposal',
+      text: 'Synthetic conversation mutation after proposal freeze.',
+    }, claim);
+    await expect(
+      h.authorization.runProposalPrecommit('w-demo', frozen.proposal.proposal_id, claim),
+    ).rejects.toBeInstanceOf(RuntimeDependencyError);
+    const proposal = h.store.snapshot().proposals.get(frozen.proposal.proposal_id)!;
+    expect([...h.store.snapshot().rulings.values()].filter(
+      (ruling) => ruling.binding.frozen_proposal_hash === proposal.proposal_hash,
+    )).toHaveLength(0);
   });
 
   it('allows new ingress after an open call expires while refusing its late admission and release', async () => {

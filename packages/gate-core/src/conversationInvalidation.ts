@@ -36,6 +36,15 @@ export function conversationMutationInvalidationOps(
     if (release.case_id !== caseId || release.state !== 'issued' || release.release_id === excludeReleaseId) continue;
     ops.push({ op: 'output_release.invalidate', release_id: release.release_id, reason, changed_at: at });
   }
+  for (const intake of state.proposalIntakes.values()) {
+    if (intake.case_id !== caseId || intake.state !== 'issued') continue;
+    ops.push({
+      op: 'proposal_intake.invalidate',
+      proposal_intake_id: intake.proposal_intake_id,
+      reason: 'conversation-changed',
+      changed_at: at,
+    });
+  }
   return ops;
 }
 
@@ -50,6 +59,22 @@ export function outputReleaseInvalidationOps(
     .map((release) => ({
       op: 'output_release.invalidate' as const,
       release_id: release.release_id,
+      reason,
+      changed_at: at,
+    }));
+}
+
+export function proposalIntakeInvalidationOps(
+  state: WorldState,
+  predicate: (intake: WorldState['proposalIntakes'] extends Map<string, infer T> ? T : never) => boolean,
+  reason: 'binding-invalidated' | 'conversation-changed',
+  at: string,
+): WalOp[] {
+  return [...state.proposalIntakes.values()]
+    .filter((intake) => intake.state === 'issued' && predicate(intake))
+    .map((intake) => ({
+      op: 'proposal_intake.invalidate' as const,
+      proposal_intake_id: intake.proposal_intake_id,
       reason,
       changed_at: at,
     }));

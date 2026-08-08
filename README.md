@@ -8,7 +8,8 @@ at an AI prompt, the action path **plan → prepare → check → decide → rev
 contract, two principal-approved acting-model evidence entries, an authorization-owned browser-initiated
 selection/switch protocol, a reviewed native selected-lane call into sealed quarantine, reviewed M5.10
 authorization-owned message ingestion and single-use output release, and hash-chained action records sealed before
-effect.
+effect. The current M5.11 implementation candidate adds governed proposal intake and fixed pre-commit evidence;
+it is not yet an exact-SHA-reviewed integration point.
 
 The authoritative build specification lives in the documentation repository:
 [runtime-gates-poc-spec.md](https://github.com/robertschaub/our-ai-charter/blob/main/docs/wip/runtime-gates-poc-spec.md).
@@ -35,9 +36,11 @@ The exact upstream revision, digest, reviewed runtime baseline, and remaining mi
   The authorization gate and principal read view are wired into `runtime:start`. M5.9, reviewed at `e58d397`,
   adds a two-step, dynamic-session-only selected-lane call whose admitted bytes remain sealed and unreadable.
   M5.10, reviewed at `8a904f3`, adds a separate session-bound message preparation/use path, authorization-owned
-  `said`/`inferred` ingestion, and a short-lived single-use release with consume-time currentness checks. ADR-013
-  is only an M5.11 definition for governed proposal intake and pre-commit gates; its correction received exact-SHA
-  review GO at `fbc72cc`, but no native proposal path is implemented. M5.7, reviewed at `442397a`, adds replayable
+  `said`/`inferred` ingestion, and a short-lived single-use release with consume-time currentness checks. The
+  reviewed ADR-013 definition at `fbc72cc` now has a bounded M5.11 implementation candidate: one explicit
+  proposal preparation, a purpose-bound schema call, authorization-owned freeze, and fixed Authorize → Submit →
+  Verify evidence. That candidate awaits exact-SHA adversarial review and is not an assurance, commitment, effect,
+  or completed M5 path. M5.7, reviewed at `442397a`, adds replayable
   headless selection and switching through orchestrator-authenticated authorization routes. M5.8, reviewed at
   `ff9e438`, adds a dynamic-session-only browser caller with a two-minute, single-use preparation, redacted
   recovery, and no model request as part of selection. Empathy triggers are also inactive.
@@ -118,9 +121,10 @@ resulting process-private, maximum-two-minute preparation can be selected once. 
   authorization transcript. The browser receives neither raw provider response nor release reference. A safe link opens the routed dialogue on the
 authorization origin, where the responder's own role token reads the question/contract and posts the answer
 directly. Raw clients still face the same ACL, Origin guard, evidence resolution, and single-use state machine.
-This M5.10 path was reviewed at `8a904f3`; it does not complete M5. ADR-013 defines a possible next bounded
-proposal-intake path; its initial definition review found two documentation-contract issues and the correction
-received GO at `fbc72cc`. It is not an implementation or integration point. M4 acceptance
+This M5.10 path was reviewed at `8a904f3`; it does not complete M5. ADR-013 defines the separately approved bounded
+proposal-intake slice; its initial definition review found two documentation-contract issues and the correction
+received GO at `fbc72cc`. The current implementation candidate realizes that definition but remains unreviewed and
+is not yet an integration point. M4 acceptance
 is complete at reviewed runtime commit `e326562`; the M5.1 conversation-state and pure projection core was
 cross-model adversarially reviewed at `c1b5eb0` with no code findings. M5.2 was reviewed at `1973515`; it adds an
 access-recorded, orchestrator-only acting projection and offline screening fixtures keyed to an exact frozen
@@ -156,9 +160,10 @@ M5.9, reviewed at `e58d397`, constructs the two signed-card-bound adapters and c
 listener binds, gives provider configuration only to that child, and exposes single-use preparation/use/status
 routes to the dynamic case session. Startup itself makes no provider request, no live provider invocation was run
 for that tranche. M5.10, reviewed at `8a904f3`, adds the separately defined message-ingress, release, and transcript
-path without proposal construction, empathy completion, a live provider run, or M6 capture. ADR-013 is the M5.11
-definition reviewed at `fbc72cc`; it changes none of those implementation limits and grants no implementation
-approval.
+path without proposal construction, empathy completion, a live provider run, or M6 capture. The M5.11 candidate
+implements only ADR-013's native proposal preparation, schema-bound intake/freeze, replayable origin evidence,
+fixed precommit sequence, and exact-key browser projection. It makes no live provider claim, never reaches Commit
+or an executing service, does not complete empathy routing or M5, and awaits exact-SHA review.
 
 Offline and deterministic verification uses synthetic records and skips only the remote-presence step:
 

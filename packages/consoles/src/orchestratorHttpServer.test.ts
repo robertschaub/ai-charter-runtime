@@ -7,6 +7,7 @@ import { CaseConsoleStateStore } from './caseConsoleState.js';
 import { CaseConversationStore } from './caseConversation.js';
 import { CaseModelSelectionPreparationStore } from './caseModelSelection.js';
 import { CaseModelTurnStore } from './caseModelTurn.js';
+import { CaseProposalStore } from './caseProposal.js';
 import { CaseSessionStore } from './caseSessionStore.js';
 import {
   ModelOutputQuarantine,
@@ -17,6 +18,222 @@ import { OrchestratorHttpServer } from './orchestratorHttpServer.js';
 import type { OrchestratorAuthorizationHttpClient, OrchestratorServicesHttpClient } from './runtimeHttpClients.js';
 
 describe('orchestrator case-console routes', () => {
+  it('confines all three M5.11 proposal routes to exact dynamic sessions and fixed browser projections', async () => {
+    const digest = 'a'.repeat(64);
+    const target = {
+      card_id: 'publicai-apertus-v1.5-70b',
+      card_version: 1,
+      requested_id: 'swiss-ai/apertus-v1.5-70b',
+    };
+    const dynamicTokens = ['c'.repeat(64), 'd'.repeat(64), 'e'.repeat(64)];
+    const sessionIds = ['session_proposal_one', 'session_proposal_two', 'session_prior_boot'];
+    const sessions = new CaseSessionStore({
+      now: () => '2026-08-08T10:00:00.000Z',
+      randomToken: () => dynamicTokens.shift()!,
+      nextSessionId: () => sessionIds.shift()!,
+    });
+    const claim = {
+      handoff_id: 'handoff_proposal_one',
+      role: 'case_officer' as const,
+      world_id: 'w-demo',
+      case_id: 'case_demo',
+      target_origin: 'http://127.0.0.1:7802',
+      authorization_boot_id: 'authz_boot_proposal',
+      consumed_at: '2026-08-08T10:00:00.000Z',
+    };
+    const first = sessions.create(claim);
+    const second = sessions.create({ ...claim, handoff_id: 'handoff_proposal_two' });
+    const priorBoot = sessions.create({
+      ...claim,
+      handoff_id: 'handoff_prior_boot',
+      authorization_boot_id: 'authz_boot_prior',
+    });
+    const current = {
+      state: 'selected' as const,
+      authorization_boot_id: 'authz_boot_proposal',
+      case_id: 'case_demo',
+      selection: {
+        world_id: 'w-demo',
+        selection_id: 'sel_proposal',
+        case_id: 'case_demo',
+        kind: 'initial' as const,
+        predecessor_selection_id: null,
+        mandate_id: 'mdt_demo_grant',
+        mandate_version: 1,
+        target: { ...target, card_digest: digest, verifying_key_id: 'card_key_one' },
+        system_use_decision: {
+          decision_id: 'sud_one',
+          version: 1,
+          record_digest: digest,
+          status: 'approved' as const,
+          conditions: [],
+        },
+        check_id: 'msc_proposal',
+        selected_at: '2026-08-08T10:00:00.000Z',
+        authority_effect: 'none' as const,
+      },
+      latest_observation: null,
+    };
+    const conversation = {
+      case_id: 'case_demo',
+      conversation_version: 2,
+      events: [{
+        speaker: 'case_officer' as const,
+        message_id: 'msg_proposal',
+        turn_id: 'turn_message_proposal',
+        text: 'Synthetic current conversation.',
+        recorded_at: '2026-08-08T10:00:00.000Z',
+      }],
+    };
+    const processStatus = {
+      kind: 'proposal_precommit_status' as const,
+      proposal_id: 'prp_proposal',
+      proposal_run_id: 'prun_proposal',
+      proposal: {
+        proposal_id: 'prp_proposal',
+        action_id: 'act_proposal',
+        revision: 1,
+        declared_objective: 'Synthetic objective',
+        proposed_action: 'Synthetic action',
+        target: { recipient: 'Synthetic recipient', resource: 'Synthetic resource' },
+        exact_parameters: { count: 1 },
+        data_to_be_disclosed: ['Synthetic public field'],
+        cost_obligation: { amount_minor_units: 0, description: 'No monetary cost' },
+        material_consequences: ['Synthetic consequence'],
+        reversibility_class: 'reversible',
+        commercial_influence: { applicable: false, note: 'None' },
+        requested_id: target.requested_id,
+        served_id: target.requested_id,
+        basis: [{ standing: 'said' as const, text: 'Synthetic basis' }],
+      },
+      state: 'verified' as const,
+      gates: [{
+        gate: 'verify' as const,
+        ruling_id: 'rul_verify',
+        verdict: 'allow' as const,
+        ux_class: 'silent' as const,
+        reason: 'Synthetic current policy allows the pre-commit stage.',
+        status: 'issued' as const,
+        validity_window: {
+          not_before: '2026-08-08T10:00:00.000Z',
+          not_after: '2026-08-08T10:02:00.000Z',
+        },
+      }],
+      escalation_id: null,
+      updated_at: '2026-08-08T10:00:01.000Z',
+    };
+    const runProposalPrecommit = vi.fn(async () => processStatus);
+    const proposalRunStatus = vi.fn(async () => processStatus);
+    const authorization = {
+      currentModelSelection: vi.fn(async () => current),
+      conversation: vi.fn(async () => conversation),
+      runProposalPrecommit,
+      proposalRunStatus,
+    } as unknown as OrchestratorAuthorizationHttpClient;
+    const quarantine = new ModelOutputQuarantine();
+    const runProposal = vi.fn(async () => ({
+      disposition: 'proposal-frozen' as const,
+      proposal: {
+        kind: 'proposal_intake_consumption_result' as const,
+        proposal_run_id: 'prun_proposal',
+        state: 'consumed' as const,
+        proposal_id: 'prp_proposal',
+        recorded_at: '2026-08-08T10:00:01.000Z',
+      },
+    }));
+    const coordinator = {
+      quarantine,
+      hasConfiguredLane: () => true,
+      runProposal,
+    } as unknown as ModelTurnCoordinator;
+    const caseProposals = new CaseProposalStore({
+      now: () => '2026-08-08T10:00:00.000Z',
+      nextPreparationId: () => 'pprep_proposal',
+      nextRunId: () => 'prun_proposal',
+      nextTurnId: () => 'turn_proposal',
+    });
+    const server = new OrchestratorHttpServer({
+      authorization,
+      services: {} as OrchestratorServicesHttpClient,
+      modelTurnCoordinator: coordinator,
+      worldId: 'w-demo',
+      demoCaseId: 'case_demo',
+      demoMandateId: 'mdt_demo_grant',
+      caseOfficerToken: 'b'.repeat(64),
+      authorizationOrigin: 'http://127.0.0.1:7801',
+      caseConsoleAssets: { shell: '', script: '', stylesheet: '' },
+      caseSessions: sessions,
+      caseProposals,
+      host: '127.0.0.1',
+      port: 0,
+    });
+    const address = await server.listen();
+    const post = (path: string, body: unknown, token?: string, origin?: string) => fetch(`${address.origin}${path}`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        ...(token === undefined ? {} : { authorization: `Bearer ${token}` }),
+        ...(origin === undefined ? {} : { origin }),
+      },
+      body: JSON.stringify(body),
+    });
+    const get = (path: string, token?: string, origin?: string) => fetch(`${address.origin}${path}`, {
+      headers: {
+        ...(token === undefined ? {} : { authorization: `Bearer ${token}` }),
+        ...(origin === undefined ? {} : { origin }),
+      },
+    });
+    try {
+      const preparePath = '/w/w-demo/cases/case_demo/proposal-preparations';
+      expect((await post(preparePath, {}, first.session_token)).status).toBe(403);
+      expect((await post(preparePath, {}, first.session_token, 'null')).status).toBe(403);
+      expect((await post(preparePath, {}, first.session_token, 'http://foreign.invalid')).status).toBe(403);
+      expect((await post(preparePath, {}, 'b'.repeat(64), address.origin)).status).toBe(401);
+      expect((await post(preparePath, { proposal: {} }, first.session_token, address.origin)).status).toBe(422);
+      expect((await post(preparePath, {}, priorBoot.session_token, address.origin)).status).toBe(401);
+      expect(sessions.authenticate(priorBoot.session_token, 'w-demo', 'case_demo')).toBeNull();
+
+      const prepared = await post(preparePath, {}, first.session_token, address.origin);
+      expect(prepared.status).toBe(201);
+      await expect(prepared.json()).resolves.toEqual({
+        preparation_id: 'pprep_proposal',
+        proposal_run_id: 'prun_proposal',
+        target,
+        issued_at: '2026-08-08T10:00:00.000Z',
+        expires_at: '2026-08-08T10:02:00.000Z',
+      });
+
+      const usePath = '/w/w-demo/cases/case_demo/proposals';
+      expect((await post(usePath, { preparation_id: 'pprep_proposal' }, first.session_token)).status).toBe(403);
+      expect((await post(usePath, { preparation_id: 'pprep_proposal' }, first.session_token, 'null')).status).toBe(403);
+      expect((await post(usePath, { preparation_id: 'pprep_proposal' }, 'b'.repeat(64), address.origin)).status).toBe(401);
+      expect((await post(usePath, { preparation_id: 'pprep_proposal', gate: 'commit' }, first.session_token, address.origin)).status).toBe(422);
+      expect((await post(usePath, { preparation_id: 'pprep_proposal' }, second.session_token, address.origin)).status).toBe(409);
+      expect(runProposal).not.toHaveBeenCalled();
+      const used = await post(usePath, { preparation_id: 'pprep_proposal' }, first.session_token, address.origin);
+      expect(used.status).toBe(200);
+      const usedBody = await used.json();
+      expect(Object.keys(usedBody).sort()).toEqual(['gates', 'proposal', 'proposal_run_id', 'state']);
+      expect(usedBody).toMatchObject({ proposal_run_id: 'prun_proposal', state: 'verified' });
+      for (const hidden of ['proposal_intake_id', 'call_id', 'output_digest', 'selection_id', 'commit_token']) {
+        expect(JSON.stringify(usedBody)).not.toContain(hidden);
+      }
+      expect(runProposal).toHaveBeenCalledOnce();
+      expect(runProposalPrecommit).toHaveBeenCalledOnce();
+
+      const statusPath = '/w/w-demo/cases/case_demo/proposal-runs/prun_proposal';
+      expect((await get(statusPath, second.session_token, 'null')).status).toBe(403);
+      expect((await get(statusPath, second.session_token, 'http://foreign.invalid')).status).toBe(403);
+      expect((await get(statusPath, 'b'.repeat(64), address.origin)).status).toBe(401);
+      const recovered = await get(statusPath, second.session_token);
+      expect(recovered.status).toBe(200);
+      await expect(recovered.json()).resolves.toEqual(usedBody);
+      expect(proposalRunStatus).toHaveBeenCalledOnce();
+    } finally {
+      await server.close();
+    }
+  });
+
   it('confines model evidence and the two-hop ruling mirror to the dynamic case session', async () => {
     const digest = 'c'.repeat(64);
     const modelTarget = {

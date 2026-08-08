@@ -39,6 +39,8 @@ import {
 } from './caseSessionHandoff.js';
 import type { Keyring } from './keyring.js';
 import { SystemUseDecisionError, type SystemUseDecisionService } from './systemUseDecision.js';
+import { ProposalIntakeError, type ProposalIntakeService } from './proposalIntake.js';
+import { ProposalPrecommitError, type ProposalPrecommitService } from './proposalPrecommit.js';
 import {
   classToken,
   browserOrigin,
@@ -63,6 +65,8 @@ import {
 } from './schemas/index.js';
 
 const jsonObject = z.record(z.string(), z.unknown());
+const strictEmptyRequest = z.object({}).strict();
+const proposalIntakeConsumeRequest = z.object({ content: z.string() }).strict();
 const proposalRequest = z
   .object({
     gate,
@@ -285,6 +289,8 @@ export interface AuthorizationHttpServerOptions {
   readonly authorization: AuthorizationCore;
   readonly conversationProjections: ConversationProjectionService;
   readonly conversationTransport: ConversationTransportService;
+  readonly proposalIntakes?: ProposalIntakeService;
+  readonly proposalPrecommit?: ProposalPrecommitService;
   readonly reads: AuthorizationReadSide;
   readonly adapter: AuthorizationHttpAdapter;
   readonly keyring: Keyring;
@@ -385,6 +391,49 @@ export class AuthorizationHttpServer {
             escalation_id: result.escalationId,
           }),
         };
+      },
+      'proposal-intake.consume': async (request, context) => {
+        if (options.proposalIntakes === undefined) return { status: 503, body: { error: 'proposal-intake-unavailable' } };
+        const intakeId = context.params['id'];
+        if (intakeId === undefined) return { status: 404, body: { error: 'not-found' } };
+        const parsed = proposalIntakeConsumeRequest.parse(await body(request));
+        const result = await options.proposalIntakes.consume(intakeId, parsed.content, requireActor(context));
+        return { status: 200, body: result, accessEvidence: result };
+      },
+      'proposal-intake.read': async (_request, context) => {
+        if (options.proposalIntakes === undefined) return { status: 503, body: { error: 'proposal-intake-unavailable' } };
+        const intakeId = context.params['id'];
+        if (intakeId === undefined) return { status: 404, body: { error: 'not-found' } };
+        const result = options.proposalIntakes.status(intakeId, requireActor(context));
+        return { status: 200, body: result, accessEvidence: result };
+      },
+      'proposal-run.read': async (_request, context) => {
+        if (options.proposalIntakes === undefined || options.proposalPrecommit === undefined) {
+          return { status: 503, body: { error: 'proposal-intake-unavailable' } };
+        }
+        const runId = context.params['id'];
+        const caseId = context.params['case_id'];
+        if (runId === undefined || caseId === undefined) return { status: 404, body: { error: 'not-found' } };
+        const actor = requireActor(context);
+        const precommit = options.proposalPrecommit.statusByRun(caseId, runId, actor);
+        if (precommit !== null) return { status: 200, body: precommit, readLengths: { gates: precommit.gates.length } };
+        const result = options.proposalIntakes.runStatus(caseId, runId, actor);
+        return { status: 200, body: result, accessEvidence: result };
+      },
+      'proposal-precommit.run': async (request, context) => {
+        if (options.proposalPrecommit === undefined) return { status: 503, body: { error: 'proposal-precommit-unavailable' } };
+        const proposalId = context.params['id'];
+        if (proposalId === undefined) return { status: 404, body: { error: 'not-found' } };
+        strictEmptyRequest.parse(await body(request));
+        const result = await options.proposalPrecommit.run(proposalId, requireActor(context));
+        return { status: 200, body: result, readLengths: { gates: result.gates.length } };
+      },
+      'proposal-precommit.read': async (_request, context) => {
+        if (options.proposalPrecommit === undefined) return { status: 503, body: { error: 'proposal-precommit-unavailable' } };
+        const proposalId = context.params['id'];
+        if (proposalId === undefined) return { status: 404, body: { error: 'not-found' } };
+        const result = options.proposalPrecommit.status(proposalId, requireActor(context));
+        return { status: 200, body: result, readLengths: { gates: result.gates.length } };
       },
       'model-selection.read': async (_request, context) => {
         if (context.params['case_id'] !== configuredCaseId) {
@@ -780,6 +829,18 @@ export class AuthorizationHttpServer {
                     : error.code === 'invalid-message' || error.code === 'invalid-scope'
                       ? 422
                       : 409,
+                body: { error: error.code },
+              };
+            }
+            if (error instanceof ProposalIntakeError) {
+              return {
+                status: error.code === 'forbidden' ? 403 : error.code === 'not-found' ? 404 : 409,
+                body: { error: error.code },
+              };
+            }
+            if (error instanceof ProposalPrecommitError) {
+              return {
+                status: error.code === 'forbidden' ? 403 : error.code === 'not-found' ? 404 : 409,
                 body: { error: error.code },
               };
             }

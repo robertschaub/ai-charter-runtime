@@ -62,6 +62,24 @@
           red-line clearance, independent review, or assurance.
         </p>
 
+        <h2>Prepare a governed proposal</h2>
+        <p>
+          This asks the selected model for one schema-bound proposal over the current authorization conversation.
+          Authorization resolves its evidence references, freezes the proposal, and runs only Authorize, Submit,
+          and Verify. It does not Commit, file, spend, notify, or create an effect.
+        </p>
+        <div class="model-actions">
+          <button id="prepare-proposal" type="button" disabled>Prepare proposal</button>
+          <button id="use-proposal" type="button" disabled>Generate and check proposal</button>
+        </div>
+        <p id="proposal-status" class="status" aria-live="polite">Select a configured model lane before preparing a proposal.</p>
+        <div id="proposal-evidence" class="collection" aria-live="polite"></div>
+         <p class="boundary-note">
+           The displayed fields are model-proposed and the gate results are pre-commit evidence. They are not an
+           approval, instruction to file, factual or legal clearance, commitment, effect, assurance, or certification.
+           No commitment, service call, or effect can occur here.
+         </p>
+
         <h2>Case gate state</h2>
         <div id="case-state" class="state" aria-live="polite">
           <p>No ruling is currently mirrored for this case.</p>

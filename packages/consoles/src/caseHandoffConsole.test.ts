@@ -11,6 +11,8 @@ import {
   parseBrowserMessagePreparation,
   parseBrowserModelTurnPreparation,
   parseBrowserModelTurnStatus,
+  parseBrowserProposalPreparation,
+  parseBrowserProposalRunStatus,
   parseBrowserSelectionPreparation,
   parseBrowserSelectionResult,
   parseCreatedSession,
@@ -105,6 +107,11 @@ describe('orchestrator-origin exact-window handoff client', () => {
     expect(shell).toContain('<textarea id="case-message"');
     expect(shell).toContain('Prepare message');
     expect(shell).toContain('Send governed turn');
+    expect(shell).toContain('Prepare a governed proposal');
+    expect(shell).toContain('Prepare proposal');
+    expect(shell).toContain('Generate and check proposal');
+    expect(shell).toContain('pre-commit evidence');
+    expect(shell).toContain('No commitment, service call, or effect can occur here.');
     expect(shell).not.toMatch(/<input\b/i);
   });
 
@@ -198,6 +205,77 @@ describe('orchestrator-origin exact-window handoff client', () => {
       terminal_reason: 'provider-failure',
       quarantine: null,
     })).toMatchObject({ state: 'failed', provider_disclosure: 'possible' });
+  });
+
+  it('accepts only exact proposal preparation and redacted pre-commit evidence', () => {
+    const preparation = {
+      preparation_id: 'pprep_one',
+      proposal_run_id: 'prun_one',
+      target,
+      issued_at: '2026-08-08T09:00:00.000Z',
+      expires_at: '2026-08-08T09:02:00.000Z',
+    };
+    expect(parseBrowserProposalPreparation(preparation)).toEqual({
+      preparationId: 'pprep_one',
+      proposalRunId: 'prun_one',
+      target,
+    });
+    for (const forbidden of [
+      { proposal_intake_id: 'pint_hidden' },
+      { conversation_version: 1 },
+      { prompt: 'forbidden' },
+      { retry: true },
+    ]) expect(parseBrowserProposalPreparation({ ...preparation, ...forbidden })).toBeNull();
+
+    const proposal = {
+      proposal_id: 'prp_one',
+      action_id: 'act_one',
+      revision: 1,
+      declared_objective: 'Synthetic objective',
+      proposed_action: 'Synthetic action',
+      target: { recipient: 'Synthetic recipient', resource: 'Synthetic resource' },
+      exact_parameters: { count: 1, modes: ['safe'] },
+      data_to_be_disclosed: ['Synthetic public field'],
+      cost_obligation: { amount_minor_units: 0, description: 'No monetary cost' },
+      material_consequences: ['Synthetic consequence'],
+      reversibility_class: 'reversible',
+      commercial_influence: { applicable: false, note: 'None' },
+      requested_id: target.requested_id,
+      served_id: target.requested_id,
+      basis: [
+        { standing: 'said', text: 'Synthetic stated basis' },
+        { standing: 'inferred-unconfirmed', text: 'Synthetic inferred basis' },
+      ],
+    };
+    const gate = {
+      gate: 'authorize',
+      ruling_id: 'rul_one',
+      verdict: 'allow',
+      ux_class: 'silent',
+      reason: 'Synthetic pre-commit gate evidence.',
+      status: 'issued',
+      validity_window: {
+        not_before: '2026-08-08T09:00:00.000Z',
+        not_after: '2026-08-08T09:02:00.000Z',
+      },
+    };
+    const status = {
+      proposal_run_id: 'prun_one',
+      state: 'frozen',
+      proposal,
+      gates: [gate],
+    };
+    expect(parseBrowserProposalRunStatus(status)).toEqual(status);
+    for (const forbidden of [
+      { proposal_intake_id: 'pint_hidden' },
+      { call_id: 'mcl_hidden' },
+      { output_digest: 'a'.repeat(64) },
+      { commit_token: 'forbidden' },
+    ]) expect(parseBrowserProposalRunStatus({ ...status, ...forbidden })).toBeNull();
+    expect(parseBrowserProposalRunStatus({ ...status, proposal: { ...proposal, item_id: 'said_hidden' } })).toBeNull();
+    expect(parseBrowserProposalRunStatus({ ...status, gates: [{ ...gate, service: 'filing' }] })).toBeNull();
+    expect(parseBrowserProposalRunStatus({ ...status, state: 'prepared', proposal: undefined, gates: [] })).toMatchObject({ state: 'prepared' });
+    expect(parseBrowserProposalRunStatus({ ...status, state: 'verified', proposal: undefined })).toBeNull();
   });
 
   it('accepts only redacted browser model-selection projections', () => {

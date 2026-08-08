@@ -112,7 +112,7 @@ model text beyond `inferred`, or call an authority-changing endpoint. Handoff re
 orchestrator session id into authorization-owned, maximum-15-minute provenance so caller headers cannot invent the
 `said` item's actor. Projection-only M5.9 calls remain sealed.
 
-**Proposed amendment (M5.11 governed proposal intake):** ADR-013 adds the dynamic-session browser routes
+**Accepted definition; implementation candidate awaiting review (M5.11 governed proposal intake):** ADR-013 adds the dynamic-session browser routes
 `POST /cases/{case_id}/proposal-preparations`, `POST /cases/{case_id}/proposals`, and
 `GET /cases/{case_id}/proposal-runs/{proposal_run_id}`. Authorization adds process-only intake consume/status and
 case/run-status routes plus proposal precommit POST/status routes. All five accept only `proc:orchestrator`, are

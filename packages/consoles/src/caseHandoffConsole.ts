@@ -32,6 +32,20 @@ interface ActiveMessagePreparation {
   readonly turnId: string;
 }
 
+interface ActiveProposalPreparation {
+  readonly preparationId: string;
+  readonly proposalRunId: string;
+  readonly target: BrowserModelTarget;
+}
+
+export interface BrowserProposalRunStatus {
+  readonly proposal_run_id: string;
+  readonly state: 'prepared' | 'running' | 'frozen' | 'denied' | 'escalated' | 'verified' | 'failed';
+  readonly proposal?: Record<string, unknown>;
+  readonly gates: readonly Record<string, unknown>[];
+  readonly escalation_id?: string;
+}
+
 export interface BrowserModelTurnStatus {
   readonly turn_id: string;
   readonly selection_id: string;
@@ -51,6 +65,8 @@ let activeModelTurnPreparation: ActiveModelTurnPreparation | null = null;
 let modelTurnOperationPending = false;
 let activeMessagePreparation: ActiveMessagePreparation | null = null;
 let messageOperationPending = false;
+let activeProposalPreparation: ActiveProposalPreparation | null = null;
+let proposalOperationPending = false;
 
 export interface RuntimeConsoleConfig {
   readonly authorization_origin: string;
@@ -540,6 +556,167 @@ function renderModelTurnStatus(value: BrowserModelTurnStatus): void {
   }
 }
 
+export function parseBrowserProposalPreparation(value: unknown): ActiveProposalPreparation | null {
+  if (
+    !isRecord(value) ||
+    !hasExactKeys(value, ['preparation_id', 'proposal_run_id', 'target', 'issued_at', 'expires_at']) ||
+    typeof value['preparation_id'] !== 'string' ||
+    !OPAQUE_ID.test(value['preparation_id']) ||
+    typeof value['proposal_run_id'] !== 'string' ||
+    !OPAQUE_ID.test(value['proposal_run_id']) ||
+    !validTimestamp(value['issued_at']) ||
+    !validTimestamp(value['expires_at']) ||
+    Date.parse(value['issued_at']) >= Date.parse(value['expires_at'])
+  ) return null;
+  const target = parseTarget(value['target']);
+  return target === null ? null : {
+    preparationId: value['preparation_id'],
+    proposalRunId: value['proposal_run_id'],
+    target,
+  };
+}
+
+const PROPOSAL_STATES = new Set(['prepared', 'running', 'frozen', 'denied', 'escalated', 'verified', 'failed']);
+const PROPOSAL_GATES = new Set(['authorize', 'submit', 'verify']);
+const PROPOSAL_VERDICTS = new Set(['allow', 'deny', 'escalate']);
+const PROPOSAL_UX = new Set(['silent', 'flag', 'stop']);
+const PROPOSAL_RULING_STATES = new Set(['issued', 'consumed', 'invalidated', 'expired']);
+
+function validProposalProjection(value: unknown): value is Record<string, unknown> {
+  if (
+    !isRecord(value) ||
+    !hasExactKeys(value, [
+      'proposal_id', 'action_id', 'revision', 'declared_objective', 'proposed_action', 'target',
+      'exact_parameters', 'data_to_be_disclosed', 'cost_obligation', 'material_consequences',
+      'reversibility_class', 'commercial_influence', 'requested_id', 'served_id', 'basis',
+    ]) ||
+    typeof value['proposal_id'] !== 'string' || !OPAQUE_ID.test(value['proposal_id']) ||
+    typeof value['action_id'] !== 'string' || !OPAQUE_ID.test(value['action_id']) ||
+    !Number.isSafeInteger(value['revision']) || Number(value['revision']) < 1 ||
+    typeof value['declared_objective'] !== 'string' ||
+    typeof value['proposed_action'] !== 'string' ||
+    !isRecord(value['target']) || !hasExactKeys(value['target'], ['recipient', 'resource']) ||
+    typeof value['target']['recipient'] !== 'string' || typeof value['target']['resource'] !== 'string' ||
+    !isRecord(value['exact_parameters']) || Object.keys(value['exact_parameters']).length > 64 ||
+    !Object.entries(value['exact_parameters']).every(([key, parameter]) =>
+      key.length >= 1 && key.length <= 128 &&
+      (typeof parameter === 'string' || typeof parameter === 'boolean' || parameter === null || Number.isSafeInteger(parameter) ||
+        (Array.isArray(parameter) && parameter.length <= 64 && parameter.every((entry) =>
+          typeof entry === 'string' || typeof entry === 'boolean' || entry === null || Number.isSafeInteger(entry))))) ||
+    !Array.isArray(value['data_to_be_disclosed']) || !value['data_to_be_disclosed'].every((item) => typeof item === 'string') ||
+    !isRecord(value['cost_obligation']) || !hasExactKeys(value['cost_obligation'], ['amount_minor_units', 'description']) ||
+    !Number.isSafeInteger(value['cost_obligation']['amount_minor_units']) || Number(value['cost_obligation']['amount_minor_units']) < 0 ||
+    typeof value['cost_obligation']['description'] !== 'string' ||
+    !Array.isArray(value['material_consequences']) || !value['material_consequences'].every((item) => typeof item === 'string') ||
+    typeof value['reversibility_class'] !== 'string' ||
+    !isRecord(value['commercial_influence']) || !hasExactKeys(value['commercial_influence'], ['applicable', 'note']) ||
+    typeof value['commercial_influence']['applicable'] !== 'boolean' || typeof value['commercial_influence']['note'] !== 'string' ||
+    typeof value['requested_id'] !== 'string' || typeof value['served_id'] !== 'string' ||
+    !Array.isArray(value['basis']) ||
+    !value['basis'].every((item) => isRecord(item) && hasExactKeys(item, ['standing', 'text']) &&
+      ['said', 'confirmed', 'inferred-unconfirmed'].includes(String(item['standing'])) && typeof item['text'] === 'string')
+  ) return false;
+  const forbidden = /(?:^|_)(?:call|intake|output|projection|session|boot|selection|digest|tags?|provenance|policy|mandate|system_use|token|nonce|reservation)(?:_|$)/u;
+  const containsForbidden = (candidate: unknown): boolean =>
+    Array.isArray(candidate)
+      ? candidate.some(containsForbidden)
+      : isRecord(candidate) && Object.entries(candidate).some(([key, nested]) => forbidden.test(key) || containsForbidden(nested));
+  return !containsForbidden(value);
+}
+
+export function parseBrowserProposalRunStatus(value: unknown): BrowserProposalRunStatus | null {
+  if (
+    !isRecord(value) ||
+    !hasExactKeys(value, ['proposal_run_id', 'state', 'gates'], ['proposal', 'escalation_id']) ||
+    typeof value['proposal_run_id'] !== 'string' || !OPAQUE_ID.test(value['proposal_run_id']) ||
+    typeof value['state'] !== 'string' || !PROPOSAL_STATES.has(value['state']) ||
+    !Array.isArray(value['gates']) || value['gates'].length > 3 ||
+    !value['gates'].every((gateValue) =>
+      isRecord(gateValue) && hasExactKeys(gateValue, ['gate', 'ruling_id', 'verdict', 'ux_class', 'reason', 'status', 'validity_window']) &&
+      typeof gateValue['gate'] === 'string' && PROPOSAL_GATES.has(gateValue['gate']) &&
+      typeof gateValue['ruling_id'] === 'string' && OPAQUE_ID.test(gateValue['ruling_id']) &&
+      typeof gateValue['verdict'] === 'string' && PROPOSAL_VERDICTS.has(gateValue['verdict']) &&
+      typeof gateValue['ux_class'] === 'string' && PROPOSAL_UX.has(gateValue['ux_class']) &&
+      typeof gateValue['reason'] === 'string' &&
+      typeof gateValue['status'] === 'string' && PROPOSAL_RULING_STATES.has(gateValue['status']) &&
+      isRecord(gateValue['validity_window']) && hasExactKeys(gateValue['validity_window'], ['not_before', 'not_after']) &&
+      validTimestamp(gateValue['validity_window']['not_before']) && validTimestamp(gateValue['validity_window']['not_after']))
+  ) return null;
+  const proposal = value['proposal'];
+  const state = value['state'] as BrowserProposalRunStatus['state'];
+  if (['frozen', 'denied', 'escalated', 'verified'].includes(state) && !validProposalProjection(proposal)) return null;
+  if (proposal !== undefined && !validProposalProjection(proposal)) return null;
+  if ((state === 'escalated') !== (typeof value['escalation_id'] === 'string' && OPAQUE_ID.test(value['escalation_id']))) return null;
+  return {
+    proposal_run_id: value['proposal_run_id'],
+    state,
+    ...(proposal === undefined ? {} : { proposal: proposal as Record<string, unknown> }),
+    gates: value['gates'] as Record<string, unknown>[],
+    ...(value['escalation_id'] === undefined ? {} : { escalation_id: value['escalation_id'] as string }),
+  };
+}
+
+function renderProposalStatus(value: BrowserProposalRunStatus): void {
+  const statusTarget = document.getElementById('proposal-status');
+  const evidence = document.getElementById('proposal-evidence');
+  if (statusTarget !== null) {
+    statusTarget.textContent = `Proposal run ${value.proposal_run_id}: ${value.state}. This is pre-commit evidence only.`;
+  }
+  if (evidence === null) return;
+  clearChildren(evidence);
+  if (value.proposal === undefined) return;
+  evidence.append(text('h3', 'Model-proposed fields'));
+  evidence.append(text('p', `Objective: ${String(value.proposal['declared_objective'] ?? '')}`));
+  evidence.append(text('p', `Action: ${String(value.proposal['proposed_action'] ?? '')}`));
+  const target = value.proposal['target'];
+  if (isRecord(target)) {
+    evidence.append(text('p', `Target recipient: ${String(target['recipient'] ?? '')}`));
+    evidence.append(text('p', `Target resource: ${String(target['resource'] ?? '')}`));
+  }
+  const parameters = value.proposal['exact_parameters'];
+  if (isRecord(parameters)) {
+    evidence.append(text('h3', 'Exact parameters'));
+    for (const [name, parameter] of Object.entries(parameters)) {
+      const rendered = Array.isArray(parameter)
+        ? parameter.map((entry) => String(entry)).join(', ')
+        : String(parameter);
+      evidence.append(text('p', `${name}: ${rendered}`));
+    }
+  }
+  const disclosure = Array.isArray(value.proposal['data_to_be_disclosed'])
+    ? value.proposal['data_to_be_disclosed']
+    : [];
+  for (const item of disclosure) evidence.append(text('p', `Data proposed for disclosure: ${String(item)}`));
+  const cost = value.proposal['cost_obligation'];
+  if (isRecord(cost)) {
+    evidence.append(text('p', `Cost or obligation: ${String(cost['amount_minor_units'])} minor units — ${String(cost['description'])}`));
+  }
+  const consequences = Array.isArray(value.proposal['material_consequences'])
+    ? value.proposal['material_consequences']
+    : [];
+  for (const item of consequences) evidence.append(text('p', `Material consequence: ${String(item)}`));
+  evidence.append(text('p', `Reversibility class: ${String(value.proposal['reversibility_class'] ?? '')}`));
+  const commercial = value.proposal['commercial_influence'];
+  if (isRecord(commercial)) {
+    evidence.append(text('p', `Commercial influence: ${commercial['applicable'] === true ? 'applicable' : 'not applicable'} — ${String(commercial['note'])}`));
+  }
+  evidence.append(text('p', `Requested model: ${String(value.proposal['requested_id'] ?? '')}`));
+  evidence.append(text('p', `Served model: ${String(value.proposal['served_id'] ?? '')}`));
+  const basis = Array.isArray(value.proposal['basis']) ? value.proposal['basis'] : [];
+  if (basis.length > 0) {
+    evidence.append(text('h3', 'Proposal basis'));
+    for (const item of basis) {
+      if (isRecord(item)) evidence.append(text('p', `${String(item['standing'])}: ${String(item['text'])}`));
+    }
+  }
+  if (value.gates.length > 0) {
+    evidence.append(text('h3', 'Pre-commit gates'));
+    for (const gateValue of value.gates) {
+      evidence.append(text('p', `${String(gateValue['gate'])}: ${String(gateValue['verdict'])} — ${String(gateValue['reason'])}`));
+    }
+  }
+}
+
 export function parseBrowserMessagePreparation(value: unknown): ActiveMessagePreparation | null {
   if (
     !isRecord(value) ||
@@ -746,6 +923,7 @@ function configureConversationControls(
             : `Turn ended as ${result.state}; no local provider text is displayed.`;
       }
       await refreshConversation(token, world, caseId);
+      activeProposalPreparation = null;
       input.value = '';
     })()
       .catch(() => {
@@ -862,6 +1040,90 @@ function configureModelTurnControls(
       })
       .finally(() => {
         modelTurnOperationPending = false;
+        prepare.disabled = false;
+      });
+  };
+}
+
+function configureProposalControls(
+  current: ReturnType<typeof parseBrowserCurrentSelection>,
+  token: string,
+  world: string,
+  caseId: string,
+): void {
+  const prepare = document.getElementById('prepare-proposal');
+  const use = document.getElementById('use-proposal');
+  const output = document.getElementById('proposal-status');
+  if (!(prepare instanceof HTMLButtonElement) || !(use instanceof HTMLButtonElement) || current === null) return;
+  if (current.state !== 'selected' || current.target === null) {
+    activeProposalPreparation = null;
+    prepare.disabled = true;
+    use.disabled = true;
+    if (output !== null) output.textContent = 'Select a configured model lane before preparing a proposal.';
+    return;
+  }
+  const target = current.target;
+  if (activeProposalPreparation !== null && targetKey(activeProposalPreparation.target) !== targetKey(target)) {
+    activeProposalPreparation = null;
+  }
+  prepare.disabled = proposalOperationPending;
+  use.disabled = proposalOperationPending || activeProposalPreparation === null;
+  prepare.onclick = () => {
+    if (proposalOperationPending) return;
+    proposalOperationPending = true;
+    activeProposalPreparation = null;
+    prepare.disabled = true;
+    use.disabled = true;
+    if (output !== null) output.textContent = 'Preparing one proposal run over the current authorization conversation.';
+    void (async () => {
+      const parsed = parseBrowserProposalPreparation(
+        await sameOriginJson(`/w/${world}/cases/${caseId}/proposal-preparations`, {}, token),
+      );
+      if (parsed === null || targetKey(parsed.target) !== targetKey(target)) throw new Error('invalid-proposal-preparation');
+      activeProposalPreparation = parsed;
+      if (output !== null) output.textContent = 'Proposal prepared. Confirm the second step to contact the selected provider.';
+    })()
+      .catch(() => {
+        if (output !== null) output.textContent = 'The proposal run could not be prepared.';
+      })
+      .finally(() => {
+        proposalOperationPending = false;
+        prepare.disabled = false;
+        use.disabled = activeProposalPreparation === null;
+      });
+  };
+  use.onclick = () => {
+    if (proposalOperationPending) return;
+    const prepared = activeProposalPreparation;
+    activeProposalPreparation = null;
+    if (prepared === null) return;
+    proposalOperationPending = true;
+    prepare.disabled = true;
+    use.disabled = true;
+    if (output !== null) output.textContent = 'Generating, freezing, and checking the proposal. No effect can occur.';
+    void (async () => {
+      let raw: unknown;
+      try {
+        raw = await sameOriginJson(
+          `/w/${world}/cases/${caseId}/proposals`,
+          { preparation_id: prepared.preparationId },
+          token,
+        );
+      } catch {
+        raw = await sameOriginGet(
+          `/w/${world}/cases/${caseId}/proposal-runs/${prepared.proposalRunId}`,
+          token,
+        );
+      }
+      const parsed = parseBrowserProposalRunStatus(raw);
+      if (parsed === null || parsed.proposal_run_id !== prepared.proposalRunId) throw new Error('invalid-proposal-status');
+      renderProposalStatus(parsed);
+    })()
+      .catch(() => {
+        if (output !== null) output.textContent = 'The proposal outcome could not be recovered. It was not retried.';
+      })
+      .finally(() => {
+        proposalOperationPending = false;
         prepare.disabled = false;
       });
   };
@@ -1000,6 +1262,7 @@ function renderModels(
           output.textContent = `${requestedId} is selected for this case. No model request was sent.`;
         }
         clearModelTurnSurface('The model selection changed. Prepare a new run for the new selection.');
+        activeProposalPreparation = null;
         await reload();
       })()
         .catch(async () => {
@@ -1025,6 +1288,7 @@ function renderModels(
   }
   if (target.childElementCount === 0) target.append(text('p', 'No acting model evidence is available for this mandate.'));
   configureModelTurnControls(current, token, world, caseId);
+  configureProposalControls(current, token, world, caseId);
 }
 
 export function shouldPollCaseState(value: unknown): boolean {
@@ -1187,6 +1451,8 @@ async function mountCaseHandoffConsole(): Promise<void> {
       modelTurnOperationPending = true;
       activeMessagePreparation = null;
       messageOperationPending = true;
+      activeProposalPreparation = null;
+      proposalOperationPending = true;
       disableSelectionControls();
       const prepareRun = document.getElementById('prepare-model-turn');
       const useRun = document.getElementById('use-model-turn');
@@ -1198,6 +1464,10 @@ async function mountCaseHandoffConsole(): Promise<void> {
       if (messageInput instanceof HTMLTextAreaElement) messageInput.disabled = true;
       if (prepareMessage instanceof HTMLButtonElement) prepareMessage.disabled = true;
       if (sendMessage instanceof HTMLButtonElement) sendMessage.disabled = true;
+      const prepareProposal = document.getElementById('prepare-proposal');
+      const useProposal = document.getElementById('use-proposal');
+      if (prepareProposal instanceof HTMLButtonElement) prepareProposal.disabled = true;
+      if (useProposal instanceof HTMLButtonElement) useProposal.disabled = true;
       clearModelTurnSurface('Case session closed; no retained model output remains available.');
       status('Case session closed.');
       const button = document.getElementById('close-session');

@@ -10,6 +10,7 @@ import {
   type ConversationTransportAccessEvidence,
   type ModelCallAccessEvidence,
   type ModelSelectionAccessEvidence,
+  type ProposalIntakeAccessEvidence,
 } from './schemas/index.js';
 import { type AuthorizationCore } from './authorizationCore.js';
 import type { TransactionActor } from './walStore.js';
@@ -76,6 +77,51 @@ export const AUTHORIZATION_ROUTES = [
     template: '/w/{world_id}/proposals',
     allowed: ['proc:orchestrator'],
     authorityChanging: true,
+  },
+  {
+    id: 'proposal-intake.consume',
+    method: 'POST',
+    template: '/w/{world_id}/proposal-intakes/{id}/consume',
+    allowed: ['proc:orchestrator'],
+    authorityChanging: false,
+    originGuarded: true,
+    accessLoggedOnServe: true,
+  },
+  {
+    id: 'proposal-intake.read',
+    method: 'GET',
+    template: '/w/{world_id}/proposal-intakes/{id}',
+    allowed: ['proc:orchestrator'],
+    authorityChanging: false,
+    originGuarded: true,
+    accessLoggedOnServe: true,
+  },
+  {
+    id: 'proposal-run.read',
+    method: 'GET',
+    template: '/w/{world_id}/cases/{case_id}/proposal-runs/{id}',
+    allowed: ['proc:orchestrator'],
+    authorityChanging: false,
+    originGuarded: true,
+    accessLoggedOnServe: true,
+  },
+  {
+    id: 'proposal-precommit.run',
+    method: 'POST',
+    template: '/w/{world_id}/proposals/{id}/precommit',
+    allowed: ['proc:orchestrator'],
+    authorityChanging: true,
+    originGuarded: true,
+    accessLoggedOnServe: true,
+  },
+  {
+    id: 'proposal-precommit.read',
+    method: 'GET',
+    template: '/w/{world_id}/proposals/{id}/precommit',
+    allowed: ['proc:orchestrator'],
+    authorityChanging: false,
+    originGuarded: true,
+    accessLoggedOnServe: true,
   },
   {
     id: 'model-selection.read',
@@ -333,7 +379,8 @@ export interface AuthorizationOperationResult<T> {
   readonly accessEvidence?:
     | ModelCallAccessEvidence
     | ModelSelectionAccessEvidence
-    | ConversationTransportAccessEvidence;
+    | ConversationTransportAccessEvidence
+    | ProposalIntakeAccessEvidence;
 }
 
 export interface AuthorizationAdapterResponse<T> {

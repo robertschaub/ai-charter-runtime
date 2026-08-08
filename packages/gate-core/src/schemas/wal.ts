@@ -6,6 +6,11 @@ import { credentialLabel, hexDigest, id, integer, modelId, role, timestamp, worl
 import { disposition } from './intervention.js';
 import { mandate } from './mandate.js';
 import { frozenProposal } from './proposal.js';
+import {
+  proposalIntakeRecord,
+  proposalIntakeRefusalReason,
+  proposalOriginRecord,
+} from './proposalIntake.js';
 import { accessChainEntry, recordEntry } from './record.js';
 import { gateRuling } from './ruling.js';
 import { modelCallFailureReason, modelCallOpenRecord } from './modelCall.js';
@@ -38,6 +43,40 @@ const transitionReason = z.string().min(1);
 
 export const walOp = z.discriminatedUnion('op', [
   z.object({ op: z.literal('proposal.freeze'), proposal: frozenProposal }).strict(),
+  z.object({ op: z.literal('proposal_origin.put'), origin: proposalOriginRecord }).strict(),
+  z.object({ op: z.literal('proposal_intake.issue'), intake: proposalIntakeRecord }).strict(),
+  z
+    .object({
+      op: z.literal('proposal_intake.consume'),
+      proposal_intake_id: id,
+      proposal_id: id,
+      changed_at: timestamp,
+    })
+    .strict(),
+  z
+    .object({
+      op: z.literal('proposal_intake.refuse'),
+      proposal_intake_id: id,
+      reason: proposalIntakeRefusalReason,
+      changed_at: timestamp,
+    })
+    .strict(),
+  z
+    .object({
+      op: z.literal('proposal_intake.invalidate'),
+      proposal_intake_id: id,
+      reason: proposalIntakeRefusalReason,
+      changed_at: timestamp,
+    })
+    .strict(),
+  z
+    .object({
+      op: z.literal('proposal_intake.expire'),
+      proposal_intake_id: id,
+      authorization_boot_id: id,
+      changed_at: timestamp,
+    })
+    .strict(),
 
   z.object({ op: z.literal('system_use_decision.issue'), decision: systemUseDecisionRecord }).strict(),
   z

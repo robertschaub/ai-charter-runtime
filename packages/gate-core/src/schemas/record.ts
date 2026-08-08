@@ -25,6 +25,7 @@ import { disposition, interventionContract, standingClass } from './intervention
 import { modelCallAccessEvidence } from './modelCall.js';
 import { modelSelectionAccessEvidence } from './modelSelection.js';
 import { conversationTransportAccessEvidence } from './conversationTransport.js';
+import { proposalIntakeAccessEvidence } from './proposalIntake.js';
 import { systemUseDecisionReference } from './systemUseDecision.js';
 
 export const EFFECT_OUTCOMES = ['success', 'failed', 'no-effect', 'unknown-reconciliation-required'] as const;
@@ -308,7 +309,12 @@ export const accessEntry = z
     read_lengths: z.record(z.string(), integer.min(0)).optional(),
     /** Bounded lifecycle/selection/transport metadata; raw provider material never enters the access chain. */
     operation_evidence: z
-      .union([modelCallAccessEvidence, modelSelectionAccessEvidence, conversationTransportAccessEvidence])
+      .union([
+        modelCallAccessEvidence,
+        modelSelectionAccessEvidence,
+        conversationTransportAccessEvidence,
+        proposalIntakeAccessEvidence,
+      ])
       .optional(),
   })
   .strict()
@@ -339,7 +345,13 @@ export const accessEntry = z
     if (entry.operation_evidence !== undefined) {
       const evidence = entry.operation_evidence;
       const expectedRoute =
-        evidence.kind === 'conversation_message_ingress'
+        evidence.kind === 'proposal_intake_consumption_result'
+          ? 'POST /w/{world_id}/proposal-intakes/{id}/consume'
+          : evidence.kind === 'proposal_intake_status'
+            ? 'GET /w/{world_id}/proposal-intakes/{id}'
+            : evidence.kind === 'proposal_run_status'
+              ? 'GET /w/{world_id}/cases/{case_id}/proposal-runs/{id}'
+              : evidence.kind === 'conversation_message_ingress'
           ? 'POST /w/{world_id}/cases/{case_id}/conversation/messages'
           : evidence.kind === 'output_release_consumed'
             ? 'POST /w/{world_id}/model-output-releases/{id}/consume'
