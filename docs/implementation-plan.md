@@ -63,6 +63,23 @@ the latest local checkpoint commit has not reached the remote—as `remote-misma
 this conservative behaviour until the operational checkpoint commit/push flow is implemented, then
 distinguish an uncommitted latest checkpoint from confirmed remote rollback or mismatch.
 
+**Open finding — `reverse` is a disposition token with no behaviour (recorded 2026-08-08, not yet
+triaged).** `reverse` appears in `GENERAL_DISPOSITIONS` in `packages/gate-core/src/schemas/intervention.ts`,
+annotated there to ADR-001 §7, and again in the governance console's own disposition list. ADR-001 §7's
+disposition map defines no behaviour for it, and no `permitted_dispositions` list in
+`packages/gate-core/policy/v1.yaml` includes it — so today it is unreachable. The risk is what happens if a
+policy ever lists it: a **static read** of the disposition path indicates the value would pass the
+permitted-set check, set no route (only `seek-review` and `route-to-remedy` do), dispose the escalation and
+release the reservation—behaviourally indistinguishable from `deny`, while the console renders a **Reverse**
+button to the operator. That is a silent-wrong-answer shape rather than a fail-closed one.
+
+Not executed; confirm with a test before acting. The architectural position points at removal rather than
+implementation: ADR-001 §5 holds that compensation is a new gated action and the machine has no un-settle
+arc, and the Consequences record that compensation of an irreversible effect stays a recorded routing
+obligation *since the POC has no remedy decider*. Note also that both published sources list `reverse` among
+the dispositions a decision-maker may choose, so removing the token is a documentation question as well as a
+code one. Either define the disposition or drop it from both enums; do not leave it reachable-but-empty.
+
 ## Milestone status
 
 | Milestone | Runtime status | Evidence boundary |
