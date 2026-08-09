@@ -18,11 +18,18 @@ source proposal. The response event, ruling invalidation, escalation consumption
 operations are one WAL transaction. Historical M4 events without a scope remain replayable but cannot be
 used to create an M5 state transition.
 
-**Implementation candidate amendment (M5.10 ordinary conversation ingress):** ADR-012 may attribute an authorization-ingested
+**Implemented and reviewed at `8a904f3` (M5.10 ordinary conversation ingress):** ADR-012 may attribute an authorization-ingested
 case-console message to `origin_actor: officer` only as a `said` item under the fixed ingress profile. That route
 cannot answer or consume a dialogue escalation, create `confirmed` or `permitted` state, satisfy an evidence
 requirement, or inherit the responder authority of this direct role-token channel. Only this ADR's
 authorization-origin response route can perform those transitions.
+
+**Proposed amendment (M5.12 native dialogue continuation):** ADR-014 binds a Verify-stage
+`unconfirmed_inference_as_fact` trigger to one exact active inferred item in the frozen proposal. Authorization
+derives the focused question, standing, route, and six-field contract; the signal and caller supply none of them.
+Every state-changing response must name that exact bound item. After an eligible response, one explicit
+authorization-owned preparation may open a schema-bound native proposal revision over the refreshed conversation.
+The response itself still starts no model, issues no ruling, and creates no action authority.
 
 ## Context
 A dialogue trigger is an ordinary escalation routed to the conversation partner — same single-use state machine, same six-field intervention contract — but two boundary rules constrain the channel. The answer posts **directly from the browser to the authorization service** under the responder's role token, from a control served by the **authorization service's own origin**, so the orchestrator neither serves the credential-bearing control nor carries the answer. And standing is **evidentiary, not managerial**: a responder answers only within their own standing; a third party's facts are resolved by cited evidence or routed to that party, never by bare assertion.
@@ -100,6 +107,12 @@ prepared. `permit` → a case-scoped entry in the revocable `permitted` store, t
 item stays unconfirmed, uncertainty carried forward; the Stop remains unless a declared reversible fallback
 within existing authority exists. `route` → recorded routing obligation plus a fresh escalation to the named
 role; the case parks. No dialogue disposition ever issues an `allow` ruling directly.
+
+ADR-014's proposed native continuation preserves that rule. `confirm`, `correct`, or `narrow` may make a separate,
+short-lived revision preparation available, but only a later explicit case-console gesture can consume it into a
+model call. Authorization derives the source action and next revision, and the revised proposal reruns
+Authorize → Submit → Verify. An escalate or final Verify allow may claim the source successor atomically; a deny
+does not. `abstain` and `route` do not enable continuation in the bounded beat-4 slice.
 
 The answer text is durable only inside the authorization-owned conversation-store WAL entry. The action
 record carries its digest, scope, responder role, and resolved evidence; the HTTP response returns none of
