@@ -1051,7 +1051,7 @@ describe('M5.4 containment with M5.5 durable model-call evidence', () => {
     expect(h.store.snapshot().conversationVersionByCase.get('case_demo')).toBe(3);
   });
 
-  it('uses native JSON schema for one proposal-purpose call, freezes through the distinct intake, and stops before Commit', async () => {
+  it('freezes one schema-bound proposal, reuses a durable precommit prefix on retry, and stops before Commit', async () => {
     const h = await authorizationHarness();
     const provider = await loopbackProvider();
     const content = nativeProposalContent();
@@ -1127,11 +1127,39 @@ describe('M5.4 containment with M5.5 durable model-call evidence', () => {
     expect(callerSelectedGate.status).toBe(422);
     expect(h.store.snapshot().rulings.size).toBe(0);
 
+    // Simulate recovery after Authorize became durable but before Submit began.
+    const durablePrefixState = h.store.snapshot();
+    const durableProposal = durablePrefixState.proposals.get(outcome.proposal.proposal_id);
+    const durableOrigin = durablePrefixState.proposalOrigins.get(outcome.proposal.proposal_id);
+    if (durableProposal === undefined || durableOrigin === undefined) throw new Error('expected native proposal origin');
+    const durableAuthorize = await h.core.ruleProposalWithCurrentness(
+      {
+        gate: 'authorize',
+        proposal: durableProposal,
+        service: durableOrigin.service,
+        actionClass: durableOrigin.action_class,
+        caseId: durableOrigin.case_id,
+        actor: ORCHESTRATOR,
+      },
+      (lockedState, at) => h.proposalIntakes.assertProposalCurrent(
+        lockedState,
+        at,
+        outcome.proposal.proposal_id,
+      ),
+    );
+    expect(durableAuthorize.ruling.verdict).toBe('allow');
+
     const precommit = await h.authorization.runProposalPrecommit('w-demo', outcome.proposal.proposal_id, claim);
     expect(precommit.proposal_run_id).toBe('prun_native_test');
     expect(precommit.state).toBe('verified');
     expect(precommit.gates.map((entry) => entry.gate)).toEqual(['authorize', 'submit', 'verify']);
     const final = h.store.snapshot();
+    expect([...final.rulings.values()].filter(
+      (ruling) => ruling.gate === 'authorize' && ruling.binding.frozen_proposal_hash === durableProposal.proposal_hash,
+    ).map((ruling) => ruling.ruling_id)).toEqual([durableAuthorize.ruling.ruling_id]);
+    expect(final.actionRecords.filter(
+      (record) => record.admissibility_decision.ruling_id === durableAuthorize.ruling.ruling_id,
+    )).toHaveLength(1);
     expect([...final.rulings.values()].some((ruling) => ruling.gate === 'commit')).toBe(false);
     expect(final.reservations.size).toBe(0);
     expect(final.commitments.size).toBe(0);
