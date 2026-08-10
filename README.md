@@ -8,9 +8,9 @@ at an AI prompt, the action path **plan → prepare → check → decide → rev
 contract, two principal-approved acting-model evidence entries, an authorization-owned browser-initiated
 selection/switch protocol, a reviewed native selected-lane call into sealed quarantine, reviewed M5.10
 authorization-owned message ingestion and single-use output release, and hash-chained action records sealed before
-effect. M5.11, reviewed at `8364745`, adds governed proposal intake and fixed pre-commit evidence. The M5.12
-implementation candidate adds an authorization-derived dialogue trigger and response-bound native proposal revision;
-it is awaiting exact-SHA adversarial review and still cannot reach Commit or effect execution.
+effect. M5.11, reviewed at `8364745`, adds governed proposal intake and fixed pre-commit evidence. M5.12, reviewed
+at `5b27b0e`, adds an authorization-derived dialogue trigger and response-bound native proposal revision; it still
+cannot reach Commit or effect execution.
 
 The authoritative build specification lives in the documentation repository:
 [runtime-gates-poc-spec.md](https://github.com/robertschaub/our-ai-charter/blob/main/docs/wip/runtime-gates-poc-spec.md).
@@ -40,10 +40,11 @@ The exact upstream revision, digest, reviewed runtime baseline, and remaining mi
   `said`/`inferred` ingestion, and a short-lived single-use release with consume-time currentness checks. The
   reviewed ADR-013 definition at `fbc72cc` now has a bounded M5.11 implementation reviewed at `8364745`: one explicit
   proposal preparation, a purpose-bound schema call, authorization-owned freeze, and fixed Authorize → Submit →
-  Verify evidence. The separately reviewed ADR-014 definition at `0c3cac9` now has an M5.12 implementation candidate:
+  Verify evidence. The separately reviewed ADR-014 definition at `0c3cac9` now has an M5.12 implementation reviewed
+  at `5b27b0e`:
   authorization resolves the exact inferred dialogue item, owns a single-use revision preparation, and re-runs the
-  revised proposal through the same three pre-commit gates. That candidate remains unreviewed until an exact committed
-  SHA receives adversarial review. Neither path is an assurance, commitment, effect, or completed M5 path. M5.7, reviewed at
+  revised proposal through the same three pre-commit gates. Neither path is an assurance, commitment, effect, or
+  completed M5 path. M5.7, reviewed at
   `442397a`, adds replayable
   headless selection and switching through orchestrator-authenticated authorization routes. M5.8, reviewed at
   `ff9e438`, adds a dynamic-session-only browser caller with a two-minute, single-use preparation, redacted
@@ -166,9 +167,9 @@ routes to the dynamic case session. Startup itself makes no provider request, no
 for that tranche. M5.10, reviewed at `8a904f3`, adds the separately defined message-ingress, release, and transcript
 path without proposal construction, empathy completion, a live provider run, or M6 capture. M5.11, reviewed at
 `8364745`, implements only ADR-013's native proposal preparation, schema-bound intake/freeze, replayable origin evidence,
- fixed precommit sequence, and exact-key browser projection. The M5.12 candidate implements only ADR-014's focused
+ fixed precommit sequence, and exact-key browser projection. M5.12, reviewed at `5b27b0e`, implements only ADR-014's focused
  Verify dialogue trigger, direct response basis, revision preparation/use, immutable successor lineage, and repeated
- precommit checks. It makes no live provider claim, never reaches Commit or an executing service, remains pending
+ precommit checks. It makes no live provider claim, never reaches Commit or an executing service, requires no further
  exact-SHA review, and does not complete M5.
 
 Offline and deterministic verification uses synthetic records and skips only the remote-presence step:
