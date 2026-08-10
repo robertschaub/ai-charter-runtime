@@ -1377,7 +1377,7 @@ export class AuthorizationCore {
       const inferenceSignals = screening.signals.filter(
         (signal) => signal.signal === 'unconfirmed_inference_as_fact',
       );
-      if (input.gate === 'verify' && inferenceSignals.length > 0) {
+      if (input.gate === 'verify' && inferenceSignals.length > 0 && evaluation.verdict !== 'deny') {
         const suspectIds = new Set(
           inferenceSignals.flatMap((signal) => (signal.suspect_item_id == null ? [] : [signal.suspect_item_id])),
         );

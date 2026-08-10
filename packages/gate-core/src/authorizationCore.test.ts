@@ -1178,6 +1178,45 @@ describe('M2 authorization transactions', () => {
     expect(result.ruling.reason).toContain('substituted-model');
   });
 
+  it('preserves an authority deny when Verify records an unconfirmed-inference signal', async () => {
+    const h = harness();
+    await initialize(h);
+    const frozen = proposal(68, {
+      cost_obligation: { amount_minor_units: 101, description: 'Synthetic over-mandate amount.' },
+    });
+    const signal: ScreeningSignal = {
+      kind: 'screening_signal',
+      signal: 'unconfirmed_inference_as_fact',
+      suspect_item_id: null,
+      confidence_pct: 100,
+      rationale: 'Synthetic inference requires confirmation.',
+      model_id: 'screening-model',
+      model_version_reported: 'screening-model-v1',
+    };
+    h.setScreening(frozen.proposal_id, [signal]);
+
+    const denied = await h.core.ruleProposal(ruleInput(frozen, { gate: 'verify' }));
+
+    expect(denied.ruling).toMatchObject({
+      gate: 'verify',
+      verdict: 'deny',
+      matched_rule_id: 'authority:broadened-request',
+      counter_reservations: [],
+    });
+    expect(denied.ruling.evidence_refs).toContainEqual(signal);
+    expect(denied.escalationId).toBeNull();
+    const state = h.store.snapshot();
+    expect(state.escalations.size).toBe(0);
+    expect(
+      state.actionRecords.find(
+        (entry) => entry.admissibility_decision.ruling_id === denied.ruling.ruling_id,
+      ),
+    ).toMatchObject({
+      admissibility_decision: { verdict: 'deny' },
+      human_intervention_event: null,
+    });
+  });
+
   it('routes ordinary card supersession to re-confirmation but fails a withdrawal closed', async () => {
     const superseded = harness();
     await initialize(superseded);
