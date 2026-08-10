@@ -23,11 +23,13 @@ import {
   outputReleaseConsumeResult,
   outputReleaseStatusProjection,
   proposalCallBinding,
+  proposalRevisionCallBinding,
   proposalIntakeConsumeResult,
   proposalIntakeStatusProjection,
   PROPOSAL_DRAFT_RESPONSE_FORMAT,
   PROPOSAL_DRAFT_SCHEMA_DIGEST,
   PROPOSAL_DRAFT_SYSTEM_INSTRUCTION,
+  PROPOSAL_REVISION_SYSTEM_INSTRUCTION,
   sortedRestrictionTags,
   verifyDigest,
   worldId,
@@ -51,6 +53,8 @@ import {
   type OutputReleaseConsumeResult,
   type OutputReleaseStatusProjection,
   type ProposalCallBinding,
+  type ProposalRevisionCallBinding,
+  type ProposalRevisionSourceProjection,
   type ProposalIntakeConsumeResult,
   type ProposalIntakeStatusProjection,
 } from 'gate-core';
@@ -86,6 +90,11 @@ const messageBoundModelTurnInput = modelTurnInput
 const proposalBoundModelTurnInput = modelTurnInput
   .omit({ maxOutputTokens: true })
   .extend({ proposalRunId: id, conversationVersion: integer.min(1) })
+  .strict();
+
+const proposalRevisionBoundModelTurnInput = modelTurnInput
+  .omit({ maxOutputTokens: true })
+  .extend({ preparationId: id })
   .strict();
 
 const quarantinedModelOutputRef = z
@@ -168,6 +177,7 @@ export interface ModelTurnRunContext {
 
 export type MessageBoundModelTurnInput = z.infer<typeof messageBoundModelTurnInput>;
 export type ProposalBoundModelTurnInput = z.infer<typeof proposalBoundModelTurnInput>;
+export type ProposalRevisionBoundModelTurnInput = z.infer<typeof proposalRevisionBoundModelTurnInput>;
 
 export class ModelTurnError extends Error {
   constructor(
@@ -222,6 +232,7 @@ export interface ModelTurnAuthorizationClient {
     readonly selectionId: string;
     readonly ingressBinding?: ModelCallIngressBinding;
     readonly proposalBinding?: ProposalCallBinding;
+    readonly revisionBinding?: ProposalRevisionCallBinding;
   }, onBehalfOf?: ModelTurnCallerClaim): Promise<ModelCallStart>;
   admitModelOutput(
     worldIdInput: string,
@@ -569,6 +580,23 @@ function proposalPrompt(projection: ConversationProjection): ActingRequest['mess
   ];
 }
 
+function proposalRevisionPrompt(
+  projection: ConversationProjection,
+  source: ProposalRevisionSourceProjection,
+): ActingRequest['messages'] {
+  return [
+    { role: 'system', content: PROPOSAL_REVISION_SYSTEM_INSTRUCTION },
+    {
+      role: 'user',
+      content: canonicalize({
+        schema: 'ai-charter-runtime/proposal-revision-call-input@1',
+        projection,
+        source_proposal: source,
+      }),
+    },
+  ];
+}
+
 /**
  * Fetches only an authorization-owned projection, calls one configured lane, and sends
  * the result back to authorization. Even an admitted result remains sealed and unreadable.
@@ -671,7 +699,7 @@ export class ModelTurnCoordinator {
   }
 
   async run(inputValue: ModelTurnInput, context: ModelTurnRunContext = {}): Promise<ModelTurnOutcome> {
-    const outcome = await this.#run(inputValue, context, null, null);
+    const outcome = await this.#run(inputValue, context, null, null, null);
     if (outcome.disposition === 'proposal-frozen') throw new ModelTurnError('admission-binding-invalid');
     return outcome;
   }
@@ -716,6 +744,7 @@ export class ModelTurnCoordinator {
         message_digest: ingress.message_digest,
       }),
       null,
+      null,
     );
     if (outcome.disposition === 'proposal-frozen') throw new ModelTurnError('admission-binding-invalid');
     return outcome;
@@ -750,6 +779,37 @@ export class ModelTurnCoordinator {
         conversation_version: input.conversationVersion,
         proposal_schema_digest: PROPOSAL_DRAFT_SCHEMA_DIGEST,
       }),
+      null,
+    );
+    if (outcome.disposition !== 'proposal-frozen') throw new ModelTurnError('authorization-refused', 'confirmed');
+    return outcome;
+  }
+
+  async runProposalRevision(
+    inputValue: ProposalRevisionBoundModelTurnInput,
+    context: ModelTurnRunContext,
+  ): Promise<ProposalModelTurnOutcome> {
+    const input = proposalRevisionBoundModelTurnInput.parse(inputValue);
+    if (
+      context.onBehalfOf === undefined ||
+      this.#authorization.consumeProposalIntake === undefined ||
+      this.#authorization.proposalIntakeStatus === undefined
+    ) {
+      throw new ModelTurnError('invalid-configuration');
+    }
+    const outcome = await this.#run(
+      {
+        turnId: input.turnId,
+        selectionId: input.selectionId,
+        cardId: input.cardId,
+        cardVersion: input.cardVersion,
+        requestedId: input.requestedId,
+        maxOutputTokens: 512,
+      },
+      context,
+      null,
+      null,
+      proposalRevisionCallBinding.parse({ preparation_id: input.preparationId }),
     );
     if (outcome.disposition !== 'proposal-frozen') throw new ModelTurnError('authorization-refused', 'confirmed');
     return outcome;
@@ -760,6 +820,7 @@ export class ModelTurnCoordinator {
     context: ModelTurnRunContext,
     ingressBinding: ModelCallIngressBinding | null,
     proposalBinding: ProposalCallBinding | null,
+    revisionBinding: ProposalRevisionCallBinding | null,
   ): Promise<ModelTurnOutcome | ProposalModelTurnOutcome> {
     const input = modelTurnInput.parse(inputValue);
     const key = laneKey(input.cardId, input.cardVersion, input.requestedId);
@@ -792,6 +853,7 @@ export class ModelTurnCoordinator {
               selectionId: input.selectionId,
               ...(ingressBinding === null ? {} : { ingressBinding }),
               ...(proposalBinding === null ? {} : { proposalBinding }),
+              ...(revisionBinding === null ? {} : { revisionBinding }),
             },
             context.onBehalfOf,
           ),
@@ -799,7 +861,7 @@ export class ModelTurnCoordinator {
       } catch {
         return halt('authorization-refused');
       }
-      const { call, projection } = started;
+      const { call, projection, revision_source: revisionSource } = started;
       if (
         call.world_id !== this.#worldId ||
         call.case_id !== this.#caseId ||
@@ -812,8 +874,12 @@ export class ModelTurnCoordinator {
         canonicalize(call.projection_item_ids) !== canonicalize(projection.items.map((item) => item.id)) ||
         canonicalize(call.ingress_binding) !== canonicalize(ingressBinding) ||
         canonicalize(call.proposal_binding) !== canonicalize(proposalBinding) ||
+        canonicalize(call.revision_binding) !== canonicalize(revisionBinding) ||
         call.session_id !==
-          (ingressBinding === null && proposalBinding === null ? null : (context.onBehalfOf?.session_id ?? null)) ||
+          (ingressBinding === null && proposalBinding === null && revisionBinding === null
+            ? null
+            : (context.onBehalfOf?.session_id ?? null)) ||
+        (revisionBinding === null) !== (revisionSource === null) ||
         !verifyDigest(call.projection_digest, digestFor('conversation-projection', projection)) ||
         projection.world_id !== this.#worldId ||
         projection.case_id !== this.#caseId ||
@@ -854,10 +920,16 @@ export class ModelTurnCoordinator {
       let rawResponse: ActingResponse;
       try {
         context.onProviderAttempt?.();
+        const proposalPurpose = proposalBinding !== null || revisionBinding !== null;
         rawResponse = await lane.adapter.act({
-          messages: proposalBinding === null ? projectionPrompt(projection) : proposalPrompt(projection),
-          maxOutputTokens: proposalBinding === null ? input.maxOutputTokens : 512,
-          ...(proposalBinding === null ? {} : { responseFormat: PROPOSAL_DRAFT_RESPONSE_FORMAT }),
+          messages:
+            revisionBinding !== null && revisionSource !== null
+              ? proposalRevisionPrompt(projection, revisionSource)
+              : proposalBinding !== null
+                ? proposalPrompt(projection)
+                : projectionPrompt(projection),
+          maxOutputTokens: proposalPurpose ? 512 : input.maxOutputTokens,
+          ...(proposalPurpose ? { responseFormat: PROPOSAL_DRAFT_RESPONSE_FORMAT } : {}),
         });
       } catch (error) {
         const failure = providerFailureEvidence(error);
@@ -928,7 +1000,7 @@ export class ModelTurnCoordinator {
         return { disposition: 'withheld', admission };
       }
       try {
-        if (ingressBinding === null && proposalBinding === null) {
+        if (ingressBinding === null && proposalBinding === null && revisionBinding === null) {
           if (admissionEnvelope.release !== null || admissionEnvelope.proposal_intake !== null) {
             return halt('admission-binding-invalid', 'confirmed', response.servedId);
           }
@@ -945,14 +1017,15 @@ export class ModelTurnCoordinator {
             ),
           };
         }
-        if (proposalBinding !== null) {
+        if (proposalBinding !== null || revisionBinding !== null) {
           const intake = admissionEnvelope.proposal_intake;
           const claim = context.onBehalfOf;
+          const expectedRunId = proposalBinding?.proposal_run_id ?? intake?.proposal_run_id;
           if (
             admissionEnvelope.release !== null ||
             intake === null ||
             intake.call_id !== call.call_id ||
-            intake.proposal_run_id !== proposalBinding.proposal_run_id ||
+            intake.proposal_run_id !== expectedRunId ||
             claim === undefined
           ) {
             return halt('admission-binding-invalid', 'confirmed', response.servedId);
@@ -1006,7 +1079,7 @@ export class ModelTurnCoordinator {
               recorded_at: status.state_changed_at,
             });
           }
-          if (proposal.proposal_run_id !== proposalBinding.proposal_run_id) {
+          if (proposal.proposal_run_id !== expectedRunId) {
             return halt('admission-binding-invalid', 'confirmed', response.servedId);
           }
           return { disposition: 'proposal-frozen', admission, proposal };

@@ -11,6 +11,7 @@ import {
   type ModelCallAccessEvidence,
   type ModelSelectionAccessEvidence,
   type ProposalIntakeAccessEvidence,
+  type ProposalRevisionPreparationProjection,
 } from './schemas/index.js';
 import { type AuthorizationCore } from './authorizationCore.js';
 import type { TransactionActor } from './walStore.js';
@@ -72,6 +73,15 @@ export const AUTHORIZATION_ROUTES = [
     accessLoggedOnServe: true,
   },
   {
+    id: 'case-session.close',
+    method: 'POST',
+    template: '/w/{world_id}/case-sessions/{id}/close',
+    allowed: ['proc:orchestrator'],
+    authorityChanging: false,
+    originGuarded: true,
+    accessLoggedOnServe: true,
+  },
+  {
     id: 'proposal.submit',
     method: 'POST',
     template: '/w/{world_id}/proposals',
@@ -91,6 +101,15 @@ export const AUTHORIZATION_ROUTES = [
     id: 'proposal-intake.read',
     method: 'GET',
     template: '/w/{world_id}/proposal-intakes/{id}',
+    allowed: ['proc:orchestrator'],
+    authorityChanging: false,
+    originGuarded: true,
+    accessLoggedOnServe: true,
+  },
+  {
+    id: 'proposal-revision.prepare',
+    method: 'POST',
+    template: '/w/{world_id}/cases/{case_id}/proposal-runs/{id}/revision-preparations',
     allowed: ['proc:orchestrator'],
     authorityChanging: false,
     originGuarded: true,
@@ -380,7 +399,8 @@ export interface AuthorizationOperationResult<T> {
     | ModelCallAccessEvidence
     | ModelSelectionAccessEvidence
     | ConversationTransportAccessEvidence
-    | ProposalIntakeAccessEvidence;
+    | ProposalIntakeAccessEvidence
+    | ProposalRevisionPreparationProjection;
 }
 
 export interface AuthorizationAdapterResponse<T> {

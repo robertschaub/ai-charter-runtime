@@ -17,6 +17,7 @@ import {
   ConversationTransportService,
   ProposalIntakeService,
   ProposalPrecommitService,
+  proposalRevisionPreparationBlocksReplacement,
   digestFor,
   Keyring,
   loadPolicyFile,
@@ -24,6 +25,7 @@ import {
   storeItem,
   WalStore,
   type Mandate,
+  type ScreeningResolution,
   type StoreItem,
 } from 'gate-core';
 import { ModelAdapterError, OpenAiCompatibleAdapter } from 'model-adapters';
@@ -159,13 +161,15 @@ async function authorizationHarness() {
   stores.push(store);
   const systemUse = syntheticSystemUseForTests(store);
   const cards = CardRegistry.load(CARDS);
+  const screeningByGate = new Map<'submit' | 'verify', ScreeningResolution>();
   const core = new AuthorizationCore({
     store,
     keyring,
     policy,
     systemUse,
     resolveAuthorizedAgent: (actor) => (actor.credential === 'proc:orchestrator' ? 'agent_demo' : undefined),
-    resolveScreening: () => ({ performed: true, signals: [], evidenceRefs: [] }),
+    resolveScreening: (_proposal, gate) =>
+      screeningByGate.get(gate) ?? { performed: true, signals: [], evidenceRefs: [] },
     validateScreeningResolution: () => true,
     resolveModelEvidence: (value) => cards.resolve(value),
   });
@@ -204,6 +208,10 @@ async function authorizationHarness() {
   void ignoredHandoffExpiry;
   const sessionId = 'session_message_turn';
   await handoffs.redeem({ ...handoffInput, session_id: sessionId }, ORCHESTRATOR);
+  let intakeSequence = 0;
+  let proposalSequence = 0;
+  let revisionPreparationSequence = 0;
+  let revisionRunSequence = 0;
   const proposalIntakes = new ProposalIntakeService({
     store,
     cards,
@@ -212,9 +220,13 @@ async function authorizationHarness() {
     caseId: 'case_demo',
     authorizationBootId: 'authz_boot_model_turn_1',
     now: () => at,
-    nextIntakeId: () => 'pint_test_native',
-    nextProposalId: () => 'prp_test_native',
+    nextIntakeId: () => (++intakeSequence === 1 ? 'pint_test_native' : `pint_test_native_${intakeSequence}`),
+    nextProposalId: () => (++proposalSequence === 1 ? 'prp_test_native' : `prp_test_native_${proposalSequence}`),
     nextActionId: () => 'act_test_native',
+    nextRevisionPreparationId: () =>
+      ++revisionPreparationSequence === 1 ? 'rprep_test_native' : `rprep_test_native_${revisionPreparationSequence}`,
+    nextRevisionRunId: () =>
+      ++revisionRunSequence === 1 ? 'prun_test_revision' : `prun_test_revision_${revisionRunSequence}`,
   });
   const projections = new ConversationProjectionService({
     store,
@@ -250,7 +262,7 @@ async function authorizationHarness() {
     reads: {} as AuthorizationReadSide,
     adapter,
     keyring,
-    caseHandoffs: {} as CaseSessionHandoffService,
+    caseHandoffs: handoffs,
     systemUse,
     runtimeConfig: {
       authorization_origin: 'http://127.0.0.1:7801',
@@ -295,10 +307,15 @@ async function authorizationHarness() {
     conversationTransport,
     proposalIntakes,
     proposalPrecommit,
+    handoffs,
     root,
     policy,
     buildDigest,
     closeAuthorization,
+    setScreening(gate: 'submit' | 'verify', resolution: ScreeningResolution | null) {
+      if (resolution === null) screeningByGate.delete(gate);
+      else screeningByGate.set(gate, resolution);
+    },
     setAt(value: string) {
       at = value;
     },
@@ -1205,6 +1222,425 @@ describe('M5.4 containment with M5.5 durable model-call evidence', () => {
     expect([...reopened.snapshot().rulings.values()].filter(
       (ruling) => ruling.binding.frozen_proposal_hash === final.proposals.get('prp_test_native')?.proposal_hash,
     ).map((ruling) => ruling.status)).toEqual(['invalidated', 'invalidated', 'invalidated']);
+  });
+
+  it('runs the bounded dialogue continuation through a semantic-only revision and re-gates without Commit', async () => {
+    const h = await authorizationHarness();
+    const provider = await loopbackProvider();
+    const initialContent = nativeProposalContent({
+      material_input_ids: ['said_public'],
+      derived_claim_ids: ['inf_7'],
+    });
+    provider.enqueue({ model: h.mandateBody.default_acting_model.requested_id, content: initialContent });
+    const coordinator = new ModelTurnCoordinator({
+      worldId: 'w-demo',
+      caseId: 'case_demo',
+      authorization: h.authorization,
+      lanes: [lane(provider)],
+    });
+    let claim = { role: 'case_officer' as const, session_id: h.sessionId };
+    const frozenInitial = await coordinator.runProposal(
+      {
+        proposalRunId: 'prun_dialogue_source',
+        conversationVersion: h.store.snapshot().conversationVersionByCase.get('case_demo') ?? 0,
+        turnId: 'turn_dialogue_source',
+        selectionId: h.selectionId,
+        cardId: h.mandateBody.default_acting_model.card_id,
+        cardVersion: h.mandateBody.default_acting_model.card_version,
+        requestedId: h.mandateBody.default_acting_model.requested_id,
+      },
+      { onBehalfOf: claim },
+    );
+    h.setScreening('verify', {
+      performed: true,
+      signals: [{
+        kind: 'screening_signal',
+        signal: 'unconfirmed_inference_as_fact',
+        suspect_item_id: 'inf_7',
+        confidence_pct: 100,
+        rationale: '<b>model prose must not become the question</b>',
+        model_id: 'screening-model',
+        model_version_reported: 'screening-model-v1',
+      }],
+      evidenceRefs: [],
+    });
+    const stopped = await h.authorization.runProposalPrecommit(
+      'w-demo',
+      frozenInitial.proposal.proposal_id,
+      claim,
+    );
+    expect(stopped.state).toBe('escalated');
+    expect(stopped.continuation).toEqual({ state: 'response-required', source_proposal_run_id: null });
+    const sourceState = h.store.snapshot();
+    const sourceEscalation = [...sourceState.escalations.values()].find(
+      (candidate) => candidate.escalation_id === stopped.escalation_id,
+    );
+    if (sourceEscalation === undefined) throw new Error('expected bounded dialogue escalation');
+    expect(sourceEscalation.dialogue_item_ref).toBe('inf_7');
+    expect(sourceEscalation.contract).toEqual({
+      trigger_and_state: { trigger: 'unconfirmed-inference-as-fact', state: 'open' },
+      decision_and_route: {
+        eligible_role: 'case_officer',
+        standing_class: 'third-party-fact',
+        competence_declared: 'Assigned case officer for the synthetic demo (declared, not verified).',
+        independence_declared: 'Not independently verified in this POC.',
+        substitute_roles: ['principal'],
+        substitute_rule: 'The principal may respond only under the same standing and cannot manufacture a third-party fact.',
+      },
+      decision_basis_shown: ['frozen-proposal-inference', 'current-evidence-status'],
+      response_bound_and_default: {
+        response_bound_ms: 900000,
+        safe_default: {
+          kind: 'stop-remains',
+          disposition: 'abstain',
+          authority_basis: { kind: 'no-new-authority' },
+          reversible: true,
+        },
+      },
+      permitted_dispositions: ['confirm', 'correct', 'narrow', 'abstain', 'route'],
+      record_and_feedback: {
+        record_events: ['dialogue_trigger_raised', 'dialogue_response_recorded'],
+        feedback_consequence: 'Increment the dialogue ask-rate counter.',
+      },
+    });
+    const sourceRuling = sourceState.rulings.get(sourceEscalation.ruling_id);
+    expect(sourceRuling?.reason).toBe(
+      'What cited evidence confirms, corrects, or narrows this inference: "The synthetic applicant entity is no more than three years old."?',
+    );
+    expect(sourceRuling?.reason).not.toContain('<b>');
+    await expect(h.core.respondDialogue({
+      escalationId: sourceEscalation.escalation_id,
+      disposition: 'confirm',
+      scope: { item_ref: 'inf_7', applies_to: 'this_case_only' },
+      actor: CASE_OFFICER,
+    })).resolves.toMatchObject({ accepted: false, defect: 'evidence-required' });
+    await expect(h.core.respondDialogue({
+      escalationId: sourceEscalation.escalation_id,
+      disposition: 'narrow',
+      answerText: 'Caller-selected scope must not redirect the bounded dialogue.',
+      scope: { item_ref: 'said_public', applies_to: 'this_case_only' },
+      actor: CASE_OFFICER,
+    })).resolves.toMatchObject({ accepted: false, defect: 'invalid-response' });
+    const response = await h.core.respondDialogue({
+      escalationId: sourceEscalation.escalation_id,
+      disposition: 'narrow',
+      answerText: 'The synthetic registration date remains unconfirmed and must be treated as an applicant assertion.',
+      scope: { item_ref: 'inf_7', applies_to: 'this_case_only' },
+      actor: CASE_OFFICER,
+    });
+    expect(response).toMatchObject({ accepted: true, status: 'disposed' });
+    expect(h.store.snapshot().storeItems.has('inf_7')).toBe(false);
+
+    const revisionPreparationPath = '/w/w-demo/cases/case_demo/proposal-runs/prun_dialogue_source/revision-preparations';
+    const revisionHeaders = {
+      authorization: `Bearer ${ORCHESTRATOR_TOKEN}`,
+      'content-type': 'application/json',
+      'x-on-behalf-of-role': 'case_officer',
+      'x-session-id': h.sessionId,
+    };
+    expect((await fetch(new URL(revisionPreparationPath, h.authorizationOrigin), {
+      method: 'POST',
+      headers: { ...revisionHeaders, origin: 'http://foreign.invalid' },
+      body: '{}',
+    })).status).toBe(403);
+    expect((await fetch(new URL(revisionPreparationPath, h.authorizationOrigin), {
+      method: 'POST',
+      headers: { ...revisionHeaders, origin: 'http://127.0.0.1:7801' },
+      body: JSON.stringify({ response: 'caller-asserted' }),
+    })).status).toBe(422);
+
+    const firstPrepared = await h.authorization.prepareProposalRevision(
+      'w-demo',
+      'case_demo',
+      'prun_dialogue_source',
+      claim,
+    );
+    expect(Object.keys(firstPrepared).sort()).toEqual([
+      'expires_at', 'issued_at', 'kind', 'preparation_id', 'proposal_run_id', 'source_proposal_run_id', 'target',
+    ]);
+    expect(firstPrepared).toMatchObject({
+      preparation_id: 'rprep_test_native',
+      proposal_run_id: 'prun_test_revision',
+      source_proposal_run_id: 'prun_dialogue_source',
+    });
+    expect(h.store.snapshot().accessRecords.find(
+      (record) => 'operation_evidence' in record &&
+        record.operation_evidence?.kind === 'proposal_revision_preparation' &&
+        record.operation_evidence.preparation_id === firstPrepared.preparation_id,
+    )).toMatchObject({
+      route: 'POST /w/{world_id}/cases/{case_id}/proposal-runs/{id}/revision-preparations',
+      authenticated_actor: 'proc:orchestrator',
+      outcome: 'served',
+      http_status: 201,
+      operation_evidence: firstPrepared,
+    });
+    await expect(h.authorization.prepareProposalRevision(
+      'w-demo',
+      'case_demo',
+      'prun_dialogue_source',
+      claim,
+    )).resolves.toEqual(firstPrepared);
+
+    const replacementHandoff = await h.handoffs.mint('case_demo', CASE_OFFICER);
+    const { expires_at: ignoredReplacementExpiry, ...replacementInput } = replacementHandoff;
+    void ignoredReplacementExpiry;
+    const replacementSessionId = 'session_dialogue_replacement';
+    await h.handoffs.redeem(
+      { ...replacementInput, session_id: replacementSessionId },
+      ORCHESTRATOR,
+    );
+    const replacementClaim = { role: 'case_officer' as const, session_id: replacementSessionId };
+    await expect(h.authorization.prepareProposalRevision(
+      'w-demo',
+      'case_demo',
+      'prun_dialogue_source',
+      replacementClaim,
+    )).rejects.toMatchObject({ httpStatus: 409 });
+    await h.handoffs.closeSession(h.sessionId, ORCHESTRATOR);
+    expect(h.store.snapshot().proposalRevisionPreparations.get(firstPrepared.preparation_id)).toMatchObject({
+      state: 'invalidated',
+      invalidation_reason: 'session-ended',
+    });
+    claim = replacementClaim;
+    const prepared = await h.authorization.prepareProposalRevision(
+      'w-demo',
+      'case_demo',
+      'prun_dialogue_source',
+      claim,
+    );
+    expect(prepared).toMatchObject({
+      preparation_id: 'rprep_test_native_2',
+      proposal_run_id: 'prun_test_revision_2',
+      source_proposal_run_id: 'prun_dialogue_source',
+    });
+
+    const revisionContent = nativeProposalContent({
+      declared_objective: 'File the narrowed synthetic grant application.',
+      material_input_ids: ['said_public'],
+      derived_claim_ids: [],
+    });
+    provider.enqueue({ model: h.mandateBody.default_acting_model.requested_id, content: revisionContent });
+    const frozenRevision = await coordinator.runProposalRevision(
+      {
+        preparationId: prepared.preparation_id,
+        turnId: 'turn_dialogue_revision',
+        selectionId: h.selectionId,
+        cardId: prepared.target.card_id,
+        cardVersion: prepared.target.card_version,
+        requestedId: prepared.target.requested_id,
+      },
+      { onBehalfOf: claim },
+    );
+    expect(frozenRevision.proposal.proposal_run_id).toBe(prepared.proposal_run_id);
+    const afterFreeze = h.store.snapshot();
+    const revision = afterFreeze.proposals.get(frozenRevision.proposal.proposal_id);
+    const origin = afterFreeze.proposalOrigins.get(frozenRevision.proposal.proposal_id);
+    const consumedPreparation = afterFreeze.proposalRevisionPreparations.get(prepared.preparation_id);
+    if (consumedPreparation === undefined) throw new Error('expected consumed revision preparation');
+    expect(proposalRevisionPreparationBlocksReplacement(
+      afterFreeze,
+      consumedPreparation,
+      '2026-08-01T09:03:00.000Z',
+    )).toBe(true);
+    expect(revision).toMatchObject({ action_id: 'act_test_native', revision: 2 });
+    expect(origin?.continuation).toMatchObject({
+      preparation_id: prepared.preparation_id,
+      source_proposal_id: frozenInitial.proposal.proposal_id,
+      source_escalation_id: sourceEscalation.escalation_id,
+      response_record_entry_id: response.recordEntryId,
+    });
+    const revisionRequest = provider.requests[1];
+    const revisionRequestJson = JSON.stringify(revisionRequest);
+    expect(revisionRequestJson).toContain('proposal-revision@1');
+    expect(revisionRequestJson).toContain('source_proposal');
+    expect(revisionRequestJson).toContain('The synthetic applicant entity is no more than three years old.');
+    for (const hidden of [
+      frozenInitial.proposal.proposal_id,
+      sourceEscalation.escalation_id,
+      sourceEscalation.ruling_id,
+      prepared.preparation_id,
+      response.recordEntryId,
+      'dialogue_item_ref',
+    ]) expect(revisionRequestJson).not.toContain(hidden);
+
+    if (revision === undefined || origin === undefined) throw new Error('expected frozen revision lineage');
+    const durableDeny = await h.core.ruleProposalWithCurrentness(
+      {
+        gate: 'authorize',
+        proposal: revision,
+        service: origin.service,
+        actionClass: origin.action_class,
+        caseId: origin.case_id,
+        context: { tool_request_class: 'inadmissible-with-fallback' },
+        actor: ORCHESTRATOR,
+      },
+      (lockedState, at) => h.proposalIntakes.assertProposalCurrent(
+        lockedState,
+        at,
+        frozenRevision.proposal.proposal_id,
+      ),
+    );
+    expect(durableDeny.ruling.verdict).toBe('deny');
+    const denied = await h.authorization.runProposalPrecommit(
+      'w-demo',
+      frozenRevision.proposal.proposal_id,
+      claim,
+    );
+    expect(denied.state).toBe('denied');
+    expect(h.store.snapshot().rulings.get(sourceEscalation.ruling_id)?.successor_ruling_id).toBeNull();
+    await expect(h.authorization.proposalRunStatus(
+      'w-demo',
+      'case_demo',
+      'prun_dialogue_source',
+      claim,
+    )).resolves.toMatchObject({ continuation: { state: 'available', source_proposal_run_id: null } });
+
+    const retryPreparation = await h.authorization.prepareProposalRevision(
+      'w-demo',
+      'case_demo',
+      'prun_dialogue_source',
+      claim,
+    );
+    expect(retryPreparation).toMatchObject({
+      preparation_id: 'rprep_test_native_3',
+      proposal_run_id: 'prun_test_revision_3',
+      source_proposal_run_id: 'prun_dialogue_source',
+    });
+    provider.enqueue({
+      model: h.mandateBody.default_acting_model.requested_id,
+      content: nativeProposalContent({
+        declared_objective: 'File the second narrowed synthetic grant application.',
+        material_input_ids: ['said_public'],
+        derived_claim_ids: [],
+      }),
+    });
+    const frozenRetryRevision = await coordinator.runProposalRevision(
+      {
+        preparationId: retryPreparation.preparation_id,
+        turnId: 'turn_dialogue_revision_retry',
+        selectionId: h.selectionId,
+        cardId: retryPreparation.target.card_id,
+        cardVersion: retryPreparation.target.card_version,
+        requestedId: retryPreparation.target.requested_id,
+      },
+      { onBehalfOf: claim },
+    );
+    expect(h.store.snapshot().proposals.get(frozenRetryRevision.proposal.proposal_id)).toMatchObject({
+      action_id: 'act_test_native',
+      revision: 3,
+    });
+
+    h.setScreening('verify', null);
+    const concurrentPrecommit = await Promise.allSettled([
+      h.authorization.runProposalPrecommit('w-demo', frozenRetryRevision.proposal.proposal_id, claim),
+      h.authorization.runProposalPrecommit('w-demo', frozenRetryRevision.proposal.proposal_id, claim),
+    ]);
+    const verified = concurrentPrecommit.find(
+      (outcome): outcome is PromiseFulfilledResult<Awaited<ReturnType<typeof h.authorization.runProposalPrecommit>>> =>
+        outcome.status === 'fulfilled' && outcome.value.state === 'verified',
+    )?.value;
+    if (verified === undefined) throw new Error('expected one verified concurrent precommit result');
+    for (const outcome of concurrentPrecommit) {
+      if (outcome.status === 'fulfilled') expect(outcome.value).toEqual(verified);
+      else expect(outcome.reason).toMatchObject({ httpStatus: 409 });
+    }
+    expect(verified.state).toBe('verified');
+    expect(verified.gates.map((entry) => entry.gate)).toEqual(['authorize', 'submit', 'verify']);
+    const final = h.store.snapshot();
+    expect([...final.rulings.values()].filter(
+      (ruling) => ruling.binding.frozen_proposal_hash ===
+        final.proposals.get(frozenRetryRevision.proposal.proposal_id)?.proposal_hash,
+    ).map((ruling) => ruling.gate)).toEqual(['authorize', 'submit', 'verify']);
+    expect(final.rulings.get(sourceEscalation.ruling_id)?.successor_ruling_id).toBe(
+      sourceEscalation.successor_ruling_id ?? verified.gates.find((entry) => entry.gate === 'verify')?.ruling_id,
+    );
+    expect(final.escalations.get(sourceEscalation.escalation_id)?.successor_ruling_id).toBe(
+      verified.gates.find((entry) => entry.gate === 'verify')?.ruling_id,
+    );
+    expect([...final.rulings.values()].some((ruling) => ruling.gate === 'commit')).toBe(false);
+    expect(final.reservations.size).toBe(0);
+    expect(final.commitments.size).toBe(0);
+    expect(final.effects.size).toBe(0);
+
+    await h.closeAuthorization();
+    h.store.close();
+    const reopened = WalStore.open({
+      recordsRoot: h.root,
+      worldId: 'w-demo',
+      runId: 'run_model_turn_revision_replay',
+      bootId: 'authz_boot_model_turn_revision_replay',
+      policyVersion: h.policy.policy.policy_version,
+      policyContentDigest: h.policy.policyContentDigest,
+      evaluatorBuildDigest: h.buildDigest,
+      now: () => '2026-08-01T09:01:00.000Z',
+    });
+    stores.push(reopened);
+    const replayed = reopened.snapshot();
+    expect([...replayed.proposalRevisionPreparations.entries()]).toEqual(
+      [...final.proposalRevisionPreparations.entries()],
+    );
+    expect(replayed.proposalOrigins.get(frozenRetryRevision.proposal.proposal_id)).toEqual(
+      final.proposalOrigins.get(frozenRetryRevision.proposal.proposal_id),
+    );
+    expect(replayed.rulings.get(sourceEscalation.ruling_id)?.successor_ruling_id).toBe(
+      verified.gates.find((entry) => entry.gate === 'verify')?.ruling_id,
+    );
+  });
+
+  it('turns a caller-selected non-inference suspect into a general Stop with no native continuation', async () => {
+    const h = await authorizationHarness();
+    const provider = await loopbackProvider();
+    provider.enqueue({
+      model: h.mandateBody.default_acting_model.requested_id,
+      content: nativeProposalContent({ material_input_ids: ['said_public'], derived_claim_ids: ['inf_7'] }),
+    });
+    const coordinator = new ModelTurnCoordinator({
+      worldId: 'w-demo',
+      caseId: 'case_demo',
+      authorization: h.authorization,
+      lanes: [lane(provider)],
+    });
+    const claim = { role: 'case_officer' as const, session_id: h.sessionId };
+    const frozen = await coordinator.runProposal({
+      proposalRunId: 'prun_invalid_dialogue_suspect',
+      conversationVersion: h.store.snapshot().conversationVersionByCase.get('case_demo') ?? 0,
+      turnId: 'turn_invalid_dialogue_suspect',
+      selectionId: h.selectionId,
+      cardId: h.mandateBody.default_acting_model.card_id,
+      cardVersion: h.mandateBody.default_acting_model.card_version,
+      requestedId: h.mandateBody.default_acting_model.requested_id,
+    }, { onBehalfOf: claim });
+    h.setScreening('verify', {
+      performed: true,
+      signals: [{
+        kind: 'screening_signal',
+        signal: 'unconfirmed_inference_as_fact',
+        suspect_item_id: 'said_public',
+        confidence_pct: 100,
+        rationale: 'Caller-selected material item.',
+        model_id: 'screening-model',
+        model_version_reported: 'screening-model-v1',
+      }],
+      evidenceRefs: [],
+    });
+    const stopped = await h.authorization.runProposalPrecommit('w-demo', frozen.proposal.proposal_id, claim);
+    expect(stopped.state).toBe('escalated');
+    expect(stopped.continuation).toEqual({ state: 'unavailable', source_proposal_run_id: null });
+    const state = h.store.snapshot();
+    const escalation = [...state.escalations.values()].find(
+      (candidate) => candidate.escalation_id === stopped.escalation_id,
+    );
+    expect(escalation?.dialogue_item_ref).toBeNull();
+    expect(escalation?.contract.trigger_and_state.trigger).toBe('unmatched-consequential');
+    expect(state.rulings.get(escalation!.ruling_id)?.reason).toBe(
+      'A screening signal requires review, but no bounded dialogue item could be established.',
+    );
+    await expect(h.authorization.prepareProposalRevision(
+      'w-demo',
+      'case_demo',
+      'prun_invalid_dialogue_suspect',
+      claim,
+    )).rejects.toMatchObject({ httpStatus: 409 });
   });
 
   it('refuses malformed admitted proposal bytes atomically and exposes no proposal or conversation release', async () => {

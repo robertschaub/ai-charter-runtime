@@ -51,11 +51,15 @@ import {
   type OutputReleaseConsumeResult,
   type OutputReleaseStatusProjection,
   proposalCallBinding,
+  proposalRevisionCallBinding,
+  proposalRevisionPreparationProjection,
   proposalIntakeConsumeResult,
   proposalIntakeStatusProjection,
   proposalRunProcessProjection,
   proposalPrecommitProjection,
   type ProposalCallBinding,
+  type ProposalRevisionCallBinding,
+  type ProposalRevisionPreparationProjection,
   type ProposalIntakeConsumeResult,
   type ProposalIntakeStatusProjection,
   type ProposalRunProcessProjection,
@@ -243,6 +247,7 @@ export class OrchestratorAuthorizationHttpClient extends JsonHttpClient {
     readonly selectionId: string;
     readonly ingressBinding?: ModelCallIngressBinding;
     readonly proposalBinding?: ProposalCallBinding;
+    readonly revisionBinding?: ProposalRevisionCallBinding;
   }, onBehalfOf?: OnBehalfOfClaim): Promise<ModelCallStart> {
     const world = worldId.parse(input.worldId);
     const request = modelCallBeginRequest.parse({
@@ -252,8 +257,28 @@ export class OrchestratorAuthorizationHttpClient extends JsonHttpClient {
         input.ingressBinding === undefined ? null : modelCallIngressBinding.parse(input.ingressBinding),
       proposal_binding:
         input.proposalBinding === undefined ? null : proposalCallBinding.parse(input.proposalBinding),
+      revision_binding:
+        input.revisionBinding === undefined ? null : proposalRevisionCallBinding.parse(input.revisionBinding),
     });
     return modelCallStart.parse(await this.post(`/w/${world}/model-calls/begin`, request, onBehalfOf));
+  }
+
+  async prepareProposalRevision(
+    worldIdInput: string,
+    caseIdInput: string,
+    sourceRunIdInput: string,
+    onBehalfOf: OnBehalfOfClaim,
+  ): Promise<ProposalRevisionPreparationProjection> {
+    const world = worldId.parse(worldIdInput);
+    const caseId = id.parse(caseIdInput);
+    const sourceRunId = id.parse(sourceRunIdInput);
+    return proposalRevisionPreparationProjection.parse(
+      await this.post(
+        `/w/${world}/cases/${caseId}/proposal-runs/${sourceRunId}/revision-preparations`,
+        {},
+        onBehalfOf,
+      ),
+    );
   }
 
   async admitModelOutput(
@@ -420,6 +445,24 @@ export class OrchestratorAuthorizationHttpClient extends JsonHttpClient {
         parsed,
       ),
     );
+  }
+
+  async closeCaseSession(
+    worldIdInput: string,
+    sessionIdInput: string,
+    onBehalfOf: OnBehalfOfClaim,
+  ): Promise<void> {
+    const world = worldId.parse(worldIdInput);
+    const sessionId = id.parse(sessionIdInput);
+    const result = await this.post(`/w/${world}/case-sessions/${sessionId}/close`, {}, onBehalfOf);
+    if (
+      typeof result !== 'object' ||
+      result === null ||
+      Object.keys(result).sort().join(',') !== 'closed_at,session_id,state' ||
+      (result as Record<string, unknown>)['session_id'] !== sessionId ||
+      (result as Record<string, unknown>)['state'] !== 'closed' ||
+      !timestamp.safeParse((result as Record<string, unknown>)['closed_at']).success
+    ) throw new Error('runtime case-session close response was invalid');
   }
 
   async approvedModels(worldIdInput: string, mandateIdInput: string): Promise<ApprovedModelsProjection> {

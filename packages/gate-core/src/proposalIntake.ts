@@ -18,6 +18,10 @@ import {
   proposalIntakeReference,
   proposalIntakeStatusProjection,
   proposalOriginRecord,
+  proposalRevisionCallBinding,
+  proposalRevisionPreparationProjection,
+  proposalRevisionPreparationRecord,
+  proposalRevisionSourceProjection,
   proposalRunProcessProjection,
   timestamp,
   type ModelCallOpenRecord,
@@ -28,10 +32,18 @@ import {
   type ProposalIntakeRecord,
   type ProposalIntakeStatusProjection,
   type ProposalRunProcessProjection,
+  type ProposalRevisionCallBinding,
+  type ProposalRevisionPreparationRecord,
+  type ProposalRevisionPreparationProjection,
+  type ProposalRevisionSourceProjection,
   type WalOp,
 } from './schemas/index.js';
 import { freezeProposal } from './authorizationCore.js';
-import { mandateVersionKey, type WorldState } from './state.js';
+import {
+  mandateVersionKey,
+  proposalRevisionPreparationBlocksReplacement,
+  type WorldState,
+} from './state.js';
 import { SystemUseDecisionService } from './systemUseDecision.js';
 import { WalStore, type TransactionActor } from './walStore.js';
 
@@ -104,6 +116,13 @@ export const PROPOSAL_DRAFT_SYSTEM_INSTRUCTION = [
   'Do not claim authority, permission, approval, provenance, classification, service, action class, or gate outcome.',
 ].join(' ');
 
+export const PROPOSAL_REVISION_SYSTEM_INSTRUCTION = [
+  'Return exactly one proposal-draft@1 JSON object matching the supplied native schema for proposal-revision@1.',
+  'Revise semantics only from the refreshed projection and semantic source proposal.',
+  'Use only opaque evidence item ids present in the refreshed projection.',
+  'Do not claim authority, permission, approval, provenance, classification, lineage, service, action class, or gate outcome.',
+].join(' ');
+
 export class ProposalIntakeError extends Error {
   constructor(
     readonly code: 'forbidden' | 'not-found' | 'conflict' | 'currentness' | 'invalid-content',
@@ -132,6 +151,8 @@ export interface ProposalIntakeServiceOptions {
   readonly nextIntakeId?: () => string;
   readonly nextProposalId?: () => string;
   readonly nextActionId?: () => string;
+  readonly nextRevisionPreparationId?: () => string;
+  readonly nextRevisionRunId?: () => string;
 }
 
 export type PreparedProposalIntake = {
@@ -258,6 +279,8 @@ export class ProposalIntakeService {
   readonly #nextIntakeId: () => string;
   readonly #nextProposalId: () => string;
   readonly #nextActionId: () => string;
+  readonly #nextRevisionPreparationId: () => string;
+  readonly #nextRevisionRunId: () => string;
 
   constructor(options: ProposalIntakeServiceOptions) {
     this.#store = options.store;
@@ -274,6 +297,9 @@ export class ProposalIntakeService {
     this.#nextIntakeId = options.nextIntakeId ?? (() => `pint_${randomBytes(16).toString('hex')}`);
     this.#nextProposalId = options.nextProposalId ?? (() => `prp_${randomBytes(16).toString('hex')}`);
     this.#nextActionId = options.nextActionId ?? (() => `act_${randomBytes(16).toString('hex')}`);
+    this.#nextRevisionPreparationId =
+      options.nextRevisionPreparationId ?? (() => `rprep_${randomBytes(16).toString('hex')}`);
+    this.#nextRevisionRunId = options.nextRevisionRunId ?? (() => `prun_${randomBytes(16).toString('hex')}`);
   }
 
   #requireOrchestrator(actor: TransactionActor): void {
@@ -367,6 +393,309 @@ export class ProposalIntakeService {
     });
   }
 
+  #revisionSourceProjection(source: WorldState['proposals'] extends Map<string, infer T> ? T : never): ProposalRevisionSourceProjection {
+    return proposalRevisionSourceProjection.parse({
+      declared_objective: source.declared_objective,
+      proposed_action: source.proposed_action,
+      target: { recipient: source.target.recipient, resource: source.target.resource },
+      exact_parameters: Object.fromEntries(
+        Object.entries(source.exact_parameters).map(([key, value]) => [key, Array.isArray(value) ? [...value] : value]),
+      ),
+      data_to_be_disclosed: [...source.data_to_be_disclosed],
+      cost_obligation: {
+        amount_minor_units: source.cost_obligation.amount_minor_units,
+        description: source.cost_obligation.description,
+      },
+      material_consequences: [...source.material_consequences],
+      reversibility_class: source.reversibility_class,
+      commercial_influence: {
+        applicable: source.commercial_influence.applicable,
+        note: source.commercial_influence.note,
+      },
+      basis: [
+        ...source.material_inputs.map((item) => ({ standing: item.store as 'said' | 'confirmed', text: item.text })),
+        ...source.derived_claims.map((item) => ({ standing: 'inferred-unconfirmed' as const, text: item.text })),
+      ],
+    });
+  }
+
+  #revisionProjection(preparation: ProposalRevisionPreparationRecord): ProposalRevisionPreparationProjection {
+    return proposalRevisionPreparationProjection.parse({
+      kind: 'proposal_revision_preparation',
+      preparation_id: preparation.preparation_id,
+      proposal_run_id: preparation.proposal_run_id,
+      source_proposal_run_id: preparation.source_proposal_run_id,
+      target: {
+        card_id: preparation.card_id,
+        card_version: preparation.card_version,
+        requested_id: preparation.requested_id,
+      },
+      issued_at: preparation.issued_at,
+      expires_at: preparation.expires_at,
+    });
+  }
+
+  hasLiveRevisionAttempt(state: WorldState, sourceProposalIdInput: string, atInput = this.#now()): boolean {
+    const sourceProposalId = id.parse(sourceProposalIdInput);
+    const at = timestamp.parse(atInput);
+    return [...state.proposalRevisionPreparations.values()].some(
+      (preparation) =>
+        preparation.source_proposal_id === sourceProposalId &&
+        proposalRevisionPreparationBlocksReplacement(state, preparation, at),
+    );
+  }
+
+  #assertRevisionPreparationCurrent(
+    state: WorldState,
+    at: string,
+    preparationInput: ProposalRevisionPreparationRecord,
+    sessionIdInput: string,
+    projectionInput?: ReturnType<typeof projectConversation>,
+  ): { preparation: ProposalRevisionPreparationRecord; source: WorldState['proposals'] extends Map<string, infer T> ? T : never; projection: ReturnType<typeof projectConversation> } {
+    const preparation = proposalRevisionPreparationRecord.parse(preparationInput);
+    const sessionId = id.parse(sessionIdInput);
+    if (
+      !['issued', 'consumed'].includes(preparation.state) ||
+      preparation.authorization_boot_id !== this.#authorizationBootId ||
+      preparation.case_id !== this.#caseId ||
+      preparation.session_id !== sessionId ||
+      at >= preparation.expires_at ||
+      preparation.purpose !== 'proposal-revision@1' ||
+      preparation.proposal_schema_digest !== PROPOSAL_DRAFT_SCHEMA_DIGEST
+    ) throw new ProposalIntakeError('currentness', 'proposal revision preparation is unavailable');
+    this.#receipt(state, sessionId, at);
+    const source = state.proposals.get(preparation.source_proposal_id);
+    const sourceOrigin = state.proposalOrigins.get(preparation.source_proposal_id);
+    const ruling = state.rulings.get(preparation.source_ruling_id);
+    const escalation = state.escalations.get(preparation.source_escalation_id);
+    const response = state.actionRecords.find((entry) => entry.entry_id === preparation.response_record_entry_id);
+    const responseEvent = response?.human_intervention_event;
+    const responsePayload = responseEvent?.event === 'human_intervention_event' ? responseEvent.payload : undefined;
+    const latestRevision = source === undefined
+      ? 0
+      : Math.max(...[...state.proposals.values()].filter((candidate) => candidate.action_id === source.action_id).map((candidate) => candidate.revision));
+    if (
+      source === undefined ||
+      sourceOrigin === undefined ||
+      sourceOrigin.proposal_run_id !== preparation.source_proposal_run_id ||
+      source.proposal_hash !== preparation.source_proposal_hash ||
+      source.action_id !== preparation.action_id ||
+      source.revision !== preparation.source_revision ||
+      preparation.expected_revision !== latestRevision + 1 ||
+      ruling === undefined ||
+      ruling.gate !== 'verify' ||
+      ruling.verdict !== 'escalate' ||
+      ruling.binding.frozen_proposal_hash !== source.proposal_hash ||
+      ruling.successor_ruling_id !== null ||
+      escalation === undefined ||
+      escalation.ruling_id !== ruling.ruling_id ||
+      escalation.state !== 'disposed' ||
+      escalation.successor_ruling_id !== null ||
+      escalation.dialogue_item_ref !== preparation.dialogue_item_ref ||
+      escalation.terminal_disposition !== preparation.disposition ||
+      responseEvent?.escalation_id !== escalation.escalation_id ||
+      responsePayload?.kind !== 'dialogue_response_recorded' ||
+      responsePayload.disposition !== preparation.disposition ||
+      responsePayload.scope?.item_ref !== preparation.dialogue_item_ref ||
+      !['confirm', 'correct', 'narrow'].includes(responsePayload.disposition) ||
+      (state.conversationVersionByCase.get(this.#caseId) ?? 0) !== preparation.conversation_version
+    ) throw new ProposalIntakeError('currentness', 'proposal revision lineage is unavailable or already continued');
+    const governance = this.#governance(state, at);
+    const projection = this.#projection(state, governance);
+    if (
+      governance.selection.selection_id !== preparation.selection_id ||
+      governance.mandate.mandate_id !== preparation.mandate_id ||
+      governance.mandate.version !== preparation.mandate_version ||
+      governance.inspection.card.card_id !== preparation.card_id ||
+      governance.inspection.card.card_version !== preparation.card_version ||
+      !verifyDigest(governance.inspection.digest, preparation.card_digest) ||
+      governance.inspection.keyId !== preparation.verifying_key_id ||
+      governance.selection.target.requested_id !== preparation.requested_id ||
+      governance.mandate.connected_service !== preparation.service ||
+      governance.mandate.action_class !== preparation.action_class ||
+      canonicalize(governance.selection.system_use_decision) !== canonicalize(preparation.system_use_decision) ||
+      state.policy === undefined ||
+      state.policy.policy_version !== preparation.policy_version ||
+      !verifyDigest(state.policy.policy_content_digest, preparation.policy_content_digest) ||
+      state.policy.evaluator_build_id !== preparation.evaluator_build_id ||
+      !this.#systemUse.isReferenceCurrent(state, preparation.system_use_decision, at) ||
+      projection.items.length === 0 ||
+      canonicalize(projection.items.map((item) => item.id)) !== canonicalize(preparation.projection_item_ids) ||
+      !verifyDigest(digestFor('conversation-projection', projection), preparation.projection_digest) ||
+      (projectionInput !== undefined && canonicalize(projectionInput) !== canonicalize(projection))
+    ) throw new ProposalIntakeError('currentness', 'proposal revision governance or projection changed');
+    return { preparation, source, projection };
+  }
+
+  async prepareRevision(
+    caseIdInput: string,
+    sourceRunIdInput: string,
+    sessionIdInput: string,
+    actor: TransactionActor,
+  ): Promise<ProposalRevisionPreparationProjection> {
+    this.#requireOrchestrator(actor);
+    const caseId = id.parse(caseIdInput);
+    const sourceRunId = id.parse(sourceRunIdInput);
+    const sessionId = id.parse(sessionIdInput);
+    if (caseId !== this.#caseId) throw new ProposalIntakeError('not-found', 'proposal run does not exist for this case');
+    const completed = await this.#store.transactWithState<ProposalRevisionPreparationProjection>(
+      'proposal_revision_prepare',
+      actor,
+      (state, at) => {
+        this.#receipt(state, sessionId, at);
+        const sourceIntakeId = state.proposalIntakeByRun.get(sourceRunId);
+        const sourceIntake = sourceIntakeId === undefined ? undefined : state.proposalIntakes.get(sourceIntakeId);
+        const source = sourceIntake?.proposal_id === null || sourceIntake?.proposal_id === undefined
+          ? undefined
+          : state.proposals.get(sourceIntake.proposal_id);
+        const sourceOrigin = source === undefined ? undefined : state.proposalOrigins.get(source.proposal_id);
+        if (sourceIntake?.case_id !== this.#caseId || source === undefined || sourceOrigin === undefined) {
+          throw new ProposalIntakeError('not-found', 'proposal run does not have a frozen proposal');
+        }
+        const ruling = [...state.rulings.values()]
+          .filter((candidate) =>
+            candidate.gate === 'verify' &&
+            candidate.verdict === 'escalate' &&
+            candidate.binding.frozen_proposal_hash === source.proposal_hash)
+          .sort((left, right) => right.issued_at.localeCompare(left.issued_at))[0];
+        const escalation = ruling === undefined
+          ? undefined
+          : [...state.escalations.values()].find((candidate) => candidate.ruling_id === ruling.ruling_id);
+        const response = escalation === undefined
+          ? undefined
+          : [...state.actionRecords]
+              .reverse()
+              .find((entry) =>
+                entry.human_intervention_event?.escalation_id === escalation.escalation_id &&
+                entry.human_intervention_event.event === 'human_intervention_event' &&
+                entry.human_intervention_event.payload.kind === 'dialogue_response_recorded');
+        const responseEvent = response?.human_intervention_event;
+        const payload = responseEvent?.event === 'human_intervention_event' ? responseEvent.payload : undefined;
+        if (
+          ruling === undefined ||
+          escalation === undefined ||
+          response === undefined ||
+          escalation.state !== 'disposed' ||
+          escalation.dialogue_item_ref === null ||
+          escalation.successor_ruling_id !== null ||
+          ruling.successor_ruling_id !== null ||
+          payload?.kind !== 'dialogue_response_recorded' ||
+          !['confirm', 'correct', 'narrow'].includes(payload.disposition) ||
+          payload.scope?.item_ref !== escalation.dialogue_item_ref
+        ) throw new ProposalIntakeError('currentness', 'proposal run has no eligible dialogue continuation');
+        const governance = this.#governance(state, at);
+        const projection = this.#projection(state, governance);
+        const conversationVersion = state.conversationVersionByCase.get(this.#caseId) ?? 0;
+        if (projection.items.length === 0 || conversationVersion < 1) {
+          throw new ProposalIntakeError('currentness', 'proposal revision projection is unavailable');
+        }
+        const expectedRevision = Math.max(
+          ...[...state.proposals.values()]
+            .filter((candidate) => candidate.action_id === source.action_id)
+            .map((candidate) => candidate.revision),
+        ) + 1;
+        const sameTuple = [...state.proposalRevisionPreparations.values()].filter(
+          (candidate) =>
+            candidate.source_proposal_id === source.proposal_id &&
+            candidate.response_record_entry_id === response.entry_id &&
+            candidate.action_id === source.action_id &&
+            candidate.conversation_version === conversationVersion &&
+            candidate.projection_digest === digestFor('conversation-projection', projection),
+        );
+        const issued = sameTuple.find((candidate) => candidate.state === 'issued' && at < candidate.expires_at);
+        if (issued !== undefined) {
+          if (issued.session_id !== sessionId) {
+            throw new ProposalIntakeError('conflict', 'another session owns the live revision preparation');
+          }
+          this.#assertRevisionPreparationCurrent(state, at, issued, sessionId, projection);
+          return { ops: [], result: this.#revisionProjection(issued) };
+        }
+        const blockingConsumed = sameTuple.find((candidate) =>
+          candidate.state === 'consumed' && proposalRevisionPreparationBlocksReplacement(state, candidate, at));
+        if (blockingConsumed !== undefined) {
+          throw new ProposalIntakeError('conflict', 'the dialogue continuation already has a live revision run');
+        }
+        const preparationId = id.parse(this.#nextRevisionPreparationId());
+        const proposalRunId = id.parse(this.#nextRevisionRunId());
+        const expiresAt = timestamp.parse(new Date(Math.min(Date.parse(at) + 120_000, Date.parse(this.#receipt(state, sessionId, at).expires_at))).toISOString());
+        const preparation = proposalRevisionPreparationRecord.parse({
+          world_id: state.worldId,
+          preparation_id: preparationId,
+          proposal_run_id: proposalRunId,
+          authorization_boot_id: this.#authorizationBootId,
+          case_id: this.#caseId,
+          session_id: sessionId,
+          source_proposal_run_id: sourceRunId,
+          source_proposal_id: source.proposal_id,
+          source_proposal_hash: source.proposal_hash,
+          action_id: source.action_id,
+          source_revision: source.revision,
+          expected_revision: expectedRevision,
+          source_ruling_id: ruling.ruling_id,
+          source_escalation_id: escalation.escalation_id,
+          dialogue_item_ref: escalation.dialogue_item_ref,
+          disposition: payload!.disposition,
+          response_record_entry_id: response!.entry_id,
+          conversation_version: conversationVersion,
+          projection_digest: digestFor('conversation-projection', projection),
+          projection_item_ids: projection.items.map((item) => item.id),
+          selection_id: governance.selection.selection_id,
+          mandate_id: governance.mandate.mandate_id,
+          mandate_version: governance.mandate.version,
+          card_id: governance.inspection.card.card_id,
+          card_version: governance.inspection.card.card_version,
+          card_digest: governance.inspection.digest,
+          verifying_key_id: governance.inspection.keyId,
+          requested_id: governance.selection.target.requested_id,
+          system_use_decision: governance.selection.system_use_decision,
+          policy_version: state.policy!.policy_version,
+          policy_content_digest: state.policy!.policy_content_digest,
+          evaluator_build_id: state.policy!.evaluator_build_id,
+          service: governance.mandate.connected_service,
+          action_class: governance.mandate.action_class,
+          purpose: 'proposal-revision@1',
+          proposal_schema_digest: PROPOSAL_DRAFT_SCHEMA_DIGEST,
+          issued_at: at,
+          expires_at: expiresAt,
+          state: 'issued',
+          state_changed_at: at,
+          consumed_call_id: null,
+          invalidation_reason: null,
+        });
+        return {
+          ops: [{ op: 'proposal_revision_preparation.issue', preparation }],
+          result: this.#revisionProjection(preparation),
+        };
+      },
+    );
+    return completed.result;
+  }
+
+  prepareRevisionCall(
+    state: WorldState,
+    at: string,
+    bindingInput: ProposalRevisionCallBinding,
+    sessionIdInput: string,
+    projectionInput: ReturnType<typeof projectConversation>,
+    callIdInput: string,
+  ): { op: Extract<WalOp, { op: 'proposal_revision_preparation.consume' }>; source: ProposalRevisionSourceProjection } {
+    const binding = proposalRevisionCallBinding.parse(bindingInput);
+    const preparation = state.proposalRevisionPreparations.get(binding.preparation_id);
+    if (preparation === undefined || preparation.state !== 'issued') {
+      throw new ProposalIntakeError('currentness', 'proposal revision preparation is not issued');
+    }
+    const current = this.#assertRevisionPreparationCurrent(state, at, preparation, sessionIdInput, projectionInput);
+    return {
+      op: {
+        op: 'proposal_revision_preparation.consume',
+        preparation_id: preparation.preparation_id,
+        call_id: id.parse(callIdInput),
+        changed_at: at,
+      },
+      source: this.#revisionSourceProjection(current.source),
+    };
+  }
+
   assertCallBinding(
     state: WorldState,
     at: string,
@@ -395,12 +724,37 @@ export class ProposalIntakeService {
     decision: Extract<ModelOutputAdmission, { readonly disposition: 'admitted' }>,
   ): PreparedProposalIntake {
     const call = modelCallOpenRecord.parse(callInput);
-    if (call.proposal_binding === null || call.ingress_binding !== null || call.session_id === null) {
+    if (
+      (call.proposal_binding === null) === (call.revision_binding === null) ||
+      call.ingress_binding !== null ||
+      call.session_id === null
+    ) {
       throw new ProposalIntakeError('currentness', 'only a proposal-purpose call can receive a proposal intake');
     }
     const governance = this.#governance(state, at);
     const projection = this.#projection(state, governance);
-    this.assertCallBinding(state, at, call.proposal_binding, call.session_id, projection);
+    let proposalRunId: string;
+    let conversationVersion: number;
+    let proposalSchemaDigest: string;
+    let revisionPreparationId: string | null = null;
+    if (call.proposal_binding !== null) {
+      this.assertCallBinding(state, at, call.proposal_binding, call.session_id, projection);
+      proposalRunId = call.proposal_binding.proposal_run_id;
+      conversationVersion = call.proposal_binding.conversation_version;
+      proposalSchemaDigest = call.proposal_binding.proposal_schema_digest;
+    } else {
+      const revision = call.revision_binding === null
+        ? undefined
+        : state.proposalRevisionPreparations.get(call.revision_binding.preparation_id);
+      if (revision === undefined || revision.consumed_call_id !== call.call_id) {
+        throw new ProposalIntakeError('currentness', 'proposal revision call lost its preparation');
+      }
+      this.#assertRevisionPreparationCurrent(state, at, revision, call.session_id, projection);
+      proposalRunId = revision.proposal_run_id;
+      conversationVersion = revision.conversation_version;
+      proposalSchemaDigest = revision.proposal_schema_digest;
+      revisionPreparationId = revision.preparation_id;
+    }
     if (
       governance.selection.selection_id !== call.selection_id ||
       canonicalize(call.projection_item_ids) !== canonicalize(projection.items.map((item) => item.id)) ||
@@ -413,12 +767,12 @@ export class ProposalIntakeService {
     const intake = proposalIntakeRecord.parse({
       world_id: state.worldId,
       proposal_intake_id: intakeId,
-      proposal_run_id: call.proposal_binding.proposal_run_id,
+      proposal_run_id: proposalRunId,
       authorization_boot_id: this.#authorizationBootId,
       call_id: call.call_id,
       case_id: this.#caseId,
       session_id: call.session_id,
-      conversation_version: call.proposal_binding.conversation_version,
+      conversation_version: conversationVersion,
       selection_id: call.selection_id,
       mandate_id: call.mandate_id,
       mandate_version: call.mandate_version,
@@ -432,7 +786,8 @@ export class ProposalIntakeService {
       projection_digest: call.projection_digest,
       projection_item_ids: call.projection_item_ids,
       output_digest: decision.output_digest,
-      proposal_schema_digest: call.proposal_binding.proposal_schema_digest,
+      proposal_schema_digest: proposalSchemaDigest,
+      revision_preparation_id: revisionPreparationId,
       issued_at: at,
       expires_at: expiresAt,
       state: 'issued',
@@ -494,14 +849,22 @@ export class ProposalIntakeService {
       call === undefined ||
       call.state !== 'terminal' ||
       call.outcome !== 'admitted' ||
-      call.proposal_binding === null ||
-      call.proposal_binding.proposal_run_id !== intake.proposal_run_id ||
+      (intake.revision_preparation_id === null
+        ? call.proposal_binding?.proposal_run_id !== intake.proposal_run_id || call.revision_binding !== null
+        : call.revision_binding?.preparation_id !== intake.revision_preparation_id || call.proposal_binding !== null) ||
       call.served_id !== intake.served_id ||
       call.output_digest !== intake.output_digest ||
       projection.items.length === 0 ||
       canonicalize(projection.items.map((item) => item.id)) !== canonicalize(intake.projection_item_ids) ||
       !verifyDigest(digestFor('conversation-projection', projection), intake.projection_digest)
     ) throw new ProposalIntakeError('currentness', 'proposal intake binding is no longer current');
+    if (intake.revision_preparation_id !== null) {
+      const preparation = state.proposalRevisionPreparations.get(intake.revision_preparation_id);
+      if (preparation === undefined || preparation.proposal_run_id !== intake.proposal_run_id) {
+        throw new ProposalIntakeError('currentness', 'proposal revision intake lost its preparation');
+      }
+      this.#assertRevisionPreparationCurrent(state, at, preparation, intake.session_id, projection);
+    }
     return governance;
   }
 
@@ -565,11 +928,28 @@ export class ProposalIntakeService {
           const op = { op: 'proposal_intake.refuse' as const, proposal_intake_id: intakeId, reason: 'invalid-evidence' as const, changed_at: at };
           return { ops: [op], result: this.#status({ ...intake, state: 'refused', state_changed_at: at, refusal_reason: 'invalid-evidence' }) };
         }
+        const revisionPreparation =
+          intake.revision_preparation_id === null
+            ? undefined
+            : state.proposalRevisionPreparations.get(intake.revision_preparation_id);
+        const sourceProposal =
+          revisionPreparation === undefined
+            ? undefined
+            : state.proposals.get(revisionPreparation.source_proposal_id);
+        if (
+          intake.revision_preparation_id !== null &&
+          (revisionPreparation === undefined ||
+            sourceProposal === undefined ||
+            revisionPreparation.state !== 'consumed' ||
+            revisionPreparation.proposal_run_id !== intake.proposal_run_id)
+        ) {
+          throw new ProposalIntakeError('currentness', 'proposal revision lineage is unavailable');
+        }
         const proposal = freezeProposal({
           world_id: state.worldId,
           proposal_id: proposalId,
-          revision: 1,
-          action_id: actionId,
+          revision: revisionPreparation?.expected_revision ?? 1,
+          action_id: sourceProposal?.action_id ?? actionId,
           selection_id: intake.selection_id,
           created_at: at,
           declared_objective: draft.declared_objective,
@@ -619,6 +999,16 @@ export class ProposalIntakeService {
           evaluator_build_id: state.policy!.evaluator_build_id,
           service: governance.mandate.connected_service,
           action_class: governance.mandate.action_class,
+          continuation:
+            revisionPreparation === undefined
+              ? null
+              : {
+                  preparation_id: revisionPreparation.preparation_id,
+                  source_proposal_id: revisionPreparation.source_proposal_id,
+                  source_ruling_id: revisionPreparation.source_ruling_id,
+                  source_escalation_id: revisionPreparation.source_escalation_id,
+                  response_record_entry_id: revisionPreparation.response_record_entry_id,
+                },
           frozen_at: at,
         });
         return {
@@ -729,6 +1119,33 @@ export class ProposalIntakeService {
         throw new ProposalIntakeError('currentness', 'native proposal basis item changed');
       }
     }
+    if (origin.continuation !== null) {
+      const preparation = state.proposalRevisionPreparations.get(origin.continuation.preparation_id);
+      const source = state.proposals.get(origin.continuation.source_proposal_id);
+      const ruling = state.rulings.get(origin.continuation.source_ruling_id);
+      const escalation = state.escalations.get(origin.continuation.source_escalation_id);
+      const response = state.actionRecords.find(
+        (entry) => entry.entry_id === origin.continuation?.response_record_entry_id,
+      );
+      if (
+        preparation === undefined ||
+        preparation.state !== 'consumed' ||
+        preparation.proposal_run_id !== origin.proposal_run_id ||
+        preparation.source_proposal_id !== source?.proposal_id ||
+        preparation.expected_revision !== proposal.revision ||
+        source?.action_id !== proposal.action_id ||
+        ruling === undefined ||
+        ruling.successor_ruling_id !== null ||
+        escalation === undefined ||
+        escalation.state !== 'disposed' ||
+        escalation.successor_ruling_id !== null ||
+        response?.human_intervention_event?.escalation_id !== escalation.escalation_id ||
+        response.human_intervention_event.event !== 'human_intervention_event' ||
+        response.human_intervention_event.payload.kind !== 'dialogue_response_recorded'
+      ) {
+        throw new ProposalIntakeError('currentness', 'proposal revision continuation is unavailable or already claimed');
+      }
+    }
   }
 
   async expire(actor: TransactionActor = { credential: 'proc:authz', claimed_role: null }): Promise<number> {
@@ -748,6 +1165,24 @@ export class ProposalIntakeService {
               authorization_boot_id: this.#authorizationBootId,
               changed_at: at,
             });
+      const preparationOps: WalOp[] = [...state.proposalRevisionPreparations.values()]
+        .filter((preparation) =>
+          preparation.state === 'issued' &&
+          (preparation.expires_at <= at || preparation.authorization_boot_id !== this.#authorizationBootId))
+        .map((preparation) =>
+          preparation.authorization_boot_id !== this.#authorizationBootId
+            ? {
+                op: 'proposal_revision_preparation.invalidate' as const,
+                preparation_id: preparation.preparation_id,
+                reason: 'authorization-restart' as const,
+                changed_at: at,
+              }
+            : {
+                op: 'proposal_revision_preparation.expire' as const,
+                preparation_id: preparation.preparation_id,
+                authorization_boot_id: this.#authorizationBootId,
+                changed_at: at,
+              });
       const priorBootProposalHashes = new Set(
         [...state.proposalOrigins.values()]
           .filter((origin) => origin.authorization_boot_id !== this.#authorizationBootId)
@@ -763,7 +1198,7 @@ export class ProposalIntakeService {
           ruling_id: ruling.ruling_id,
           reason: 'authorization-restart',
         }));
-      const ops = [...intakeOps, ...rulingOps];
+      const ops = [...intakeOps, ...preparationOps, ...rulingOps];
       return { ops, result: ops.length };
     });
     return completed.result;

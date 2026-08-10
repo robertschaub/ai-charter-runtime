@@ -4,7 +4,11 @@ import { randomUUID } from 'node:crypto';
 
 import { bindMandate, type IdFactory } from './authorizationCore.js';
 import { escalationPatternRequiresNarrowing } from './evaluator.js';
-import { outputReleaseInvalidationOps, proposalIntakeInvalidationOps } from './conversationInvalidation.js';
+import {
+  outputReleaseInvalidationOps,
+  proposalIntakeInvalidationOps,
+  proposalRevisionPreparationInvalidationOps,
+} from './conversationInvalidation.js';
 import type { Keyring } from './keyring.js';
 import type { LoadedPolicy } from './policyLoader.js';
 import type { Disposition, GateRuling, Mandate, PatternEvent, RecordEntry, WalOp } from './schemas/index.js';
@@ -182,6 +186,13 @@ export async function runSweeper(
           'binding-invalidated',
           at,
         ),
+        ...proposalRevisionPreparationInvalidationOps(
+          state,
+          (preparation) =>
+            preparation.mandate_id === mandateId && preparation.mandate_version === status.version,
+          'authority-changed',
+          at,
+        ),
       );
       ops.push({ op: 'mandate.expire', mandate_id: mandateId, version: status.version, expired_at: at });
       expiredMandates += 1;
@@ -218,6 +229,12 @@ export async function runSweeper(
           state,
           (intake) => intake.mandate_id === mandateId,
           'binding-invalidated',
+          at,
+        ),
+        ...proposalRevisionPreparationInvalidationOps(
+          state,
+          (preparation) => preparation.mandate_id === mandateId,
+          'authority-changed',
           at,
         ),
       );

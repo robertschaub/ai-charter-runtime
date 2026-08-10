@@ -109,6 +109,7 @@ describe('orchestrator-origin exact-window handoff client', () => {
     expect(shell).toContain('Send governed turn');
     expect(shell).toContain('Prepare a governed proposal');
     expect(shell).toContain('Prepare proposal');
+    expect(shell).toContain('Prepare response-bound revision');
     expect(shell).toContain('Generate and check proposal');
     expect(shell).toContain('pre-commit evidence');
     expect(shell).toContain('No commitment, service call, or effect can occur here.');
@@ -264,6 +265,7 @@ describe('orchestrator-origin exact-window handoff client', () => {
       state: 'frozen',
       proposal,
       gates: [gate],
+      continuation: { state: 'available', source_proposal_run_id: null },
     };
     expect(parseBrowserProposalRunStatus(status)).toEqual(status);
     for (const forbidden of [
@@ -274,6 +276,10 @@ describe('orchestrator-origin exact-window handoff client', () => {
     ]) expect(parseBrowserProposalRunStatus({ ...status, ...forbidden })).toBeNull();
     expect(parseBrowserProposalRunStatus({ ...status, proposal: { ...proposal, item_id: 'said_hidden' } })).toBeNull();
     expect(parseBrowserProposalRunStatus({ ...status, gates: [{ ...gate, service: 'filing' }] })).toBeNull();
+    expect(parseBrowserProposalRunStatus({ ...status, continuation: { ...status.continuation, dialogue_item_ref: 'inf_hidden' } })).toBeNull();
+    expect(parseBrowserProposalRunStatus({ ...status, continuation: { state: 'unavailable', source_proposal_run_id: 'prun_source' } })).toMatchObject({
+      continuation: { state: 'unavailable', source_proposal_run_id: 'prun_source' },
+    });
     expect(parseBrowserProposalRunStatus({ ...status, state: 'prepared', proposal: undefined, gates: [] })).toMatchObject({ state: 'prepared' });
     expect(parseBrowserProposalRunStatus({ ...status, state: 'verified', proposal: undefined })).toBeNull();
   });

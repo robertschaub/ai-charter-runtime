@@ -19,7 +19,19 @@ export const screeningFixture = z
       ),
     signals: z.array(screeningSignal),
   })
-  .strict();
+  .strict()
+  .superRefine((fixture, context) => {
+    for (const [index, signal] of fixture.signals.entries()) {
+      if (signal.suspect_item_id !== undefined && signal.suspect_item_id !== null &&
+          !fixture.suspect_item_ids.includes(signal.suspect_item_id)) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['signals', index, 'suspect_item_id'],
+          message: 'a screening signal suspect must be present in the exact screening projection',
+        });
+      }
+    }
+  });
 
 export const screeningFixtureSet = z
   .array(screeningFixture)

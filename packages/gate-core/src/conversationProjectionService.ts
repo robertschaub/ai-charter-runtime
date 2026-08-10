@@ -62,7 +62,11 @@ import { SystemUseDecisionError, SystemUseDecisionService } from './systemUseDec
 import { compareServedId } from './servedModel.js';
 import { ConversationTransportService } from './conversationTransport.js';
 import { ProposalIntakeService } from './proposalIntake.js';
-import { outputReleaseInvalidationOps, proposalIntakeInvalidationOps } from './conversationInvalidation.js';
+import {
+  outputReleaseInvalidationOps,
+  proposalIntakeInvalidationOps,
+  proposalRevisionPreparationInvalidationOps,
+} from './conversationInvalidation.js';
 
 export class ConversationProjectionServiceError extends Error {
   constructor(
@@ -86,9 +90,10 @@ export interface ScreeningProjectionInput {
   readonly caseId?: string;
 }
 
-export type ModelCallBeginInput = Omit<ModelCallBeginRequest, 'ingress_binding' | 'proposal_binding'> & {
+export type ModelCallBeginInput = Omit<ModelCallBeginRequest, 'ingress_binding' | 'proposal_binding' | 'revision_binding'> & {
   readonly ingress_binding?: ModelCallBeginRequest['ingress_binding'];
   readonly proposal_binding?: ModelCallBeginRequest['proposal_binding'];
+  readonly revision_binding?: ModelCallBeginRequest['revision_binding'];
   readonly sessionId?: string;
   readonly actor: TransactionActor;
 };
@@ -473,6 +478,12 @@ export class ConversationProjectionService {
               'binding-invalidated',
               at,
             ),
+            ...proposalRevisionPreparationInvalidationOps(
+              state,
+              (preparation) => preparation.case_id === this.#caseId,
+              'selection-changed',
+              at,
+            ),
             { op: 'model_selection.append', selection },
           ],
           result: { accepted: true, projection },
@@ -552,6 +563,24 @@ export class ConversationProjectionService {
           throw new ConversationProjectionServiceError('invalid-scope', 'proposal-purpose binding is unavailable');
         }
       }
+      let revisionStart: ReturnType<ProposalIntakeService['prepareRevisionCall']> | null = null;
+      if (request.revision_binding !== null) {
+        if (this.#proposalIntakes === undefined || sessionId === undefined) {
+          throw new ConversationProjectionServiceError('invalid-scope', 'proposal-revision call requires session provenance');
+        }
+        try {
+          revisionStart = this.#proposalIntakes.prepareRevisionCall(
+            state,
+            at,
+            request.revision_binding,
+            sessionId,
+            resolved.projection,
+            callId,
+          );
+        } catch {
+          throw new ConversationProjectionServiceError('invalid-scope', 'proposal-revision binding is unavailable');
+        }
+      }
       if ([...state.modelCalls.values()].some((call) => call.case_id === this.#caseId && call.turn_id === request.turn_id)) {
         throw new ConversationProjectionServiceError('invalid-scope', 'model turn already has a durable call attempt');
       }
@@ -573,8 +602,9 @@ export class ConversationProjectionService {
         projection_item_ids: resolved.projection.items.map((item) => item.id),
         ingress_binding: request.ingress_binding,
         proposal_binding: request.proposal_binding,
+        revision_binding: request.revision_binding,
         session_id:
-          request.ingress_binding === null && request.proposal_binding === null
+          request.ingress_binding === null && request.proposal_binding === null && request.revision_binding === null
             ? null
             : id.parse(sessionId),
         system_use_decision: resolved.systemUseDecision,
@@ -589,8 +619,15 @@ export class ConversationProjectionService {
         failure_reason: null,
       });
       return {
-        ops: [{ op: 'model_call.open', call }],
-        result: modelCallStart.parse({ call, projection: resolved.projection }),
+        ops: [
+          { op: 'model_call.open', call },
+          ...(revisionStart === null ? [] : [revisionStart.op]),
+        ],
+        result: modelCallStart.parse({
+          call,
+          projection: resolved.projection,
+          revision_source: revisionStart?.source ?? null,
+        }),
       };
     });
     return completed.result;
@@ -737,7 +774,7 @@ export class ConversationProjectionService {
       (state, at) => {
         const call = this.#openCall(state, request.call_id, at);
         if (
-          (call.ingress_binding !== null || call.proposal_binding !== null) &&
+          (call.ingress_binding !== null || call.proposal_binding !== null || call.revision_binding !== null) &&
           (sessionId === undefined || call.session_id !== id.parse(sessionId))
         ) {
           throw new ConversationProjectionServiceError('invalid-scope', 'purpose-bound call session does not match');
@@ -789,7 +826,7 @@ export class ConversationProjectionService {
             throw new ConversationProjectionServiceError('invalid-scope', 'output release currentness failed');
           }
         }
-        if (decision.disposition === 'admitted' && call.proposal_binding !== null) {
+        if (decision.disposition === 'admitted' && (call.proposal_binding !== null || call.revision_binding !== null)) {
           if (this.#proposalIntakes === undefined) {
             throw new ConversationProjectionServiceError('invalid-scope', 'proposal intake is unavailable');
           }

@@ -378,6 +378,11 @@ export class OrchestratorHttpServer {
             }
             closeSessionRequest.parse(await readJson(request, maxBodyBytes));
             await caseOperations.run(async () => {
+              await options.authorization.closeCaseSession(
+                configuredWorld,
+                session.session_id,
+                { role: session.role, session_id: session.session_id },
+              );
               if (!sessions.close(presented, configuredWorld)) {
                 sendJson(response, 401, { error: 'unauthenticated' });
                 return;
@@ -1106,6 +1111,71 @@ export class OrchestratorHttpServer {
             });
             return;
           }
+          const proposalRevisionPreparationMatch =
+            /^\/w\/([^/]+)\/cases\/([^/]+)\/proposal-runs\/([^/]+)\/revision-preparations$/.exec(url.pathname);
+          if (request.method === 'POST' && proposalRevisionPreparationMatch !== null) {
+            const requestedWorld = worldId.safeParse(proposalRevisionPreparationMatch[1]);
+            const requestedCase = id.safeParse(proposalRevisionPreparationMatch[2]);
+            const sourceRun = id.safeParse(proposalRevisionPreparationMatch[3]);
+            if (
+              !requestedWorld.success ||
+              requestedWorld.data !== configuredWorld ||
+              !requestedCase.success ||
+              requestedCase.data !== configuredCase ||
+              !sourceRun.success
+            ) {
+              sendJson(response, 404, { error: 'not-found' });
+              return;
+            }
+            if (requestOrigin(request) !== ownOrigin) {
+              sendJson(response, 403, { error: 'forbidden' });
+              return;
+            }
+            const presented = bearer(request.headers.authorization);
+            const session = presented === null ? null : sessions.authenticate(presented, configuredWorld, configuredCase);
+            if (presented === null || session === null) {
+              sendJson(response, 401, { error: 'unauthenticated' });
+              return;
+            }
+            browserProposalPreparationRequest.parse(await readJson(request, maxBodyBytes));
+            if (coordinator === undefined) {
+              sendJson(response, 503, { error: 'proposal-interaction-unavailable' });
+              return;
+            }
+            await caseOperations.run(async () => {
+              try {
+                const claim = { role: session.role, session_id: session.session_id } as const;
+                const prepared = await options.authorization.prepareProposalRevision(
+                  configuredWorld,
+                  configuredCase,
+                  sourceRun.data,
+                  claim,
+                );
+                const current = await options.authorization.currentModelSelection(configuredWorld, configuredCase);
+                assertCurrentSelectionBinding(current, configuredWorld, configuredCase);
+                if (
+                  current.authorization_boot_id !== session.authorization_boot_id ||
+                  current.state !== 'selected' ||
+                  !coordinator.hasConfiguredLane(
+                    prepared.target.card_id,
+                    prepared.target.card_version,
+                    prepared.target.requested_id,
+                  )
+                ) throw new Error('proposal-revision-preparation-refused');
+                sendJson(response, 201, proposals.registerRevision(session, current, prepared));
+              } catch (error) {
+                if (error instanceof RuntimeDependencyError && error.httpStatus === 401) {
+                  sessions.close(presented, configuredWorld);
+                  proposals.burnForSession(session.session_id);
+                  modelTurns.discardSession(session.session_id, coordinator.quarantine);
+                  sendJson(response, 401, { error: 'session-restart-required' });
+                  return;
+                }
+                sendJson(response, 409, { error: 'proposal-revision-preparation-refused' });
+              }
+            });
+            return;
+          }
           const proposalUseMatch = /^\/w\/([^/]+)\/cases\/([^/]+)\/proposals$/.exec(url.pathname);
           if (request.method === 'POST' && proposalUseMatch !== null) {
             const requestedWorld = worldId.safeParse(proposalUseMatch[1]);
@@ -1144,7 +1214,6 @@ export class OrchestratorHttpServer {
               try {
                 const current = await options.authorization.currentModelSelection(configuredWorld, configuredCase);
                 assertCurrentSelectionBinding(current, configuredWorld, configuredCase);
-                const conversation = await options.authorization.conversation(configuredWorld, configuredCase, claim);
                 if (current.authorization_boot_id !== session.authorization_boot_id) {
                   sessions.close(presented, configuredWorld);
                   preparations.burnForSession(session.session_id);
@@ -1159,22 +1228,39 @@ export class OrchestratorHttpServer {
                   current.state !== 'selected' ||
                   current.selection.selection_id !== begun.selectionId ||
                   !sameModelTarget(current.selection.target, begun.target) ||
-                  conversation.conversation_version !== begun.conversationVersion ||
-                  conversation.events.length === 0 ||
                   !coordinator.hasConfiguredLane(begun.target.card_id, begun.target.card_version, begun.target.requested_id)
                 ) throw new ModelTurnError('authorization-refused');
-                const frozen = await coordinator.runProposal(
-                  {
-                    proposalRunId: begun.proposalRunId,
-                    conversationVersion: begun.conversationVersion,
-                    turnId: begun.turnId,
-                    selectionId: begun.selectionId,
-                    cardId: begun.target.card_id,
-                    cardVersion: begun.target.card_version,
-                    requestedId: begun.target.requested_id,
-                  },
-                  { onBehalfOf: claim },
-                );
+                const frozen = begun.kind === 'initial'
+                  ? await (async () => {
+                      const conversation = await options.authorization.conversation(configuredWorld, configuredCase, claim);
+                      if (
+                        conversation.conversation_version !== begun.conversationVersion ||
+                        conversation.events.length === 0
+                      ) throw new ModelTurnError('authorization-refused');
+                      return coordinator.runProposal(
+                        {
+                          proposalRunId: begun.proposalRunId,
+                          conversationVersion: begun.conversationVersion,
+                          turnId: begun.turnId,
+                          selectionId: begun.selectionId,
+                          cardId: begun.target.card_id,
+                          cardVersion: begun.target.card_version,
+                          requestedId: begun.target.requested_id,
+                        },
+                        { onBehalfOf: claim },
+                      );
+                    })()
+                  : await coordinator.runProposalRevision(
+                      {
+                        preparationId: begun.preparationId,
+                        turnId: begun.turnId,
+                        selectionId: begun.selectionId,
+                        cardId: begun.target.card_id,
+                        cardVersion: begun.target.card_version,
+                        requestedId: begun.target.requested_id,
+                      },
+                      { onBehalfOf: claim },
+                    );
                 let processStatus;
                 try {
                   processStatus = await options.authorization.runProposalPrecommit(

@@ -13,6 +13,7 @@ import {
   type WalOp,
 } from './schemas/index.js';
 import type { TransactionActor, WalStore } from './walStore.js';
+import { proposalRevisionPreparationInvalidationOps } from './conversationInvalidation.js';
 
 const MINT_ACTOR: TransactionActor['credential'] = 'role:case_officer';
 const REDEEM_ACTOR: TransactionActor['credential'] = 'proc:orchestrator';
@@ -146,6 +147,17 @@ export class CaseSessionHandoffService {
       const ops = [
         ...expiryOps(state.caseSessionHandoffs, this.#bootId, at),
         ...provenanceExpiryOps(state.caseSessionProvenance, this.#bootId, at),
+        ...proposalRevisionPreparationInvalidationOps(
+          state,
+          (preparation) => {
+            const receipt = state.caseSessionProvenance.get(preparation.session_id);
+            return receipt === undefined ||
+              receipt.authorization_boot_id !== this.#bootId ||
+              receipt.expires_at <= at;
+          },
+          'session-ended',
+          at,
+        ),
       ];
       return { ops, result: ops.length };
     });
@@ -272,5 +284,40 @@ export class CaseSessionHandoffService {
     });
     if (!completed.result.accepted) throw new CaseSessionHandoffError('handoff-refused');
     return completed.result.claim;
+  }
+
+  async closeSession(
+    sessionIdInput: string,
+    actor: TransactionActor,
+  ): Promise<{ readonly session_id: string; readonly state: 'closed'; readonly closed_at: string }> {
+    if (actor.credential !== REDEEM_ACTOR) {
+      throw new CaseSessionHandoffError('actor-refused');
+    }
+    const sessionId = id.parse(sessionIdInput);
+    const completed = await this.#store.transactWithState(
+      'case_session_close',
+      actor,
+      (state, at) => {
+        const receipt = state.caseSessionProvenance.get(sessionId);
+        if (
+          receipt === undefined ||
+          receipt.state !== 'active' ||
+          receipt.authorization_boot_id !== this.#bootId
+        ) throw new CaseSessionHandoffError('handoff-refused');
+        return {
+          ops: [
+            ...proposalRevisionPreparationInvalidationOps(
+              state,
+              (preparation) => preparation.session_id === sessionId,
+              'session-ended',
+              at,
+            ),
+            { op: 'case_session_provenance.close' as const, session_id: sessionId, closed_at: at },
+          ],
+          result: { session_id: sessionId, state: 'closed' as const, closed_at: at },
+        };
+      },
+    );
+    return completed.result;
   }
 }

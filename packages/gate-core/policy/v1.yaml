@@ -134,7 +134,6 @@ rules:
       matchers:
         - { kind: signal, signal: injection_suspicion, min_confidence_pct: 1 }
         - { kind: signal, signal: evidence_conflict, min_confidence_pct: 1 }
-        - { kind: signal, signal: unconfirmed_inference_as_fact, min_confidence_pct: 1 }
         - { kind: signal, signal: scope_drift, min_confidence_pct: 1 }
     verdict: escalate
     ux_class: stop
@@ -160,6 +159,35 @@ rules:
       record_and_feedback:
         record_events: [escalation_raised, disposition_recorded]
         feedback_consequence: Increment the escalation-pattern counter.
+
+  - id: escalate-verify-unconfirmed-inference
+    priority: 100
+    gate: verify
+    matcher: { kind: signal, signal: unconfirmed_inference_as_fact, min_confidence_pct: 1 }
+    verdict: escalate
+    ux_class: stop
+    reason_template: The cited inference requires confirmation, correction, or narrowing.
+    intervention_contract:
+      trigger_and_state: { trigger: unconfirmed-inference-as-fact, state: open }
+      decision_and_route:
+        eligible_role: case_officer
+        standing_class: third-party-fact
+        competence_declared: Assigned case officer for the synthetic demo (declared, not verified).
+        independence_declared: Not independently verified in this POC.
+        substitute_roles: [principal]
+        substitute_rule: The principal may respond only under the same standing and cannot manufacture a third-party fact.
+      decision_basis_shown: [frozen-proposal-inference, current-evidence-status]
+      response_bound_and_default:
+        response_bound_ms: 900000
+        safe_default:
+          kind: stop-remains
+          disposition: abstain
+          authority_basis: { kind: no-new-authority }
+          reversible: true
+      permitted_dispositions: [confirm, correct, narrow, abstain, route]
+      record_and_feedback:
+        record_events: [dialogue_trigger_raised, dialogue_response_recorded]
+        feedback_consequence: Increment the dialogue ask-rate counter.
 
   - id: escalate-verify-conflict
     priority: 90

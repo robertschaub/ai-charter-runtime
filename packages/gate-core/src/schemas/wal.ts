@@ -11,6 +11,10 @@ import {
   proposalIntakeRefusalReason,
   proposalOriginRecord,
 } from './proposalIntake.js';
+import {
+  proposalRevisionInvalidationReason,
+  proposalRevisionPreparationRecord,
+} from './proposalRevision.js';
 import { accessChainEntry, recordEntry } from './record.js';
 import { gateRuling } from './ruling.js';
 import { modelCallFailureReason, modelCallOpenRecord } from './modelCall.js';
@@ -42,6 +46,31 @@ import { systemUseDecisionRecord, systemUseDecisionStatus } from './systemUseDec
 const transitionReason = z.string().min(1);
 
 export const walOp = z.discriminatedUnion('op', [
+  z.object({ op: z.literal('proposal_revision_preparation.issue'), preparation: proposalRevisionPreparationRecord }).strict(),
+  z
+    .object({
+      op: z.literal('proposal_revision_preparation.consume'),
+      preparation_id: id,
+      call_id: id,
+      changed_at: timestamp,
+    })
+    .strict(),
+  z
+    .object({
+      op: z.literal('proposal_revision_preparation.invalidate'),
+      preparation_id: id,
+      reason: proposalRevisionInvalidationReason,
+      changed_at: timestamp,
+    })
+    .strict(),
+  z
+    .object({
+      op: z.literal('proposal_revision_preparation.expire'),
+      preparation_id: id,
+      authorization_boot_id: id,
+      changed_at: timestamp,
+    })
+    .strict(),
   z.object({ op: z.literal('proposal.freeze'), proposal: frozenProposal }).strict(),
   z.object({ op: z.literal('proposal_origin.put'), origin: proposalOriginRecord }).strict(),
   z.object({ op: z.literal('proposal_intake.issue'), intake: proposalIntakeRecord }).strict(),
@@ -94,6 +123,7 @@ export const walOp = z.discriminatedUnion('op', [
   z.object({ op: z.literal('case_session_handoff.expire'), handoff_id: id }).strict(),
   z.object({ op: z.literal('case_session_provenance.issue'), receipt: caseSessionProvenanceReceipt }).strict(),
   z.object({ op: z.literal('case_session_provenance.expire'), session_id: id }).strict(),
+  z.object({ op: z.literal('case_session_provenance.close'), session_id: id, closed_at: timestamp }).strict(),
 
   z.object({ op: z.literal('nonce.issue'), nonce: nonceRecord }).strict(),
   z.object({ op: z.literal('nonce.consume'), nonce_id: id }).strict(),

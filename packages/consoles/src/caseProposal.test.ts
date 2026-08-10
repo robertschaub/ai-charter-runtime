@@ -136,6 +136,53 @@ describe('M5.11 browser proposal preparation and projection', () => {
     expect(store.beginUse(afterRestart.preparation_id, session)).toBeNull();
   });
 
+  it('replaces a local initial preparation with one authorization-owned revision wrapper', () => {
+    const store = new CaseProposalStore({
+      maxRecords: 1,
+      now: () => at,
+      nextPreparationId: () => 'pprep_initial',
+      nextRunId: () => 'prun_initial',
+      nextTurnId: () => 'turn_revision',
+    });
+    const initial = store.create(session, current, conversation);
+    const revision = store.registerRevision(session, current, {
+      kind: 'proposal_revision_preparation',
+      preparation_id: 'rprep_one',
+      proposal_run_id: 'prun_revision',
+      source_proposal_run_id: 'prun_source',
+      target: {
+        card_id: 'publicai-apertus-v1.5-70b',
+        card_version: 1,
+        requested_id: 'swiss-ai/apertus-v1.5-70b',
+      },
+      issued_at: at,
+      expires_at: '2026-08-08T10:02:00.000Z',
+    });
+    expect(store.beginUse(initial.preparation_id, session)).toBeNull();
+    expect(store.registerRevision(session, current, {
+      kind: 'proposal_revision_preparation',
+      preparation_id: 'rprep_one',
+      proposal_run_id: 'prun_revision',
+      source_proposal_run_id: 'prun_source',
+      target: revision.target,
+      issued_at: revision.issued_at,
+      expires_at: revision.expires_at,
+    })).toEqual(revision);
+    expect(store.beginUse(revision.preparation_id, session)).toEqual({
+      kind: 'revision',
+      proposalRunId: 'prun_revision',
+      sourceProposalRunId: 'prun_source',
+      turnId: 'turn_revision',
+      preparationId: 'rprep_one',
+      selectionId: 'sel_one',
+      target: revision.target,
+    });
+    expect(store.fail('prun_revision')).toMatchObject({
+      state: 'failed',
+      continuation: { state: 'unavailable', source_proposal_run_id: 'prun_source' },
+    });
+  });
+
   it('constructs an exact redacted browser projection field by field', () => {
     const process = proposalPrecommitProjection.parse({
       kind: 'proposal_precommit_status',
@@ -173,7 +220,8 @@ describe('M5.11 browser proposal preparation and projection', () => {
     });
     const browser = toBrowserProposalRunStatus(process);
     expect(browserProposalRunStatus.parse(browser)).toEqual(browser);
-    expect(Object.keys(browser).sort()).toEqual(['gates', 'proposal', 'proposal_run_id', 'state']);
+    expect(Object.keys(browser).sort()).toEqual(['continuation', 'gates', 'proposal', 'proposal_run_id', 'state']);
+    expect(browser.continuation).toEqual({ state: 'unavailable', source_proposal_run_id: null });
     expect(Object.keys(browser.proposal!).sort()).toEqual([
       'action_id', 'basis', 'commercial_influence', 'cost_obligation', 'data_to_be_disclosed',
       'declared_objective', 'exact_parameters', 'material_consequences', 'proposal_id', 'proposed_action',

@@ -332,14 +332,21 @@ describe('ADR-002 authorization HTTP adapter', () => {
     expect(store.snapshot().accessRecords).toHaveLength(0);
   });
 
-  it('fixes the M5.11 route classifications and confines all five routes to the orchestrator process', async () => {
+  it('fixes the proposal route classifications and confines the M5.11/M5.12 routes to the orchestrator process', async () => {
     const processRoutes = AUTHORIZATION_ROUTES.filter(
       (route) => route.allowed !== 'open' && Array.from(route.allowed).some((allowed) => allowed === 'proc:orchestrator'),
     );
-    expect(processRoutes.filter((route) => route.id !== 'case-handoff.redeem')).toHaveLength(20);
+    expect(processRoutes.filter((route) => !['case-handoff.redeem', 'case-session.close'].includes(route.id))).toHaveLength(21);
+    expect(AUTHORIZATION_ROUTES.find((route) => route.id === 'case-session.close')).toMatchObject({
+      allowed: ['proc:orchestrator'],
+      authorityChanging: false,
+      originGuarded: true,
+      accessLoggedOnServe: true,
+    });
     const expected = {
       'proposal-intake.consume': false,
       'proposal-intake.read': false,
+      'proposal-revision.prepare': false,
       'proposal-run.read': false,
       'proposal-precommit.run': true,
       'proposal-precommit.read': false,
@@ -347,6 +354,7 @@ describe('ADR-002 authorization HTTP adapter', () => {
     const paths = {
       'proposal-intake.consume': '/w/w-demo/proposal-intakes/pint_one/consume',
       'proposal-intake.read': '/w/w-demo/proposal-intakes/pint_one',
+      'proposal-revision.prepare': '/w/w-demo/cases/case_demo/proposal-runs/prun_one/revision-preparations',
       'proposal-run.read': '/w/w-demo/cases/case_demo/proposal-runs/prun_one',
       'proposal-precommit.run': '/w/w-demo/proposals/prp_one/precommit',
       'proposal-precommit.read': '/w/w-demo/proposals/prp_one/precommit',
@@ -381,8 +389,8 @@ describe('ADR-002 authorization HTTP adapter', () => {
         origin: 'http://127.0.0.1:7801',
       }, operation)).resolves.toMatchObject({ status: 200, body: { ok: true } });
     }
-    expect(operation).toHaveBeenCalledTimes(5);
-    expect(store.snapshot().accessRecords.filter((record) => 'outcome' in record && record.outcome === 'served')).toHaveLength(5);
+    expect(operation).toHaveBeenCalledTimes(6);
+    expect(store.snapshot().accessRecords.filter((record) => 'outcome' in record && record.outcome === 'served')).toHaveLength(6);
   });
 
   it('begins a model call only for the orchestrator and records every attempt', async () => {

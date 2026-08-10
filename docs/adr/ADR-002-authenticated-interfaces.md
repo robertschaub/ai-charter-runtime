@@ -122,7 +122,7 @@ Origin-guarded and access-recorded, and expose strict projections. Intake consum
 it can issue Authorize/Submit/Verify rulings and open an escalation. That classification does not let the
 orchestrator decide a ruling or reach Commit, reservation, token, service, or effect paths.
 
-**Proposed amendment (M5.12 native dialogue continuation):** ADR-014 adds one dynamic-session browser mutation and
+**M5.12 implementation candidate (native dialogue continuation):** reviewed ADR-014 adds one dynamic-session browser mutation and
 one matching process route:
 `POST /cases/{case_id}/proposal-runs/{source_proposal_run_id}/revision-preparations`. The browser body and process
 body are strictly empty. Authorization alone resolves the exact disposed dialogue response, source proposal/action,
@@ -223,7 +223,7 @@ Authorization service, all data routes under `/w/{world_id}/…`:
 | `POST /proposal-intakes/{proposal_intake_id}/consume` (freeze one admitted draft) | `proc:orchestrator` only; `authorityChanging: false`, Origin-guarded, and access-recorded |
 | `GET /proposal-intakes/{proposal_intake_id}` (content-free intake status) | `proc:orchestrator` only; `authorityChanging: false`, Origin-guarded, and access-recorded |
 | `GET /cases/{case_id}/proposal-runs/{proposal_run_id}` (content-free proposal-run recovery) | `proc:orchestrator` only; `authorityChanging: false`, Origin-guarded, and access-recorded |
-| `POST /cases/{case_id}/proposal-runs/{source_proposal_run_id}/revision-preparations` (proposed M5.12: issue one dialogue-bound native revision preparation) | `proc:orchestrator` only; `authorityChanging: false`, Origin-guarded, and access-recorded |
+| `POST /cases/{case_id}/proposal-runs/{source_proposal_run_id}/revision-preparations` (M5.12 candidate: issue one dialogue-bound native revision preparation) | `proc:orchestrator` only; `authorityChanging: false`, Origin-guarded, and access-recorded |
 | `POST /proposals/{proposal_id}/precommit` (fixed Authorize → Submit → Verify) | `proc:orchestrator` only; `authorityChanging: true`, Origin-guarded, and access-recorded |
 | `GET /proposals/{proposal_id}/precommit` (read-only precommit recovery) | `proc:orchestrator` only; `authorityChanging: false`, Origin-guarded, and access-recorded |
 | `POST /model-calls/begin` (durably bind one attempt, then return its authorization-resolved projection) | `proc:orchestrator` only; non-authorizing, Origin-guarded, and access-recorded |
@@ -236,6 +236,7 @@ Authorization service, all data routes under `/w/{world_id}/…`:
 | `GET /mandates/{id}/approved-models` (picker and principal card-evidence source, card-verified) | `proc:orchestrator`, `role:principal`, `role:case_officer` |
 | `POST /case-session-handoffs` (mint; adapter `authorityChanging: true`, `originGuarded: true`) | **`role:case_officer` only** |
 | `POST /case-session-handoffs/{id}/redeem` (consume; adapter `authorityChanging: false`, `originGuarded: true`) | **`proc:orchestrator` only** |
+| `POST /case-sessions/{session_id}/close` (expire authorization provenance and issued revision preparations; adapter `authorityChanging: false`, `originGuarded: true`) | **`proc:orchestrator` only**, exact on-behalf-of session |
 | `POST /commit-verify` | **`proc:services_host` only** |
 | `POST /effects/{effect_id}/outcome` | **`proc:services_host` only** |
 | `POST /access-events` (narrow services-host denial evidence) | **`proc:services_host` only** |
@@ -263,7 +264,9 @@ credential state but cannot mint a handoff or change a mandate, ruling, escalati
 so `authorityChanging: false` is an explicit classification rather than an omission. It nevertheless carries
 the independent `originGuarded: true` transport flag and rejects a present foreign or opaque origin. Existing
 authority-changing routes imply that guard; the handoff implementation makes the two concepts explicit so
-protocol-credential mutation is not mislabeled as action authority. Both transitions are durably appended
+protocol-credential mutation is not mislabeled as action authority. Explicit session close likewise expires only the
+authorization-owned provenance receipt and invalidates any still-issued revision preparation for that session; it
+cannot change action authority. All three transitions are durably appended
 before their response. The exact config route precedes the wildcard console shell and
 returns only `{authorization_origin, orchestrator_origin}` with `Cache-Control: no-store`, no CORS, and no
 caller-supplied override.
@@ -294,7 +297,7 @@ accepts only the single-use handoff in a strict same-origin body and is explicit
 `POST /w/{w}/cases/{id}/model-turn-preparations`,
 `POST /w/{w}/cases/{id}/model-turns`, `GET /w/{w}/cases/{id}/model-turns/{turn_id}`,
 `POST /w/{w}/cases/{id}/proposal-preparations`, `POST /w/{w}/cases/{id}/proposals`,
-`POST /w/{w}/cases/{id}/proposal-runs/{source_proposal_run_id}/revision-preparations` (proposed by ADR-014),
+`POST /w/{w}/cases/{id}/proposal-runs/{source_proposal_run_id}/revision-preparations` (defined by ADR-014),
 `GET /w/{w}/cases/{id}/proposal-runs/{proposal_run_id}`,
 and `POST /w/{w}/case-sessions/close` require the
 dynamic case-session bearer and re-check its exact role/world/case/expiry binding. ADR-010's two selection
@@ -313,8 +316,8 @@ Services host: `POST /w/{w}/services/{service}/execute` `proc:orchestrator`;
 and the persistent services-ledger id; only absence under the same ledger id can release a commitment.
 
 **The reviewed M5.11 implementation exposes the orchestrator's process credential on exactly twenty gate/data
-routes plus the dedicated case-session-handoff redemption route. ADR-014 would add one route, making exactly
-twenty-one if M5.12 is implemented.** The resulting twenty-one are proposal submission, proposal-intake consumption,
+routes plus dedicated case-session-handoff redemption and close routes. The M5.12 candidate adds one gate/data route,
+making exactly twenty-one.** The resulting twenty-one are proposal submission, proposal-intake consumption,
 proposal-intake status, proposal-run status, proposal precommit, proposal-precommit status, model-call begin,
 model-output admission, model-call failure, conversation-message ingestion, model-output-release consumption,
 model-output-release status, conversation read,
@@ -445,8 +448,9 @@ caller-selected target.
    an unrelated at-least-256-bit bearer, store its digest with role/world/case/creation/expiry and
    `active` state in process memory, and return the raw value once with `Cache-Control: no-store`. The browser
    stores it only in orchestrator-origin `sessionStorage` and sends it only as a same-origin bearer. The
-   session lasts no more than 15 minutes, has no refresh or widening operation, and is closed server-side on
-   explicit logout. Tab close removes the client copy; expiry or an orchestrator restart removes server
+   session lasts no more than 15 minutes and has no refresh or widening operation. Explicit logout first closes the
+   exact authorization-owned provenance receipt through the process-authenticated backchannel, then closes the
+   orchestrator-local bearer and quarantined state. Tab close removes the client copy; expiry or an orchestrator restart removes server
    usability. A fresh authorization-origin handoff is the only way to create another session.
 
 Both origins serve these surfaces with a strict self-only CSP, `frame-ancestors 'none'`, no third-party
@@ -649,7 +653,7 @@ effect. Intake ambiguity, single-use consumption, restart recovery by proposal-r
 projections, and fixed Authorize → Submit → Verify ordering must be covered without exposing content or private
 bindings. Existing dynamic sessions remain denied on the headless action-execution route.
 
-**Required with a later M5.12 implementation.** Real-listener tests must prove the new browser route accepts only
+**Required for the M5.12 implementation candidate.** Real-listener tests must prove the new browser route accepts only
 the exact active case-officer session and present exact Origin, while the authorization route accepts only
 `proc:orchestrator`, rejects present foreign/opaque Origin, and appends bounded access evidence. Both strict empty
 bodies must reject response/proposal content, item/scope, question/contract, source action/revision, model/currentness,

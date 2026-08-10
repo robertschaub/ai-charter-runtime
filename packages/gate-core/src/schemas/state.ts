@@ -143,6 +143,8 @@ export const escalationRecord = z
     ruling_id: id,
     /** Null for a ruling escalation; set when an unknown commitment opens recovery. */
     source_commitment_id: id.nullable().default(null),
+    /** Exact inferred item for the bounded M5.12 dialogue trigger; null on general escalations. */
+    dialogue_item_ref: id.nullable().default(null),
     frozen_proposal_hash: hexDigest,
     contract: interventionContract,
     opened_at: timestamp,

@@ -365,6 +365,15 @@ export class AuthorizationHttpServer {
         const claim = await options.caseHandoffs.redeem(parsed, requireActor(context));
         return { status: 200, body: claim };
       },
+      'case-session.close': async (request, context) => {
+        const sessionId = context.params['id'];
+        if (sessionId === undefined || context.sessionId !== sessionId) {
+          return { status: 403, body: { error: 'forbidden' } };
+        }
+        strictEmptyRequest.parse(await body(request));
+        const result = await options.caseHandoffs.closeSession(sessionId, requireActor(context));
+        return { status: 200, body: result };
+      },
       'proposal.submit': async (request, context) => {
         const parsed = proposalRequest.parse(await body(request));
         const result: RuleProposalResult = await options.authorization.ruleProposal({
@@ -406,6 +415,22 @@ export class AuthorizationHttpServer {
         if (intakeId === undefined) return { status: 404, body: { error: 'not-found' } };
         const result = options.proposalIntakes.status(intakeId, requireActor(context));
         return { status: 200, body: result, accessEvidence: result };
+      },
+      'proposal-revision.prepare': async (request, context) => {
+        if (options.proposalIntakes === undefined) return { status: 503, body: { error: 'proposal-intake-unavailable' } };
+        const runId = context.params['id'];
+        const caseId = context.params['case_id'];
+        if (runId === undefined || caseId === undefined || context.sessionId === null) {
+          return { status: 403, body: { error: 'forbidden' } };
+        }
+        strictEmptyRequest.parse(await body(request));
+        const result = await options.proposalIntakes.prepareRevision(
+          caseId,
+          runId,
+          context.sessionId,
+          requireActor(context),
+        );
+        return { status: 201, body: result, accessEvidence: result };
       },
       'proposal-run.read': async (_request, context) => {
         if (options.proposalIntakes === undefined || options.proposalPrecommit === undefined) {

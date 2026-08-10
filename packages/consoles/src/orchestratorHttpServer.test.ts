@@ -18,7 +18,7 @@ import { OrchestratorHttpServer } from './orchestratorHttpServer.js';
 import type { OrchestratorAuthorizationHttpClient, OrchestratorServicesHttpClient } from './runtimeHttpClients.js';
 
 describe('orchestrator case-console routes', () => {
-  it('confines all three M5.11 proposal routes to exact dynamic sessions and fixed browser projections', async () => {
+  it('confines proposal and response-bound revision routes to exact dynamic sessions and fixed browser projections', async () => {
     const digest = 'a'.repeat(64);
     const target = {
       card_id: 'publicai-apertus-v1.5-70b',
@@ -120,15 +120,26 @@ describe('orchestrator case-console routes', () => {
         },
       }],
       escalation_id: null,
+      continuation: { state: 'available' as const, source_proposal_run_id: null },
       updated_at: '2026-08-08T10:00:01.000Z',
     };
     const runProposalPrecommit = vi.fn(async () => processStatus);
     const proposalRunStatus = vi.fn(async () => processStatus);
+    const prepareProposalRevision = vi.fn(async () => ({
+      kind: 'proposal_revision_preparation' as const,
+      preparation_id: 'rprep_revision',
+      proposal_run_id: 'prun_revision',
+      source_proposal_run_id: 'prun_proposal',
+      target,
+      issued_at: '2026-08-08T10:00:00.000Z',
+      expires_at: '2026-08-08T10:02:00.000Z',
+    }));
     const authorization = {
       currentModelSelection: vi.fn(async () => current),
       conversation: vi.fn(async () => conversation),
       runProposalPrecommit,
       proposalRunStatus,
+      prepareProposalRevision,
     } as unknown as OrchestratorAuthorizationHttpClient;
     const quarantine = new ModelOutputQuarantine();
     const runProposal = vi.fn(async () => ({
@@ -213,7 +224,7 @@ describe('orchestrator case-console routes', () => {
       const used = await post(usePath, { preparation_id: 'pprep_proposal' }, first.session_token, address.origin);
       expect(used.status).toBe(200);
       const usedBody = await used.json();
-      expect(Object.keys(usedBody).sort()).toEqual(['gates', 'proposal', 'proposal_run_id', 'state']);
+      expect(Object.keys(usedBody).sort()).toEqual(['continuation', 'gates', 'proposal', 'proposal_run_id', 'state']);
       expect(usedBody).toMatchObject({ proposal_run_id: 'prun_proposal', state: 'verified' });
       for (const hidden of ['proposal_intake_id', 'call_id', 'output_digest', 'selection_id', 'commit_token']) {
         expect(JSON.stringify(usedBody)).not.toContain(hidden);
@@ -229,6 +240,37 @@ describe('orchestrator case-console routes', () => {
       expect(recovered.status).toBe(200);
       await expect(recovered.json()).resolves.toEqual(usedBody);
       expect(proposalRunStatus).toHaveBeenCalledOnce();
+
+      const revisionPath = `${statusPath}/revision-preparations`;
+      expect((await post(revisionPath, {}, first.session_token)).status).toBe(403);
+      expect((await post(revisionPath, {}, first.session_token, 'null')).status).toBe(403);
+      expect((await post(revisionPath, {}, first.session_token, 'http://foreign.invalid')).status).toBe(403);
+      expect((await post(revisionPath, {}, 'b'.repeat(64), address.origin)).status).toBe(401);
+      expect((await post(revisionPath, { response: 'caller-asserted' }, first.session_token, address.origin)).status).toBe(422);
+      expect(prepareProposalRevision).not.toHaveBeenCalled();
+      const revisionPrepared = await post(revisionPath, {}, first.session_token, address.origin);
+      expect(revisionPrepared.status).toBe(201);
+      await expect(revisionPrepared.json()).resolves.toEqual({
+        preparation_id: 'rprep_revision',
+        proposal_run_id: 'prun_revision',
+        target,
+        issued_at: '2026-08-08T10:00:00.000Z',
+        expires_at: '2026-08-08T10:02:00.000Z',
+      });
+      expect(prepareProposalRevision).toHaveBeenCalledWith(
+        'w-demo',
+        'case_demo',
+        'prun_proposal',
+        { role: 'case_officer', session_id: first.session_id },
+      );
+      const localRevision = await get('/w/w-demo/cases/case_demo/proposal-runs/prun_revision', first.session_token);
+      expect(localRevision.status).toBe(200);
+      await expect(localRevision.json()).resolves.toEqual({
+        proposal_run_id: 'prun_revision',
+        state: 'prepared',
+        gates: [],
+        continuation: { state: 'prepared', source_proposal_run_id: 'prun_proposal' },
+      });
     } finally {
       await server.close();
     }
@@ -375,6 +417,7 @@ describe('orchestrator case-console routes', () => {
       checkModelSelection,
       selectModel,
       redeemCaseSessionHandoff: vi.fn(),
+      closeCaseSession: vi.fn(async () => undefined),
       ruleCommit: vi.fn(),
     } as unknown as OrchestratorAuthorizationHttpClient;
     const preparationIds = ['msp_browser_one', 'msp_browser_two', 'msp_browser_three'];
@@ -722,6 +765,7 @@ describe('orchestrator case-console routes', () => {
       rulingStatus: vi.fn(),
       approvedModels: vi.fn(),
       redeemCaseSessionHandoff: vi.fn(),
+      closeCaseSession: vi.fn(async () => undefined),
       ruleCommit: vi.fn(),
     };
     const provider = vi
@@ -874,6 +918,11 @@ describe('orchestrator case-console routes', () => {
       const firstSession = sessions.authenticate(firstCreated.session_token, 'w-demo', 'case_demo');
       if (firstSession === null) throw new Error('synthetic session disappeared');
       expect((await post('/w/w-demo/case-sessions/close', {})).status).toBe(200);
+      expect(authorization.closeCaseSession).toHaveBeenCalledWith(
+        'w-demo',
+        firstSession.session_id,
+        { role: 'case_officer', session_id: firstSession.session_id },
+      );
       expect(coordinator.quarantine.size).toBe(0);
       expect(modelTurns.status(prepared.turn_id, firstSession)).toMatchObject({
         state: 'discarded',
@@ -1003,6 +1052,7 @@ describe('orchestrator case-console routes', () => {
       rulingStatus: vi.fn(),
       approvedModels: vi.fn(),
       redeemCaseSessionHandoff: vi.fn(),
+      closeCaseSession: vi.fn(async () => undefined),
       ruleCommit: vi.fn(),
     } as unknown as OrchestratorAuthorizationHttpClient;
     const runMessage = vi.fn(async (input: { turnId: string }) => ({

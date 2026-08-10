@@ -45,6 +45,12 @@ export function conversationMutationInvalidationOps(
       changed_at: at,
     });
   }
+  ops.push(...proposalRevisionPreparationInvalidationOps(
+    state,
+    (preparation) => preparation.case_id === caseId,
+    'conversation-changed',
+    at,
+  ));
   return ops;
 }
 
@@ -75,6 +81,24 @@ export function proposalIntakeInvalidationOps(
     .map((intake) => ({
       op: 'proposal_intake.invalidate' as const,
       proposal_intake_id: intake.proposal_intake_id,
+      reason,
+      changed_at: at,
+    }));
+}
+
+export function proposalRevisionPreparationInvalidationOps(
+  state: WorldState,
+  predicate: (
+    preparation: WorldState['proposalRevisionPreparations'] extends Map<string, infer T> ? T : never,
+  ) => boolean,
+  reason: 'session-ended' | 'conversation-changed' | 'selection-changed' | 'authority-changed' | 'successor-claimed',
+  at: string,
+): WalOp[] {
+  return [...state.proposalRevisionPreparations.values()]
+    .filter((preparation) => preparation.state === 'issued' && predicate(preparation))
+    .map((preparation) => ({
+      op: 'proposal_revision_preparation.invalidate' as const,
+      preparation_id: preparation.preparation_id,
       reason,
       changed_at: at,
     }));

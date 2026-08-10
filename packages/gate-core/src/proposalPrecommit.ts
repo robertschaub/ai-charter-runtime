@@ -3,6 +3,7 @@
 import { z } from 'zod';
 
 import { AuthorizationCore } from './authorizationCore.js';
+import { proposalRevisionPreparationInvalidationOps } from './conversationInvalidation.js';
 import { ProposalIntakeError, ProposalIntakeService } from './proposalIntake.js';
 import {
   classToken,
@@ -16,6 +17,7 @@ import {
   uxClass,
   validityWindow,
   verdict,
+  proposalRevisionContinuationProjection,
   type GateRuling,
 } from './schemas/index.js';
 import { WalStore, type TransactionActor } from './walStore.js';
@@ -67,6 +69,10 @@ export const proposalPrecommitProjection = z
     state: z.enum(['frozen', 'denied', 'escalated', 'verified', 'failed']),
     gates: z.array(proposalPrecommitGateProjection).max(3),
     escalation_id: id.nullable(),
+    continuation: proposalRevisionContinuationProjection.default({
+      state: 'unavailable',
+      source_proposal_run_id: null,
+    }),
     updated_at: timestamp,
   })
   .strict();
@@ -147,9 +153,32 @@ export class ProposalPrecommitService {
           : hasInvalidatedProgress
             ? 'failed'
             : 'frozen';
-    const escalation = terminal === undefined
+    const escalationSource = terminal ?? latest.find((candidate) => candidate.verdict === 'escalate');
+    const escalation = escalationSource === undefined
       ? undefined
-      : [...state.escalations.values()].find((candidate) => candidate.ruling_id === terminal.ruling_id);
+      : [...state.escalations.values()].find((candidate) => candidate.ruling_id === escalationSource.ruling_id);
+    const continuation = origin.continuation !== null
+      ? {
+          state: 'unavailable' as const,
+          source_proposal_run_id:
+            state.proposalOrigins.get(origin.continuation.source_proposal_id)?.proposal_run_id ?? null,
+        }
+      : escalation === undefined || escalation.dialogue_item_ref === null
+        ? { state: 'unavailable' as const, source_proposal_run_id: null }
+        : escalation.successor_ruling_id !== null
+          ? { state: 'continued' as const, source_proposal_run_id: null }
+          : escalation.state === 'open'
+            ? { state: 'response-required' as const, source_proposal_run_id: null }
+            : escalation.terminal_disposition === 'route'
+              ? { state: 'parked' as const, source_proposal_run_id: null }
+              : ['confirm', 'correct', 'narrow'].includes(escalation.terminal_disposition ?? '')
+                ? {
+                    state: this.#proposalIntakes.hasLiveRevisionAttempt(state, proposal.proposal_id)
+                      ? 'prepared' as const
+                      : 'available' as const,
+                    source_proposal_run_id: null,
+                  }
+                : { state: 'unavailable' as const, source_proposal_run_id: null };
     return proposalPrecommitProjection.parse({
       kind: 'proposal_precommit_status',
       proposal_id: proposalId,
@@ -179,6 +208,7 @@ export class ProposalPrecommitService {
       state: stateName,
       gates: latest.map(projectGate),
       escalation_id: escalation?.escalation_id ?? null,
+      continuation,
       updated_at: latest.at(-1)?.issued_at ?? origin.frozen_at,
     });
   }
@@ -225,6 +255,39 @@ export class ProposalPrecommitService {
             actor,
           },
           (lockedState, at) => this.#proposalIntakes.assertProposalCurrent(lockedState, at, proposalId),
+          (lockedState, at, result) => {
+            if (
+              origin.continuation === null ||
+              (result.ruling.verdict !== 'escalate' &&
+                !(gateName === 'verify' && result.ruling.verdict === 'allow'))
+            ) return [];
+            const sourceRuling = lockedState.rulings.get(origin.continuation.source_ruling_id);
+            const sourceEscalation = lockedState.escalations.get(origin.continuation.source_escalation_id);
+            if (
+              sourceRuling === undefined ||
+              sourceEscalation === undefined ||
+              sourceRuling.successor_ruling_id !== null ||
+              sourceEscalation.successor_ruling_id !== null
+            ) throw new ProposalPrecommitError('currentness', 'dialogue continuation already has a successor');
+            return [
+              ...proposalRevisionPreparationInvalidationOps(
+                lockedState,
+                (preparation) => preparation.source_proposal_id === origin.continuation?.source_proposal_id,
+                'successor-claimed',
+                at,
+              ),
+              {
+                op: 'ruling.link_successor' as const,
+                ruling_id: sourceRuling.ruling_id,
+                successor_ruling_id: result.ruling.ruling_id,
+              },
+              {
+                op: 'escalation.link_successor' as const,
+                escalation_id: sourceEscalation.escalation_id,
+                successor_ruling_id: result.ruling.ruling_id,
+              },
+            ];
+          },
         );
       } catch (error) {
         if (error instanceof ProposalIntakeError) {

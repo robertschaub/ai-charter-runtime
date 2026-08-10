@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: CC-BY-4.0 -->
 # ADR-014 — Native dialogue trigger and proposal-revision continuation
 
-**Status:** proposed M5.12 definition only; not reviewed and not approved for implementation.
+**Status:** accepted definition at `0c3cac9` (GO — no findings); bounded implementation candidate awaiting exact-SHA review.
 **Spec:** §4 (proposal revisions, screening signals, intervention contract), §5 (empathy layer and disposition
 continuation), §6 criteria 1, 2, 4, and 5, §7 beat 4, and §10 M5.
 **Depends on:** ADR-004, ADR-005, ADR-009, ADR-012, and ADR-013.

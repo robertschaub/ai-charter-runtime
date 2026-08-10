@@ -48,6 +48,8 @@ export const SCREENING_SIGNALS = [
 export const screeningSignal = z.object({
   kind: z.literal('screening_signal'),
   signal: z.enum(SCREENING_SIGNALS),
+  /** Protocol-only evidence reference; authorization validates it before forming dialogue. */
+  suspect_item_id: id.nullable().optional(),
   confidence_pct: confidencePct,
   rationale: z.string(),
   /** Model id and version as reported by the serving API. */

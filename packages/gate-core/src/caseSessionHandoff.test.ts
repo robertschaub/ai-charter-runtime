@@ -149,6 +149,23 @@ describe('ADR-002 durable case-session handoffs', () => {
     });
   });
 
+  it('durably closes the authorization-owned session receipt exactly once', async () => {
+    const { store, service } = setup();
+    const minted = await service.mint('case_demo', CASE_OFFICER);
+    const input = redeemInput(minted);
+    await service.redeem(input, ORCHESTRATOR);
+    await expect(service.closeSession(input.session_id, CASE_OFFICER)).rejects.toMatchObject({ code: 'actor-refused' });
+    await expect(service.closeSession(input.session_id, ORCHESTRATOR)).resolves.toEqual({
+      session_id: input.session_id,
+      state: 'closed',
+      closed_at: '2026-08-03T10:00:00.000Z',
+    });
+    expect(store.snapshot().caseSessionProvenance.get(input.session_id)?.state).toBe('expired');
+    await expect(service.closeSession(input.session_id, ORCHESTRATOR)).rejects.toMatchObject({
+      code: 'handoff-refused',
+    });
+  });
+
   it('expires elapsed handoffs lazily and prior-boot handoffs before a new listener can bind', async () => {
     const elapsed = setup({ ttlMs: 1_000 });
     const elapsedMint = await elapsed.service.mint('case_demo', CASE_OFFICER);

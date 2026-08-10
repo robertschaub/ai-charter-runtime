@@ -18,6 +18,7 @@ import {
   mandateState,
   modelCard,
   modelCallOpenRecord,
+  proposalRevisionSourceProjection,
   modelId,
   modelSelectionCheckRecord,
   modelSelectionObservation,
@@ -148,6 +149,7 @@ export const modelCallStart = z
   .object({
     call: modelCallOpenRecord,
     projection: conversationProjection,
+    revision_source: proposalRevisionSourceProjection.nullable().default(null),
   })
   .strict();
 

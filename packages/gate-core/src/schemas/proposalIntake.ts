@@ -15,6 +15,7 @@ import {
   worldId,
 } from './common.js';
 import { systemUseDecisionReference } from './systemUseDecision.js';
+import { proposalRevisionCallBinding } from './proposalRevision.js';
 
 const boundedText = z.string().min(1).max(4_096);
 const boundedOptionalText = z.string().max(4_096);
@@ -119,6 +120,7 @@ export const proposalIntakeRecord = z
     projection_item_ids: uniqueNonEmptyIds,
     output_digest: hexDigest,
     proposal_schema_digest: hexDigest,
+    revision_preparation_id: id.nullable().default(null),
     issued_at: timestamp,
     expires_at: timestamp,
     state: proposalIntakeState,
@@ -185,10 +187,24 @@ export const proposalOriginRecord = z
     evaluator_build_id: z.string().min(1),
     service: id,
     action_class: classToken,
+    continuation: z
+      .object({
+        preparation_id: id,
+        source_proposal_id: id,
+        source_ruling_id: id,
+        source_escalation_id: id,
+        response_record_entry_id: id,
+      })
+      .strict()
+      .nullable()
+      .default(null),
     frozen_at: timestamp,
   })
   .strict();
 export type ProposalOriginRecord = z.infer<typeof proposalOriginRecord>;
+
+/** Intake linkage is null for an initial proposal and opaque for a revision call. */
+export const proposalIntakeRevisionBinding = proposalRevisionCallBinding.nullable().default(null);
 
 export const proposalIntakeReference = z
   .object({

@@ -2,7 +2,11 @@
 /** ADR-008 system-use decision digest, replay-safe lifecycle, and fail-closed resolver. */
 import { canonicalize } from './canonicalize.js';
 import { digestFor, verifyDigest } from './hash.js';
-import { outputReleaseInvalidationOps, proposalIntakeInvalidationOps } from './conversationInvalidation.js';
+import {
+  outputReleaseInvalidationOps,
+  proposalIntakeInvalidationOps,
+  proposalRevisionPreparationInvalidationOps,
+} from './conversationInvalidation.js';
 import {
   systemUseDecisionRecord,
   systemUseDecisionReference,
@@ -393,6 +397,12 @@ export class SystemUseDecisionService {
             'binding-invalidated',
             at,
           ),
+          ...proposalRevisionPreparationInvalidationOps(
+            state,
+            (preparation) => verifyDigest(preparation.system_use_decision.record_digest, record.trace.record_digest),
+            'authority-changed',
+            at,
+          ),
           { op: 'system_use_decision.transition', decision_id: decisionId, version, status, changed_at: at },
         ],
         result: undefined,
@@ -422,6 +432,12 @@ export class SystemUseDecisionService {
             state,
             (intake) => verifyDigest(intake.system_use_decision.record_digest, prior.trace.record_digest),
             'binding-invalidated',
+            at,
+          ),
+          ...proposalRevisionPreparationInvalidationOps(
+            state,
+            (preparation) => verifyDigest(preparation.system_use_decision.record_digest, prior.trace.record_digest),
+            'authority-changed',
             at,
           ),
           {

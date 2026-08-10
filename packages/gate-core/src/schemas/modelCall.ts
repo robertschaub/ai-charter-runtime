@@ -6,6 +6,7 @@ import { cardSlug, hexDigest, id, integer, modelId, timestamp, worldId } from '.
 import { modelCallIngressBinding, outputReleaseReference } from './conversationTransport.js';
 import { modelOutputAdmission, modelOutputAdmissionRequest } from './output.js';
 import { proposalCallBinding, proposalIntakeReference } from './proposalIntake.js';
+import { proposalRevisionCallBinding } from './proposalRevision.js';
 import { systemUseDecisionReference } from './systemUseDecision.js';
 
 export const MODEL_CALL_REPORTABLE_FAILURE_REASONS = [
@@ -28,11 +29,19 @@ export const modelCallBeginRequest = z
     selection_id: id,
     ingress_binding: modelCallIngressBinding.nullable().default(null),
     proposal_binding: proposalCallBinding.nullable().default(null),
+    revision_binding: proposalRevisionCallBinding.nullable().default(null),
   })
   .strict()
-  .refine((request) => request.ingress_binding === null || request.proposal_binding === null, {
+  .refine(
+    (request) =>
+      Number(request.ingress_binding !== null) +
+        Number(request.proposal_binding !== null) +
+        Number(request.revision_binding !== null) <=
+      1,
+    {
     message: 'model call purposes are mutually exclusive',
-  });
+    },
+  );
 export type ModelCallBeginRequest = z.infer<typeof modelCallBeginRequest>;
 
 const modelCallBinding = z.object({
@@ -53,6 +62,7 @@ const modelCallBinding = z.object({
   projection_item_ids: z.array(id).default([]),
   ingress_binding: modelCallIngressBinding.nullable().default(null),
   proposal_binding: proposalCallBinding.nullable().default(null),
+  revision_binding: proposalRevisionCallBinding.nullable().default(null),
   session_id: id.nullable().default(null),
   system_use_decision: systemUseDecisionReference,
   opened_at: timestamp,
@@ -60,10 +70,18 @@ const modelCallBinding = z.object({
 });
 
 function refinePurposeBinding(
-  record: { ingress_binding: unknown | null; proposal_binding: unknown | null; session_id: string | null },
+  record: {
+    ingress_binding: unknown | null;
+    proposal_binding: unknown | null;
+    revision_binding: unknown | null;
+    session_id: string | null;
+  },
   context: z.RefinementCtx,
 ): void {
-  const purposeCount = Number(record.ingress_binding !== null) + Number(record.proposal_binding !== null);
+  const purposeCount =
+    Number(record.ingress_binding !== null) +
+    Number(record.proposal_binding !== null) +
+    Number(record.revision_binding !== null);
   if (purposeCount > 1 || (purposeCount === 0) !== (record.session_id === null)) {
     context.addIssue({
       code: z.ZodIssueCode.custom,

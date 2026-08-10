@@ -225,7 +225,7 @@ headless deterministic-test interface and is not widened or accepted from a dyna
 
 M5.11 does not change screening-signal or dialogue-routing semantics. A current policy deny or escalation is
 recorded and stops the sequence. ADR-004's focused question, standing validation, response, and proposal-revision
-continuation are completed separately in M5.12. ADR-014 is the proposed definition for that bridge; it reuses this
+continuation are completed separately in M5.12. ADR-014 is the reviewed definition for that bridge; it reuses this
 ADR's proposal call, intake, freeze, and precommit boundaries without widening the M5.11 implementation.
 
 ### 6. The browser sees a redacted proposal and gate evidence, never raw model JSON
@@ -321,8 +321,8 @@ conversation-bound, model-proposed,
 authorization-frozen artifact and fixed pre-commit evidence sequence. It does not make a proposal true, safe,
 lawful, approved, committed, or executed, and it does not complete M5.
 
-ADR-014 proposes, but does not implement, semantic `unconfirmed_inference_as_fact` dialogue-trigger routing and
-response-driven proposal revision (M5.12). Commit/effect initiation from the dynamic case session, broader ingestion
+The M5.12 candidate implements ADR-014's semantic `unconfirmed_inference_as_fact` dialogue-trigger routing and
+response-driven proposal revision. Commit/effect initiation from the dynamic case session, broader ingestion
 roles, retention and deletion propagation, live provider runs, and M6 capture remain deferred. The two non-blocking
 M5.10 transaction-shape hardening observations remain separately deferred rather than being hidden inside this
 slice.

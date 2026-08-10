@@ -10,6 +10,7 @@ import {
   conversationMutationInvalidationOps,
   outputReleaseInvalidationOps,
   proposalIntakeInvalidationOps,
+  proposalRevisionPreparationInvalidationOps,
 } from './conversationInvalidation.js';
 import {
   frozenProposal,
@@ -46,6 +47,7 @@ import {
   type ModelCallAccessEvidence,
   type ModelSelectionAccessEvidence,
   type ProposalIntakeAccessEvidence,
+  type ProposalRevisionPreparationProjection,
   type PatternEvent,
   type RecordEntry,
   type ScreeningSignal,
@@ -84,7 +86,9 @@ export class AuthorizationError extends Error {
 }
 
 export interface IdFactory {
-  next(prefix: 'rul' | 'nce' | 'rsv' | 'esc' | 'pat' | 'rec' | 'acc' | 'rev' | 'cmt' | 'eff' | 'sel' | 'itm'): string;
+  next(
+    prefix: 'rul' | 'nce' | 'rsv' | 'esc' | 'pat' | 'rec' | 'acc' | 'rev' | 'cmt' | 'eff' | 'sel' | 'itm' | 'turn',
+  ): string;
 }
 
 const defaultIds: IdFactory = {
@@ -291,7 +295,8 @@ export interface RecordAccessInput {
     | ModelCallAccessEvidence
     | ModelSelectionAccessEvidence
     | ConversationTransportAccessEvidence
-    | ProposalIntakeAccessEvidence;
+    | ProposalIntakeAccessEvidence
+    | ProposalRevisionPreparationProjection;
   readonly suppressedCount?: number;
   readonly suppressionWindowMs?: number;
   readonly suppressionFinal?: boolean;
@@ -1000,6 +1005,7 @@ export class AuthorizationCore {
               ...invalidationOps(state, () => true, 'policy-reload'),
               ...outputReleaseInvalidationOps(state, () => true, 'policy-reload', at),
               ...proposalIntakeInvalidationOps(state, () => true, 'binding-invalidated', at),
+              ...proposalRevisionPreparationInvalidationOps(state, () => true, 'authority-changed', at),
               {
                 op: 'policy.reload' as const,
                 policy: {
@@ -1029,6 +1035,7 @@ export class AuthorizationCore {
               ...invalidationOps(state, () => true, 'policy-reload'),
               ...outputReleaseInvalidationOps(state, () => true, 'policy-reload', at),
               ...proposalIntakeInvalidationOps(state, () => true, 'binding-invalidated', at),
+              ...proposalRevisionPreparationInvalidationOps(state, () => true, 'authority-changed', at),
               {
                 op: 'policy.reload' as const,
                 policy: {
@@ -1131,6 +1138,12 @@ export class AuthorizationCore {
           'binding-invalidated',
           at,
         ),
+        ...proposalRevisionPreparationInvalidationOps(
+          state,
+          (preparation) => preparation.mandate_id === parsed.mandate_id,
+          'authority-changed',
+          at,
+        ),
         { op: 'mandate.amend', mandate: parsed },
       ],
       result: undefined };
@@ -1156,6 +1169,13 @@ export class AuthorizationCore {
           state,
           (intake) => intake.mandate_id === mandateId && intake.mandate_version === version,
           'binding-invalidated',
+          at,
+        ),
+        ...proposalRevisionPreparationInvalidationOps(
+          state,
+          (preparation) =>
+            preparation.mandate_id === mandateId && preparation.mandate_version === version,
+          'authority-changed',
           at,
         ),
         { op: 'mandate.revoke', mandate_id: mandateId, version, revoked_at: at },
@@ -1191,6 +1211,7 @@ export class AuthorizationCore {
   async ruleProposalWithCurrentness(
     input: RuleProposalInput,
     assertCurrent: (state: WorldState, at: string) => void,
+    afterBuild?: (state: WorldState, at: string, result: RuleProposalResult) => readonly WalOp[],
   ): Promise<RuleProposalResult> {
     if (input.actor.credential !== 'proc:orchestrator') {
       throw new AuthorizationError('unauthorized-actor', 'only the orchestrator may submit a proposal for ruling');
@@ -1200,7 +1221,7 @@ export class AuthorizationCore {
     const screening = await this.#screeningEvidence(proposal, input.gate, input.caseId);
     const completed = await this.#store.transactWithState('native_precommit_ruling_issue', input.actor, (state, at) => {
       assertCurrent(state, at);
-      return this.#buildRuling(
+      const built = this.#buildRuling(
         {
           ...input,
           proposal,
@@ -1211,6 +1232,10 @@ export class AuthorizationCore {
         state,
         at,
       );
+      return {
+        ops: [...built.ops, ...(afterBuild?.(state, at, built.result) ?? [])],
+        result: built.result,
+      };
     });
     return completed.result;
   }
@@ -1338,7 +1363,7 @@ export class AuthorizationCore {
       const wouldExceed = Object.values(counters).some(
         (counter) => counter.limit !== null && counter.current + counter.delta > counter.limit,
       );
-      const evaluation =
+      let evaluation =
         wouldExceed && policyEvaluation.verdict === 'allow'
           ? {
               verdict: 'escalate' as const,
@@ -1348,6 +1373,55 @@ export class AuthorizationCore {
               interventionContract: policy.policy.aggregate_ceiling_contract,
             }
           : policyEvaluation;
+      let dialogueItemRef: string | null = null;
+      const inferenceSignals = screening.signals.filter(
+        (signal) => signal.signal === 'unconfirmed_inference_as_fact',
+      );
+      if (input.gate === 'verify' && inferenceSignals.length > 0) {
+        const suspectIds = new Set(
+          inferenceSignals.flatMap((signal) => (signal.suspect_item_id == null ? [] : [signal.suspect_item_id])),
+        );
+        const suspectId = suspectIds.size === 1 ? [...suspectIds][0] : undefined;
+        const origin = state.proposalOrigins.get(proposal.proposal_id);
+        const sourceEntry = suspectId === undefined ? undefined : state.storeItems.get(suspectId);
+        const proposalItem = suspectId === undefined
+          ? undefined
+          : proposal.derived_claims.find((item) => item.id === suspectId);
+        const safeDialogue =
+          suspectId !== undefined &&
+          inferenceSignals.every((signal) => signal.suspect_item_id === suspectId) &&
+          input.caseId !== undefined &&
+          origin !== undefined &&
+          origin.case_id === input.caseId &&
+          origin.proposal_hash === proposal.proposal_hash &&
+          origin.conversation_version === (state.conversationVersionByCase.get(input.caseId) ?? 0) &&
+          origin.projection_item_ids.includes(suspectId) &&
+          sourceEntry !== undefined &&
+          sourceEntry.case_id === input.caseId &&
+          sourceEntry.item.store === 'inferred' &&
+          proposalItem !== undefined &&
+          canonicalize(sourceEntry.item) === canonicalize(proposalItem);
+        if (safeDialogue && proposalItem !== undefined) {
+          dialogueItemRef = proposalItem.id;
+          evaluation = {
+            verdict: 'escalate',
+            uxClass: 'stop',
+            matchedRuleId: 'escalate-verify-unconfirmed-inference',
+            reason: `What cited evidence confirms, corrects, or narrows this inference: "${proposalItem.text}"?`,
+            interventionContract:
+              policy.policy.rules.find((rule) => rule.id === 'escalate-verify-unconfirmed-inference')
+                ?.intervention_contract ?? null,
+          };
+        } else {
+          evaluation = {
+            verdict: 'escalate',
+            uxClass: 'stop',
+            matchedRuleId: 'default:unconfirmed-inference-invalid',
+            reason: 'A screening signal requires review, but no bounded dialogue item could be established.',
+            interventionContract: policy.policy.default_escalation_contract,
+          };
+        }
+      }
       if (systemUseDecision === null && evaluation.verdict !== 'deny') {
         throw new AuthorizationError('system-use-unavailable', 'current system-use decision is unavailable');
       }
@@ -1456,6 +1530,7 @@ export class AuthorizationCore {
             case_id: dialogueContract ? (input.caseId ?? null) : null,
             ruling_id: rulingId,
             source_commitment_id: null,
+            dialogue_item_ref: dialogueItemRef,
             frozen_proposal_hash: proposal.proposal_hash,
             contract,
             opened_at: at,
@@ -1510,6 +1585,12 @@ export class AuthorizationCore {
               state,
               (intake) => intake.mandate_id === defects.mandate?.mandate_id,
               'binding-invalidated',
+              at,
+            ),
+            ...proposalRevisionPreparationInvalidationOps(
+              state,
+              (preparation) => preparation.mandate_id === defects.mandate?.mandate_id,
+              'authority-changed',
               at,
             ),
           );
@@ -2090,10 +2171,12 @@ export class AuthorizationCore {
             (item) => item.id === itemRef,
           );
           if (
+            (escalation.dialogue_item_ref !== null && itemRef !== escalation.dialogue_item_ref) ||
             sourceEntry === undefined ||
             sourceEntry.case_id !== escalation.case_id ||
             proposalItem === undefined ||
             canonicalize(sourceEntry.item) !== canonicalize(proposalItem) ||
+            (escalation.dialogue_item_ref !== null && sourceEntry.item.store !== 'inferred') ||
             (disposition === 'confirm' && sourceEntry.item.store !== 'inferred') ||
             (disposition === 'permit' && sourceEntry.item.store === 'inferred')
           ) {
@@ -2140,7 +2223,11 @@ export class AuthorizationCore {
           const responderOrigin =
             responderRole === 'applicant' ? 'applicant' : responderRole === 'case_officer' ? 'officer' : null;
           if (responderOrigin === null) return refuse('invalid-response');
-          const turn = `dialogue_${escalationId}`;
+          // The provider projection may expose a conversation turn as semantic context.
+          // Keep that identifier domain-separated from authorization-owned escalation
+          // evidence so a revision call cannot recover the hidden escalation id through
+          // an otherwise permitted dialogue-response item.
+          const turn = this.#ids.next('turn');
           let answerItemId: string | null = null;
           if (answerText !== undefined && answerText.length > 0) {
             answerItemId = this.#ids.next('itm');
@@ -3011,6 +3098,7 @@ export class AuthorizationCore {
               case_id: null,
               ruling_id: commitment.ruling_id,
               source_commitment_id: commitmentId,
+              dialogue_item_ref: null,
               frozen_proposal_hash: commitment.frozen_proposal_hash,
               contract,
               opened_at: at,

@@ -24,7 +24,7 @@ cannot answer or consume a dialogue escalation, create `confirmed` or `permitted
 requirement, or inherit the responder authority of this direct role-token channel. Only this ADR's
 authorization-origin response route can perform those transitions.
 
-**Proposed amendment (M5.12 native dialogue continuation):** ADR-014 binds a Verify-stage
+**M5.12 implementation candidate (native dialogue continuation):** reviewed ADR-014 binds a Verify-stage
 `unconfirmed_inference_as_fact` trigger to one exact active inferred item in the frozen proposal. Authorization
 derives the focused question, standing, route, and six-field contract; the signal and caller supply none of them.
 Every state-changing response must name that exact bound item. After an eligible response, one explicit
@@ -108,7 +108,7 @@ item stays unconfirmed, uncertainty carried forward; the Stop remains unless a d
 within existing authority exists. `route` → recorded routing obligation plus a fresh escalation to the named
 role; the case parks. No dialogue disposition ever issues an `allow` ruling directly.
 
-ADR-014's proposed native continuation preserves that rule. `confirm`, `correct`, or `narrow` may make a separate,
+ADR-014's native continuation preserves that rule. `confirm`, `correct`, or `narrow` may make a separate,
 short-lived revision preparation available, but only a later explicit case-console gesture can consume it into a
 model call. Authorization derives the source action and next revision, and the revised proposal reruns
 Authorize → Submit → Verify. An escalate or final Verify allow may claim the source successor atomically; a deny

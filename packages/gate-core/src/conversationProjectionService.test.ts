@@ -644,6 +644,19 @@ describe('M5.2 authorization-resolved conversation projections', () => {
         { ...base, suspect_item_ids: ['item_b'] },
       ]).success,
     ).toBe(false);
+    expect(screeningFixtureSet.safeParse([{
+      ...base,
+      suspect_item_ids: ['item_a'],
+      signals: [{
+        kind: 'screening_signal',
+        signal: 'unconfirmed_inference_as_fact',
+        suspect_item_id: 'item_b',
+        confidence_pct: 100,
+        rationale: 'Synthetic inconsistent fixture.',
+        model_id: 'screening-model',
+        model_version_reported: 'screening-model-v1',
+      }],
+    }]).success).toBe(false);
   });
 
   it('fixes acting scope internally and intersects the current mandate with the reloaded signed card', async () => {

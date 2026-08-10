@@ -26,6 +26,7 @@ import { modelCallAccessEvidence } from './modelCall.js';
 import { modelSelectionAccessEvidence } from './modelSelection.js';
 import { conversationTransportAccessEvidence } from './conversationTransport.js';
 import { proposalIntakeAccessEvidence } from './proposalIntake.js';
+import { proposalRevisionPreparationProjection } from './proposalRevision.js';
 import { systemUseDecisionReference } from './systemUseDecision.js';
 
 export const EFFECT_OUTCOMES = ['success', 'failed', 'no-effect', 'unknown-reconciliation-required'] as const;
@@ -314,6 +315,7 @@ export const accessEntry = z
         modelSelectionAccessEvidence,
         conversationTransportAccessEvidence,
         proposalIntakeAccessEvidence,
+        proposalRevisionPreparationProjection,
       ])
       .optional(),
   })
@@ -345,7 +347,9 @@ export const accessEntry = z
     if (entry.operation_evidence !== undefined) {
       const evidence = entry.operation_evidence;
       const expectedRoute =
-        evidence.kind === 'proposal_intake_consumption_result'
+        evidence.kind === 'proposal_revision_preparation'
+          ? 'POST /w/{world_id}/cases/{case_id}/proposal-runs/{id}/revision-preparations'
+          : evidence.kind === 'proposal_intake_consumption_result'
           ? 'POST /w/{world_id}/proposal-intakes/{id}/consume'
           : evidence.kind === 'proposal_intake_status'
             ? 'GET /w/{world_id}/proposal-intakes/{id}'
@@ -374,7 +378,7 @@ export const accessEntry = z
         entry.route !== expectedRoute ||
         entry.authenticated_actor !== 'proc:orchestrator' ||
         entry.outcome !== 'served' ||
-        entry.http_status !== 200
+        entry.http_status !== (evidence.kind === 'proposal_revision_preparation' ? 201 : 200)
       ) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,

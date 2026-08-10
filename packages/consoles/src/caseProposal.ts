@@ -9,12 +9,14 @@ import {
   proposalPrecommitGateProjection,
   proposalPrecommitProjection,
   proposalRunProcessProjection,
+  proposalRevisionContinuationProjection,
   timestamp,
   type ConversationProcessProjection,
   type CurrentModelSelectionProjection,
   type ModelSelectionTarget,
   type ProposalPrecommitProjection,
   type ProposalRunProcessProjection,
+  type ProposalRevisionPreparationProjection,
 } from 'gate-core';
 import { z } from 'zod';
 
@@ -45,6 +47,7 @@ export const browserProposalRunStatus = z
     proposal: browserProposal.optional(),
     gates: z.array(browserGate).max(3),
     escalation_id: id.optional(),
+    continuation: proposalRevisionContinuationProjection,
   })
   .strict()
   .superRefine((value, context) => {
@@ -61,6 +64,7 @@ export const browserProposalRunStatus = z
 export type BrowserProposalRunStatus = z.infer<typeof browserProposalRunStatus>;
 
 interface ProposalRecord {
+  readonly kind: 'initial' | 'revision';
   readonly preparationId: string;
   readonly proposalRunId: string;
   readonly turnId: string;
@@ -70,6 +74,8 @@ interface ProposalRecord {
   readonly caseId: string;
   readonly authorizationBootId: string;
   readonly conversationVersion: number;
+  readonly revisionPreparationId: string | null;
+  readonly sourceProposalRunId: string | null;
   readonly selectionId: string;
   readonly target: ModelSelectionTarget;
   readonly issuedAt: string;
@@ -77,13 +83,22 @@ interface ProposalRecord {
   state: 'prepared' | 'running' | 'failed';
 }
 
-export interface BegunProposalRun {
+export type BegunProposalRun = {
+  readonly kind: 'initial';
   readonly proposalRunId: string;
   readonly turnId: string;
   readonly conversationVersion: number;
   readonly selectionId: string;
   readonly target: ModelSelectionTarget;
-}
+} | {
+  readonly kind: 'revision';
+  readonly proposalRunId: string;
+  readonly sourceProposalRunId: string;
+  readonly turnId: string;
+  readonly preparationId: string;
+  readonly selectionId: string;
+  readonly target: ModelSelectionTarget;
+};
 
 export interface CaseProposalStoreOptions {
   readonly ttlMs?: number;
@@ -151,6 +166,7 @@ export function toBrowserProposalRunStatus(
         },
       })),
       ...(value.escalation_id === null ? {} : { escalation_id: value.escalation_id }),
+      continuation: value.continuation,
     });
   }
   const value = proposalRunProcessProjection.parse(input);
@@ -158,6 +174,7 @@ export function toBrowserProposalRunStatus(
     proposal_run_id: value.proposal_run_id,
     state: value.state === 'issued' ? 'running' : value.state === 'consumed' ? 'frozen' : 'failed',
     gates: [],
+    continuation: { state: 'unavailable', source_proposal_run_id: null },
   });
 }
 
@@ -225,6 +242,7 @@ export class CaseProposalStore {
       requested_id: current.selection.target.requested_id,
     });
     const record: ProposalRecord = {
+      kind: 'initial',
       preparationId,
       proposalRunId,
       turnId,
@@ -234,6 +252,8 @@ export class CaseProposalStore {
       caseId: session.case_id,
       authorizationBootId: session.authorization_boot_id,
       conversationVersion: conversation.conversation_version,
+      revisionPreparationId: null,
+      sourceProposalRunId: null,
       selectionId: current.selection.selection_id,
       target,
       issuedAt: at,
@@ -246,6 +266,83 @@ export class CaseProposalStore {
     return browserProposalPreparation.parse({ preparation_id: preparationId, proposal_run_id: proposalRunId, target, issued_at: at, expires_at: expiresAt });
   }
 
+  registerRevision(
+    session: CaseSessionRecord,
+    current: CurrentModelSelectionProjection,
+    preparationInput: ProposalRevisionPreparationProjection,
+  ): BrowserProposalPreparation {
+    const preparation = preparationInput;
+    const at = timestamp.parse(this.#now());
+    if (
+      session.state !== 'active' ||
+      session.expires_at <= at ||
+      current.state !== 'selected' ||
+      current.authorization_boot_id !== session.authorization_boot_id ||
+      current.case_id !== session.case_id ||
+      current.selection.world_id !== session.world_id ||
+      current.selection.case_id !== session.case_id ||
+      current.selection.target.card_id !== preparation.target.card_id ||
+      current.selection.target.card_version !== preparation.target.card_version ||
+      current.selection.target.requested_id !== preparation.target.requested_id ||
+      preparation.expires_at <= at
+    ) throw new Error('proposal-revision-preparation-binding-invalid');
+    const existingRunId = this.#runByPreparation.get(preparation.preparation_id);
+    const existing = existingRunId === undefined ? undefined : this.#recordsByRun.get(existingRunId);
+    if (
+      existing !== undefined &&
+      existing.kind === 'revision' &&
+      existing.proposalRunId === preparation.proposal_run_id &&
+      sameSession(existing, session)
+    ) {
+      return browserProposalPreparation.parse({
+        preparation_id: existing.preparationId,
+        proposal_run_id: existing.proposalRunId,
+        target: existing.target,
+        issued_at: existing.issuedAt,
+        expires_at: existing.expiresAt,
+      });
+    }
+    if (existingRunId !== undefined || this.#recordsByRun.has(preparation.proposal_run_id)) {
+      throw new Error('proposal revision preparation already registered');
+    }
+    const priorPreparation = this.#currentPreparationBySession.get(session.session_id);
+    const priorRun = priorPreparation === undefined ? undefined : this.#runByPreparation.get(priorPreparation);
+    const prior = priorRun === undefined ? undefined : this.#recordsByRun.get(priorRun);
+    if (prior?.state === 'prepared') this.#deletePrepared(prior);
+    if (this.#recordsByRun.size >= this.#maxRecords) throw new Error('proposal-preparation-capacity');
+    const turnId = id.parse(this.#nextTurnId());
+    const target = modelSelectionTarget.parse(preparation.target);
+    const record: ProposalRecord = {
+      kind: 'revision',
+      preparationId: preparation.preparation_id,
+      proposalRunId: preparation.proposal_run_id,
+      turnId,
+      sessionId: session.session_id,
+      sessionExpiresAt: session.expires_at,
+      worldId: session.world_id,
+      caseId: session.case_id,
+      authorizationBootId: session.authorization_boot_id,
+      conversationVersion: 0,
+      revisionPreparationId: preparation.preparation_id,
+      sourceProposalRunId: preparation.source_proposal_run_id,
+      selectionId: current.selection.selection_id,
+      target,
+      issuedAt: preparation.issued_at,
+      expiresAt: preparation.expires_at,
+      state: 'prepared',
+    };
+    this.#recordsByRun.set(record.proposalRunId, record);
+    this.#runByPreparation.set(record.preparationId, record.proposalRunId);
+    this.#currentPreparationBySession.set(record.sessionId, record.preparationId);
+    return browserProposalPreparation.parse({
+      preparation_id: record.preparationId,
+      proposal_run_id: record.proposalRunId,
+      target,
+      issued_at: record.issuedAt,
+      expires_at: record.expiresAt,
+    });
+  }
+
   beginUse(preparationIdInput: string, session: CaseSessionRecord): BegunProposalRun | null {
     const preparationId = id.parse(preparationIdInput);
     const runId = this.#runByPreparation.get(preparationId);
@@ -255,26 +352,53 @@ export class CaseProposalStore {
     record.state = 'running';
     this.#runByPreparation.delete(preparationId);
     this.#currentPreparationBySession.delete(record.sessionId);
-    return {
-      proposalRunId: record.proposalRunId,
-      turnId: record.turnId,
-      conversationVersion: record.conversationVersion,
-      selectionId: record.selectionId,
-      target: record.target,
-    };
+    return record.kind === 'initial'
+      ? {
+          kind: 'initial',
+          proposalRunId: record.proposalRunId,
+          turnId: record.turnId,
+          conversationVersion: record.conversationVersion,
+          selectionId: record.selectionId,
+          target: record.target,
+        }
+      : {
+          kind: 'revision',
+          proposalRunId: record.proposalRunId,
+          sourceProposalRunId: record.sourceProposalRunId!,
+          turnId: record.turnId,
+          preparationId: record.revisionPreparationId!,
+          selectionId: record.selectionId,
+          target: record.target,
+        };
   }
 
   fail(runIdInput: string): BrowserProposalRunStatus {
     const record = this.#recordsByRun.get(id.parse(runIdInput));
     if (record === undefined) throw new Error('proposal-run-missing');
     record.state = 'failed';
-    return browserProposalRunStatus.parse({ proposal_run_id: record.proposalRunId, state: 'failed', gates: [] });
+    return browserProposalRunStatus.parse({
+      proposal_run_id: record.proposalRunId,
+      state: 'failed',
+      gates: [],
+      continuation: {
+        state: 'unavailable',
+        source_proposal_run_id: record.sourceProposalRunId,
+      },
+    });
   }
 
   localStatus(runIdInput: string, session: CaseSessionRecord): BrowserProposalRunStatus | null {
     const record = this.#recordsByRun.get(id.parse(runIdInput));
     if (record === undefined || !sameSession(record, session)) return null;
-    return browserProposalRunStatus.parse({ proposal_run_id: record.proposalRunId, state: record.state, gates: [] });
+    return browserProposalRunStatus.parse({
+      proposal_run_id: record.proposalRunId,
+      state: record.state,
+      gates: [],
+      continuation: {
+        state: record.kind === 'revision' && record.state !== 'failed' ? 'prepared' : 'unavailable',
+        source_proposal_run_id: record.sourceProposalRunId,
+      },
+    });
   }
 
   discardResolved(runIdInput: string): void {

@@ -44,6 +44,10 @@ export interface BrowserProposalRunStatus {
   readonly proposal?: Record<string, unknown>;
   readonly gates: readonly Record<string, unknown>[];
   readonly escalation_id?: string;
+  readonly continuation: {
+    readonly state: 'unavailable' | 'response-required' | 'available' | 'prepared' | 'continued' | 'parked';
+    readonly source_proposal_run_id: string | null;
+  };
 }
 
 export interface BrowserModelTurnStatus {
@@ -581,6 +585,14 @@ const PROPOSAL_GATES = new Set(['authorize', 'submit', 'verify']);
 const PROPOSAL_VERDICTS = new Set(['allow', 'deny', 'escalate']);
 const PROPOSAL_UX = new Set(['silent', 'flag', 'stop']);
 const PROPOSAL_RULING_STATES = new Set(['issued', 'consumed', 'invalidated', 'expired']);
+const PROPOSAL_CONTINUATION_STATES = new Set([
+  'unavailable',
+  'response-required',
+  'available',
+  'prepared',
+  'continued',
+  'parked',
+]);
 
 function validProposalProjection(value: unknown): value is Record<string, unknown> {
   if (
@@ -627,7 +639,7 @@ function validProposalProjection(value: unknown): value is Record<string, unknow
 export function parseBrowserProposalRunStatus(value: unknown): BrowserProposalRunStatus | null {
   if (
     !isRecord(value) ||
-    !hasExactKeys(value, ['proposal_run_id', 'state', 'gates'], ['proposal', 'escalation_id']) ||
+    !hasExactKeys(value, ['proposal_run_id', 'state', 'gates', 'continuation'], ['proposal', 'escalation_id']) ||
     typeof value['proposal_run_id'] !== 'string' || !OPAQUE_ID.test(value['proposal_run_id']) ||
     typeof value['state'] !== 'string' || !PROPOSAL_STATES.has(value['state']) ||
     !Array.isArray(value['gates']) || value['gates'].length > 3 ||
@@ -640,7 +652,14 @@ export function parseBrowserProposalRunStatus(value: unknown): BrowserProposalRu
       typeof gateValue['reason'] === 'string' &&
       typeof gateValue['status'] === 'string' && PROPOSAL_RULING_STATES.has(gateValue['status']) &&
       isRecord(gateValue['validity_window']) && hasExactKeys(gateValue['validity_window'], ['not_before', 'not_after']) &&
-      validTimestamp(gateValue['validity_window']['not_before']) && validTimestamp(gateValue['validity_window']['not_after']))
+       validTimestamp(gateValue['validity_window']['not_before']) && validTimestamp(gateValue['validity_window']['not_after'])) ||
+    !isRecord(value['continuation']) ||
+    !hasExactKeys(value['continuation'], ['state', 'source_proposal_run_id']) ||
+    typeof value['continuation']['state'] !== 'string' ||
+    !PROPOSAL_CONTINUATION_STATES.has(value['continuation']['state']) ||
+    (value['continuation']['source_proposal_run_id'] !== null &&
+      (typeof value['continuation']['source_proposal_run_id'] !== 'string' ||
+        !OPAQUE_ID.test(value['continuation']['source_proposal_run_id'])))
   ) return null;
   const proposal = value['proposal'];
   const state = value['state'] as BrowserProposalRunStatus['state'];
@@ -653,6 +672,10 @@ export function parseBrowserProposalRunStatus(value: unknown): BrowserProposalRu
     ...(proposal === undefined ? {} : { proposal: proposal as Record<string, unknown> }),
     gates: value['gates'] as Record<string, unknown>[],
     ...(value['escalation_id'] === undefined ? {} : { escalation_id: value['escalation_id'] as string }),
+    continuation: {
+      state: value['continuation']['state'] as BrowserProposalRunStatus['continuation']['state'],
+      source_proposal_run_id: value['continuation']['source_proposal_run_id'] as string | null,
+    },
   };
 }
 
@@ -660,7 +683,9 @@ function renderProposalStatus(value: BrowserProposalRunStatus): void {
   const statusTarget = document.getElementById('proposal-status');
   const evidence = document.getElementById('proposal-evidence');
   if (statusTarget !== null) {
-    statusTarget.textContent = `Proposal run ${value.proposal_run_id}: ${value.state}. This is pre-commit evidence only.`;
+    statusTarget.textContent =
+      `Proposal run ${value.proposal_run_id}: ${value.state}; continuation ${value.continuation.state}. ` +
+      'This is pre-commit evidence only.';
   }
   if (evidence === null) return;
   clearChildren(evidence);
@@ -1052,12 +1077,19 @@ function configureProposalControls(
   caseId: string,
 ): void {
   const prepare = document.getElementById('prepare-proposal');
+  const revise = document.getElementById('prepare-proposal-revision');
   const use = document.getElementById('use-proposal');
   const output = document.getElementById('proposal-status');
-  if (!(prepare instanceof HTMLButtonElement) || !(use instanceof HTMLButtonElement) || current === null) return;
+  if (
+    !(prepare instanceof HTMLButtonElement) ||
+    !(revise instanceof HTMLButtonElement) ||
+    !(use instanceof HTMLButtonElement) ||
+    current === null
+  ) return;
   if (current.state !== 'selected' || current.target === null) {
     activeProposalPreparation = null;
     prepare.disabled = true;
+    revise.disabled = true;
     use.disabled = true;
     if (output !== null) output.textContent = 'Select a configured model lane before preparing a proposal.';
     return;
@@ -1067,7 +1099,50 @@ function configureProposalControls(
     activeProposalPreparation = null;
   }
   prepare.disabled = proposalOperationPending;
+  revise.disabled = true;
   use.disabled = proposalOperationPending || activeProposalPreparation === null;
+
+  const armRevision = (statusValue: BrowserProposalRunStatus): void => {
+    revise.disabled = proposalOperationPending || statusValue.continuation.state !== 'available';
+    revise.onclick = statusValue.continuation.state !== 'available'
+      ? null
+      : () => {
+          if (proposalOperationPending) return;
+          proposalOperationPending = true;
+          activeProposalPreparation = null;
+          prepare.disabled = true;
+          revise.disabled = true;
+          use.disabled = true;
+          if (output !== null) {
+            output.textContent = 'Preparing one response-bound proposal revision. No authority or effect is created.';
+          }
+          void (async () => {
+            const parsed = parseBrowserProposalPreparation(
+              await sameOriginJson(
+                `/w/${world}/cases/${caseId}/proposal-runs/${statusValue.proposal_run_id}/revision-preparations`,
+                {},
+                token,
+              ),
+            );
+            if (parsed === null || targetKey(parsed.target) !== targetKey(target)) {
+              throw new Error('invalid-proposal-revision-preparation');
+            }
+            activeProposalPreparation = parsed;
+            if (output !== null) {
+              output.textContent = 'Revision prepared. Confirm the second step to contact the selected provider.';
+            }
+          })()
+            .catch(() => {
+              if (output !== null) output.textContent = 'The proposal revision could not be prepared.';
+            })
+            .finally(() => {
+              proposalOperationPending = false;
+              prepare.disabled = false;
+              revise.disabled = activeProposalPreparation !== null;
+              use.disabled = activeProposalPreparation === null;
+            });
+        };
+  };
   prepare.onclick = () => {
     if (proposalOperationPending) return;
     proposalOperationPending = true;
@@ -1118,6 +1193,7 @@ function configureProposalControls(
       const parsed = parseBrowserProposalRunStatus(raw);
       if (parsed === null || parsed.proposal_run_id !== prepared.proposalRunId) throw new Error('invalid-proposal-status');
       renderProposalStatus(parsed);
+      armRevision(parsed);
     })()
       .catch(() => {
         if (output !== null) output.textContent = 'The proposal outcome could not be recovered. It was not retried.';
@@ -1465,8 +1541,10 @@ async function mountCaseHandoffConsole(): Promise<void> {
       if (prepareMessage instanceof HTMLButtonElement) prepareMessage.disabled = true;
       if (sendMessage instanceof HTMLButtonElement) sendMessage.disabled = true;
       const prepareProposal = document.getElementById('prepare-proposal');
+      const prepareProposalRevision = document.getElementById('prepare-proposal-revision');
       const useProposal = document.getElementById('use-proposal');
       if (prepareProposal instanceof HTMLButtonElement) prepareProposal.disabled = true;
+      if (prepareProposalRevision instanceof HTMLButtonElement) prepareProposalRevision.disabled = true;
       if (useProposal instanceof HTMLButtonElement) useProposal.disabled = true;
       clearModelTurnSurface('Case session closed; no retained model output remains available.');
       status('Case session closed.');
