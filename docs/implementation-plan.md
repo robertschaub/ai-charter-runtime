@@ -3,8 +3,9 @@
 
 **Status date:** 2026-08-11
 
-**Current milestone:** M4 and bounded M5 complete; the M6 definition is proposed in ADR-016. M6 implementation and
-live capture have not started and remain review- and approval-gated.
+**Current milestone:** M4 and bounded M5 complete; the ADR-016 M6 definition received GO at `582eaeb`. M6.0a's
+anchoring-flow correction is proposed in ADR-003, definition only. M6 implementation and live capture have not
+started and remain review- and approval-gated.
 
 This file tracks implementation status and sequencing in `ai-charter-runtime`. It does not replace or
 reinterpret the authoritative specification. On divergence, the specification and its linked Charter
@@ -43,6 +44,14 @@ The latest cross-model adversarially reviewed implementation is
 or M6 capability changed. Its acceptance ledger preserves four partial and two not-assessed empathy red-line
 families; M5 completion is therefore only the bounded POC milestone, not an assurance or semantic-clearance claim.
 
+ADR-016's documentation-only M6 definition at `582eaebb11c6c5ded5a3882140bed40eb77e1135` (`582eaeb`) received
+**GO — no findings**. Review confirmed the twenty-two-beat two-lane offline pass, the live beats 0–6 and 19–21
+boundary, authorization-owned screening, services-host-only Commit boundary, honest capture provenance, and the
+separate anchoring and `reverse` prerequisites. The maintainer resolved both non-blocking questions: M6.2 must
+enumerate the complete services-host route set, and the procedural capture-review attestation remains explicitly
+`self_declared` and non-authority-bearing. This review clears the definition only; it authorizes no implementation,
+provider call, capture, checkpoint operation, or publication.
+
 The preceding authority-bearing integration baseline is
 `5b27b0e3034fdc05f599f475a0a4c5329ef829ee` (`5b27b0e`). The M5.12 definition at
 `0c3cac948338835c8273257fc3f439f533a4cb48` (`0c3cac9`) received **GO — no findings**. Exact-SHA review of the
@@ -72,10 +81,13 @@ disposition-route guard; the focused `7f2e153` correction was re-reviewed **GO �
 findings** before the acceptance tranche was added.
 One separate earlier Low finding remains deliberately deferred to the anchoring-flow slice below.
 
-**Deferred anchoring-flow finding:** remote verification currently classifies an honest failed push—where
-the latest local checkpoint commit has not reached the remote—as `remote-mismatch` and fails stop. Preserve
-this conservative behaviour until the operational checkpoint commit/push flow is implemented, then
-distinguish an uncommitted latest checkpoint from confirmed remote rollback or mismatch.
+**M6.0a anchoring-flow correction proposed, not implemented:** remote verification currently classifies an honest
+failed push—where the latest local checkpoint commit has not reached the remote—as `remote-mismatch` and fails
+stop. ADR-003 now defines the separately review-gated correction: exact local terminal-attempt evidence plus an
+injectable current-remote observation distinguish a definitely unpushed candidate from rollback, ambiguity, and
+availability. Missing or ambiguous acknowledgment evidence with a reachable remote halts; remote unavailability
+remains an extended-window warning. The existing checkpoint artifact and pointer schemas do not need a new field.
+Until implementation receives GO, preserve the current conservative behaviour.
 
 **Open finding — `reverse` is a disposition token with no behaviour (recorded 2026-08-08, not yet
 triaged).** `reverse` appears in `GENERAL_DISPOSITIONS` in `packages/gate-core/src/schemas/intervention.ts`,
@@ -104,7 +116,7 @@ code one. Either define the disposition or drop it from both enums; do not leave
 | M3 — vertical slice | Implemented | Deterministic authorize → propose → rule → commit-verify → effect → receipt path, adapters, service ledger, and signed cards are present. |
 | M4 — escalation + governance console | **Complete** | Final exact-SHA review of `e326562` returned GO with no findings; the offline acceptance ledger preserves the remaining partial and not-assessed boundaries. |
 | M5 — screening + empathy + switching | **Complete within the bounded POC acceptance** | M5.1–M5.12 culminate in the authority-bearing baseline `5b27b0e`. ADR-015's zero-route M5.13 definition received GO at `a08fa98`; its fixture/test/acceptance implementation at `5251500` received GO with no findings. The acceptance ledger retains four partial and two not-assessed empathy red-line families. This is not assurance, semantic clearance, or deployment readiness. |
-| M6 — full pass + demo capture | **Definition proposed; implementation not started** | [ADR-016](adr/ADR-016-m6-evidence-capture.md) separates authorization-owned live screening, native commitment continuation, deterministic two-lane full pass, and live observational capture. No provider call, checkpoint push, or capture artifact is authorized by the definition. |
+| M6 — full pass + demo capture | **Definition reviewed; prerequisites not implemented** | [ADR-016](adr/ADR-016-m6-evidence-capture.md) received GO at `582eaeb`. M6.0a's anchoring distinction is proposed in ADR-003; M6.0b `reverse` remains parked. No provider call, checkpoint push, or capture artifact is authorized. |
 | M7 — article | Not started | Publication claims follow a reviewed and explicitly published M6 artifact. |
 
 These labels describe repository implementation status, not assurance, certification, or independent
@@ -697,21 +709,27 @@ authorization route. The bounded handoff and session implementation was independ
 
 ## Ordered next slices
 
-1. **Review the M6 definition at an exact committed SHA.** ADR-016 is documentation only and authorizes no code,
-   provider call, capture, checkpoint operation, or publication.
-2. **M6.0 — close two prerequisites separately.** Define and review the anchoring-flow distinction and the
-   unsupported general `reverse` disposition. ADR-016 makes both prerequisites to live completion but does not
-   authorize either correction.
-3. **M6.1 — authorization-owned live screening protocol.** After definition GO and separate maintainer approval,
+1. **Review the M6.0a definition at an exact committed SHA.** ADR-003's acknowledgment evidence, outcome matrix,
+   injectable observation seam, and M6.4 predicate are documentation only. They authorize no code, checkpoint
+   operation, network call, or push.
+2. **Implement M6.0a only after definition GO and separate approval.** Add the pure classifier, read-only injected
+   remote observation, receipt/window projection, and deterministic no-network acceptance matrix. Preserve
+   fail-stop behaviour for ambiguity and rollback; add no writer, retry, recovery, capture, or live operation. Stop
+   for exact-SHA review.
+3. **M6.0b — define `reverse` separately.** Resolve the unsupported general disposition through an upstream-aware
+   documentation decision before any runtime correction. It may not ride in the anchoring tranche.
+4. **M6.1 — authorization-owned live screening protocol.** After both prerequisite reviews and separate maintainer approval,
    add the paused fixed-precommit screening-call lifecycle with synthetic loopback providers only. Stop for
    exact-SHA review; no live provider call is authorized.
-4. **M6.2 — native commitment continuation.** After M6.1 GO and separate approval, implement only
+5. **M6.2 — native commitment continuation.** After M6.1 GO and separate approval, enumerate the complete
+   services-host route set, then implement only
    the proposal-bound execution-preparation → services-host Commit/verify → local mock-effect path with synthetic
    loopback tests. Stop for exact-SHA review.
-5. **M6.3 — offline full pass and capture contract.** After M6.2 GO and separate approval, implement the strict
+6. **M6.3 — offline full pass and capture contract.** After M6.2 GO and separate approval, implement the strict
    plan/artifact schemas, two-lane twenty-two-beat and adversarial matrix, acceptance ledger, gitignored staging,
    sanitization checks, and dry-run assets. No live provider call or push. Stop for exact-SHA review.
-6. **M6.4 — live capture and publication.** Freeze one plan, obtain action-time approval for its bounded acting and
+7. **M6.4 — live capture and publication.** Freeze one plan, require M6.0a's current `remotely_acknowledged`
+   predicate, obtain action-time approval for its bounded acting and
    screening-provider calls and separate approval for checkpoint pushes, capture through `runtime:start`, sanitize and review the
    candidate artifact, then obtain separate commit/push approval. Only a published exact SHA and final cross-model
    README/spec review permit a documentation-only M6 closure.
