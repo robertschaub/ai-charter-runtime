@@ -17,7 +17,7 @@ The authoritative build specification lives in the documentation repository:
 On any divergence, the specification and its linked Charter source documents prevail.
 The exact upstream revision, digest, reviewed runtime baseline, and remaining milestone work are tracked in
 [docs/implementation-plan.md](docs/implementation-plan.md); the offline M4 beat and adversarial mapping is in
-[docs/m4-acceptance.md](docs/m4-acceptance.md), and the bounded M5 implementation-candidate evidence is in
+[docs/m4-acceptance.md](docs/m4-acceptance.md), and the bounded M5 acceptance evidence is in
 [docs/m5-acceptance.md](docs/m5-acceptance.md).
 
 ## Honest limits — read this first
@@ -52,8 +52,9 @@ The exact upstream revision, digest, reviewed runtime baseline, and remaining mi
   recovery, and no model request as part of selection. The M5.12 Verify-stage
   `unconfirmed_inference_as_fact` trigger is the only active native empathy dialogue path; broader semantic
   red-line coverage remains partial or not assessed. ADR-015's definition received exact-SHA GO at `a08fa98`.
-  The bounded M5.13 implementation candidate adds only the exact beat-5 fixture/test and acceptance ledger: no
-  route, model capability, Commit, or effect path. M5 remains in progress pending exact-SHA implementation review.
+  The bounded M5.13 implementation at `5251500` received exact-SHA GO with no findings and completes M5 only for
+  this POC's stated acceptance boundary. It adds only the exact beat-5 fixture/test and acceptance ledger: no route,
+  model capability, Commit, or effect path. Four empathy red-line families remain partial and two not assessed.
 - **A deterministic gate proves declared rules were applied** — not that the rules are lawful, fair, or legitimate.
 - **Commit-token window (interpretive choice).** Commitment binds at `commit-verify`; a revocation landing in the
   token's short TTL is too late for that action by definition. On the stricter reading of "authority in flight",
@@ -175,8 +176,8 @@ path without proposal construction, empathy completion, a live provider run, or 
  fixed precommit sequence, and exact-key browser projection. M5.12, reviewed at `5b27b0e`, implements only ADR-014's focused
  Verify dialogue trigger, direct response basis, revision preparation/use, immutable successor lineage, and repeated
  precommit checks. It makes no live provider claim and never reaches Commit or an executing service. The M5.13
- implementation candidate adds fixture-pinned beat-5 conformance and an honest acceptance map; it requires exact-SHA
- review and does not yet complete M5.
+ implementation reviewed at `5251500` adds fixture-pinned beat-5 conformance and an honest acceptance map. This
+ completes the bounded M5 milestone, not the partial or unassessed areas recorded in that map.
 
 Offline and deterministic verification uses synthetic records and skips only the remote-presence step:
 

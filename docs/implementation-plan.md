@@ -3,7 +3,7 @@
 
 **Status date:** 2026-08-11
 
-**Current milestone:** M4 complete; M5 implementation is in progress.
+**Current milestone:** M4 and bounded M5 complete; M6 has not started and remains approval-gated.
 
 This file tracks implementation status and sequencing in `ai-charter-runtime`. It does not replace or
 reinterpret the authoritative specification. On divergence, the specification and its linked Charter
@@ -36,6 +36,13 @@ URLs, commit, paths, and digests above. A later upstream change does not silentl
 ## Reviewed implementation baseline
 
 The latest cross-model adversarially reviewed implementation is
+`52515009ba2d077a9b2dd01058863c9bd6bf4782` (`5251500`). ADR-015's M5.13 definition at `a08fa98` received
+**GO — no findings**. Exact-SHA review of the fixture/test/acceptance implementation at `5251500` also returned
+**GO — no findings** and confirmed that no production source, policy, schema, route, authority path, Commit/effect,
+or M6 capability changed. Its acceptance ledger preserves four partial and two not-assessed empathy red-line
+families; M5 completion is therefore only the bounded POC milestone, not an assurance or semantic-clearance claim.
+
+The preceding authority-bearing integration baseline is
 `5b27b0e3034fdc05f599f475a0a4c5329ef829ee` (`5b27b0e`). The M5.12 definition at
 `0c3cac948338835c8273257fc3f439f533a4cb48` (`0c3cac9`) received **GO — no findings**. Exact-SHA review of the
 bounded implementation at `4c14e6b30d3b9d2c4ddd58f57d5acff615028b7e` (`4c14e6b`) returned GO with one Low
@@ -45,7 +52,7 @@ aggregate-ceiling escalation behaviour. Its regression proves the legacy Verify 
 opening an escalation or dialogue item. Focused exact-SHA re-review returned **GO — finding closed; no new
 findings** and independently reproduced the red state against the parent.
 
-Reviewed validation is `npm run typecheck` clean, 4 Git-safety hook tests, 378 Vitest tests across 43 files,
+Latest reviewed validation is `npm run typecheck` clean, 4 Git-safety hook tests, 380 Vitest tests across 43 files,
 `git diff --check`, and verification of both unchanged signed cards. Neither implementation nor review moved the
 Charter provenance baseline.
 
@@ -95,7 +102,7 @@ code one. Either define the disposition or drop it from both enums; do not leave
 | M2 — transactional core | Implemented and fault-tested | Authorization remains the single durable serialization point; authority defects fail closed. |
 | M3 — vertical slice | Implemented | Deterministic authorize → propose → rule → commit-verify → effect → receipt path, adapters, service ledger, and signed cards are present. |
 | M4 — escalation + governance console | **Complete** | Final exact-SHA review of `e326562` returned GO with no findings; the offline acceptance ledger preserves the remaining partial and not-assessed boundaries. |
-| M5 — screening + empathy + switching | **In progress** | M5.1 is reviewed at `c1b5eb0`; M5.2 at `1973515`; M5.3 at `1cc7fb2`, with its Low wording finding closed at `2b7b45a`; M5.4 at `b247d5b`; M5.5 durable call evidence at `1d992fa`; M5.6 system-use decisions at `b57c01e`; M5.7 headless governed selection at `442397a`; M5.8 browser initiation at `ff9e438`; M5.9 native provider ingress at `e58d397`; M5.10 conversation ingestion and output release at `8a904f3`; M5.11 governed proposal intake at `8364745`; and M5.12 native dialogue continuation at `5b27b0e`. ADR-015's zero-route M5.13 definition received GO at `a08fa98`; its fixture/test/acceptance implementation is an unreviewed candidate. M6 remains blocked. |
+| M5 — screening + empathy + switching | **Complete within the bounded POC acceptance** | M5.1–M5.12 culminate in the authority-bearing baseline `5b27b0e`. ADR-015's zero-route M5.13 definition received GO at `a08fa98`; its fixture/test/acceptance implementation at `5251500` received GO with no findings. The acceptance ledger retains four partial and two not-assessed empathy red-line families. This is not assurance, semantic clearance, or deployment readiness. |
 | M6–M7 | Not started | Full capture/publication work follows the implementation milestones. |
 
 These labels describe repository implementation status, not assurance, certification, or independent
@@ -641,14 +648,14 @@ received focused re-review with **GO — finding closed; no new findings**. The 
 Git-safety tests, 378/378 Vitest tests across 43 files, both unchanged signed-card verifications, and the regression's
 failure against the unguarded parent.
 
-### M5.13 implementation candidate — bounded empathy conformance and M5 acceptance
+### M5.13 implemented and reviewed at `5251500` — bounded empathy conformance and M5 acceptance
 
 ADR-015 narrows the remaining milestone work to evidence the POC can actually support. Its definition at `a08fa98`
 received **GO — no findings**, and the maintainer approved the bounded implementation. It does not add a semantic
 empathy classifier or dialogue class. The reviewed M5.12 Verify trigger remains the only native empathy dialogue
 path, and its signal remains evidence that can raise allow to Stop + escalate but can never lower a deny.
 
-The implementation candidate is limited to synthetic fixtures, conformance tests, the offline
+The reviewed implementation is limited to synthetic fixtures, conformance tests, the offline
 [`m5-acceptance.md`](m5-acceptance.md) ledger, and truthful status documentation:
 
 - add one exact applicant-document injection fixture and end-to-end Submit test for spec beat 5
@@ -663,10 +670,11 @@ The implementation candidate is limited to synthetic fixtures, conformance tests
   capability.
 
 The fixture-pinned tests expose no production defect, so no production source or interface changes are included.
-M5 remains in progress until an exact-SHA implementation review returns GO. The acceptance ledger retains four
-partial and two not-assessed empathy red-line families rather than upgrading them from milestone status.
+Exact-SHA review of `5251500` returned **GO — no findings**. M5 is complete only within the bounded POC acceptance;
+the ledger retains four partial and two not-assessed empathy red-line families rather than upgrading them from
+milestone status.
 
-Candidate validation is `npm run typecheck` clean, 4/4 Git-safety hook tests, 380/380 Vitest tests across 43 files,
+Reviewed validation is `npm run typecheck` clean, 4/4 Git-safety hook tests, 380/380 Vitest tests across 43 files,
 `git diff --check` clean, and both unchanged signed cards verified. The added fixtures and tests are synthetic and
 offline; no live provider, probe, key operation, card signing, generated-record edit, or push was performed.
 
@@ -687,10 +695,10 @@ authorization route. The bounded handoff and session implementation was independ
 
 ## Ordered next slices
 
-1. **Review the exact M5.13 implementation SHA before marking M5 complete.** The definition review returned GO and
-   the approved implementation candidate remains fixture/test/documentation only. A later documentation-only GO
-   acknowledgement may close the review without a recursive round.
-2. **Do not begin M6.** Live dual-model capture remains gated on reviewed M5 acceptance and explicit approval.
+1. **Do not begin M6 without explicit maintainer approval.** Live dual-model capture is now sequenced after reviewed
+   M5 acceptance but remains a separate, approval-gated milestone.
+2. **Keep deferred findings separate.** The anchoring-flow distinction and the unimplemented general `reverse`
+   disposition require their own bounded decisions; M5 closure does not authorize either correction.
 
 Substantive tranches are committed and reviewed at bounded integration points. A documentation-only status
 acknowledgement does not trigger a recursive review round; changes to ADRs, gates, invariants, ACLs,

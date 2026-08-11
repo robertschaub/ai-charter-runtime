@@ -1,8 +1,8 @@
 <!-- SPDX-License-Identifier: CC-BY-4.0 -->
 # ADR-015 — Bounded empathy conformance and M5 acceptance
 
-**Status:** definition reviewed GO at `a08fa98`; bounded implementation candidate awaiting exact-SHA adversarial
-review.
+**Status:** definition reviewed GO at `a08fa98`; bounded implementation reviewed GO at `5251500`; M5 acceptance
+complete within the POC boundary stated below.
 **Spec:** §2 (empathy source), §4 (four-store items and screening signals), §5 (empathy layer, entry and
 output boundaries, and model navigation), §7 beats 4–5 and 19–21, §8 test-family coverage, and §10 M5.
 **Depends on:** ADR-002, ADR-004, ADR-005, ADR-009, ADR-012, ADR-013, and ADR-014.

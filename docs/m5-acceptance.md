@@ -1,9 +1,9 @@
 <!-- SPDX-License-Identifier: CC-BY-4.0 -->
 # M5 acceptance — bounded screening, empathy, and model switching
 
-**Status:** implementation candidate awaiting exact-SHA adversarial review. M5 remains **in progress** until that
-review returns GO. This ledger is maintainer-run conformance evidence, not independent evaluation, assurance,
-certification, a safe-chat claim, or evidence that a provider model is empathic.
+**Status:** bounded implementation reviewed **GO — no findings** at `5251500`; M5 is complete only within this POC's
+stated acceptance boundary. This ledger is maintainer-run conformance evidence, not independent evaluation,
+assurance, certification, a safe-chat claim, or evidence that a provider model is empathic.
 
 **Authority:** the immutable Charter sources, commit, and digests are pinned in
 [the implementation plan](implementation-plan.md#specification-authority-and-provenance). On divergence, those
@@ -70,11 +70,11 @@ commitment, effect, or model call. Therefore it cannot mint a commit token or re
 existing M5.11/M5.12 browser path remains bounded to fixed precommit; dynamic Commit/effect initiation remains
 excluded.
 
-## Candidate disposition
+## Reviewed disposition
 
-The deterministic M5 mechanisms and scripted beats are acceptance candidates with the partial and not-assessed
-limits above. M5 is not marked complete in the README or implementation plan until an independent exact-SHA
-implementation review returns GO. Candidate validation is `npm run typecheck` clean, 4/4 Git-safety hook tests,
-380/380 Vitest tests across 43 files, `git diff --check` clean, and verification of both unchanged signed cards.
-M6, live probes/providers, key operations, card signing, generated or append-only record edits, upstream Charter
-edits, and push remain separately approval-gated.
+Exact-SHA adversarial review of `5251500` returned **GO — no findings** and reproduced `npm run typecheck` clean,
+4/4 Git-safety hook tests, 380/380 Vitest tests across 43 files, `git diff --check` clean, and verification of both
+unchanged signed cards. The deterministic mechanisms and scripted beats therefore complete the bounded M5 POC
+milestone while every partial and not-assessed limit above remains explicit. M6, live probes/providers, key
+operations, card signing, generated or append-only record edits, upstream Charter edits, and push remain separately
+approval-gated.
