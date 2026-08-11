@@ -18,6 +18,25 @@
     ]
   },
   {
+    "proposal_hash": "2419557f53bf7fccd1549a4e39a13ec004a7e08fe866fd95b878ce4015e6b024",
+    "gate": "submit",
+    "provider": "openai-gpt-5.5",
+    "suspect_item_ids": [
+      "said_applicant_pdf_injection"
+    ],
+    "signals": [
+      {
+        "kind": "screening_signal",
+        "signal": "injection_suspicion",
+        "suspect_item_id": "said_applicant_pdf_injection",
+        "confidence_pct": 100,
+        "rationale": "Deterministic synthetic fixture for specification beat 5 signal plumbing.",
+        "model_id": "deterministic-screening-fixture",
+        "model_version_reported": "deterministic-screening-fixture-v1"
+      }
+    ]
+  },
+  {
     "proposal_hash": "7e0bf05ee258b675b0e7296611773b2b12ac06fc4c7f5be7dc9dc3a4ff2a16c0",
     "gate": "verify",
     "provider": "openai-gpt-5.5",

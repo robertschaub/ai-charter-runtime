@@ -18,6 +18,7 @@ import { loadPolicyFile } from './policyLoader.js';
 import {
   frozenProposal,
   modelCallFailureRequest,
+  modelSelectionTransition,
   storeItem,
   type FrozenProposal,
   type Mandate,
@@ -177,6 +178,44 @@ async function switchSelection(
     expected_current_selection_id: currentSelectionId,
     actor: ORCHESTRATOR,
   });
+}
+
+async function installDeterministicFixtureSelection(
+  setupValue: Awaited<ReturnType<typeof createSetup>>,
+  selectionId: string,
+): Promise<void> {
+  const checked = await setupValue.service.checkSelection({
+    expected_current_selection_id: null,
+    target: setupValue.mandateBody.default_acting_model,
+    actor: ORCHESTRATOR,
+  });
+  const selection = modelSelectionTransition.parse({
+    world_id: 'w-demo',
+    selection_id: selectionId,
+    case_id: 'case_demo',
+    kind: 'initial',
+    predecessor_selection_id: null,
+    mandate_id: checked.check.mandate_id,
+    mandate_version: checked.check.mandate_version,
+    target: checked.check.target,
+    system_use_decision: checked.check.system_use_decision,
+    check_id: checked.check.check_id,
+    selected_at: setupValue.clock.now,
+    authority_effect: 'none',
+  });
+  await setupValue.store.transact(
+    'test_fixture_model_selection_apply',
+    ORCHESTRATOR,
+    [
+      {
+        op: 'model_selection_check.consume',
+        check_id: checked.check.check_id,
+        consumed_at: setupValue.clock.now,
+      },
+      { op: 'model_selection.append', selection },
+    ],
+    setupValue.clock.now,
+  );
 }
 
 describe('M5.7 authorization-owned governed model selection', () => {
@@ -765,6 +804,179 @@ describe('M5.2 authorization-resolved conversation projections', () => {
     expect(service.screening({ proposal: mismatchedItem, gate: 'submit', caseId: 'case_demo' })).toMatchObject({
       performed: false,
       evidenceRefs: [{ kind: 'screening_skipped', reason: 'proposal-item-mismatch' }],
+    });
+  });
+
+  it('runs specification beat 5 from the exact applicant-document projection to a terminal Submit Stop', async () => {
+    const h = await createSetup([], { selectInitial: false });
+    const proposal = frozenProposal.parse(readJson(join(DEMO, 'screening-injection-proposal.json')));
+    const { proposal_hash: recordedHash, ...proposalBody } = proposal;
+    expect(freezeProposal(proposalBody).proposal_hash).toBe(recordedHash);
+
+    await h.core.putConversationItems({
+      caseId: 'case_demo',
+      items: proposal.material_inputs,
+      actor: AUTHZ,
+    });
+    await installDeterministicFixtureSelection(h, proposal.selection_id);
+
+    const resolved = h.service.screening({ proposal, gate: 'submit', caseId: 'case_demo' });
+    expect(resolved).toEqual({
+      performed: true,
+      signals: [
+        {
+          kind: 'screening_signal',
+          signal: 'injection_suspicion',
+          suspect_item_id: 'said_applicant_pdf_injection',
+          confidence_pct: 100,
+          rationale: 'Deterministic synthetic fixture for specification beat 5 signal plumbing.',
+          model_id: 'deterministic-screening-fixture',
+          model_version_reported: 'deterministic-screening-fixture-v1',
+        },
+      ],
+      evidenceRefs: [
+        {
+          kind: 'submit_projection',
+          provider: 'openai-gpt-5.5',
+          role: 'screening',
+          included: 1,
+          dropped: 0,
+          dropped_item_ids: [],
+          unmet_tags: [],
+        },
+      ],
+    });
+    expect(h.service.validateScreeningResolution(resolved, proposal, 'submit', 'case_demo')).toBe(true);
+
+    const cards = CardRegistry.load(CARDS);
+    const rulingCore = new AuthorizationCore({
+      store: h.store,
+      keyring: h.keyring,
+      policy: h.policy,
+      systemUse: h.systemUse,
+      resolveAuthorizedAgent: (actor) =>
+        actor.credential === 'proc:orchestrator' ? 'agent_demo' : undefined,
+      resolveScreening: (value, gateName, caseId) =>
+        h.service.screening({ proposal: value, gate: gateName, ...(caseId === undefined ? {} : { caseId }) }),
+      validateScreeningResolution: (resolution, value, gateName, caseId) =>
+        h.service.validateScreeningResolution(resolution, value, gateName, caseId),
+      resolveModelEvidence: (value) => cards.resolve(value),
+    });
+    const ruled = await rulingCore.ruleProposal({
+      gate: 'submit',
+      proposal,
+      service: 'filing',
+      actionClass: 'grant-filing',
+      caseId: 'case_demo',
+      actor: ORCHESTRATOR,
+    });
+    expect(ruled.ruling).toMatchObject({
+      gate: 'submit',
+      verdict: 'escalate',
+      ux_class: 'stop',
+      matched_rule_id: 'escalate-submit-signal',
+      evidence_refs: [...resolved.evidenceRefs, ...resolved.signals],
+    });
+    expect(ruled.escalationId).not.toBeNull();
+
+    const final = h.store.snapshot();
+    expect([...final.rulings.values()].map((ruling) => ruling.gate)).toEqual(['submit']);
+    expect([...final.rulings.values()].some((ruling) => ruling.verdict === 'allow')).toBe(false);
+    expect([...final.rulings.values()].some((ruling) => ruling.gate === 'verify' || ruling.gate === 'commit')).toBe(false);
+    expect(final.reservations.size).toBe(0);
+    expect(final.commitments.size).toBe(0);
+    expect(final.effects.size).toBe(0);
+    expect(final.modelCalls.size).toBe(0);
+  });
+
+  it('fails closed instead of reusing beat-5 evidence across changed or undisclosable bindings', async () => {
+    const h = await createSetup([], { selectInitial: false });
+    const proposal = frozenProposal.parse(readJson(join(DEMO, 'screening-injection-proposal.json')));
+    await h.core.putConversationItems({ caseId: 'case_demo', items: proposal.material_inputs, actor: AUTHZ });
+
+    expect(h.service.screening({ proposal, gate: 'submit', caseId: 'other_case' })).toMatchObject({
+      performed: false,
+      evidenceRefs: [{ kind: 'screening_skipped', reason: 'case-mismatch' }],
+    });
+    expect(h.service.screening({ proposal, gate: 'verify', caseId: 'case_demo' })).toMatchObject({
+      performed: false,
+      evidenceRefs: [{ kind: 'screening_skipped', reason: 'fixture-unavailable' }],
+    });
+
+    const { proposal_hash: ignoredHash, ...proposalBody } = proposal;
+    void ignoredHash;
+    const changedHash = freezeProposal({
+      ...proposalBody,
+      proposal_id: 'prp_screening_injection_changed',
+      action_id: 'act_screening_injection_changed',
+    });
+    expect(h.service.screening({ proposal: changedHash, gate: 'submit', caseId: 'case_demo' })).toMatchObject({
+      performed: false,
+      evidenceRefs: [{ kind: 'screening_skipped', reason: 'fixture-unavailable' }],
+    });
+
+    const changedItem: FrozenProposal = {
+      ...proposal,
+      material_inputs: [
+        {
+          ...(proposal.material_inputs[0] as StoreItem),
+          text: 'Caller-modified synthetic applicant-document instruction.',
+        },
+      ],
+    };
+    expect(h.service.screening({ proposal: changedItem, gate: 'submit', caseId: 'case_demo' })).toMatchObject({
+      performed: false,
+      evidenceRefs: [{ kind: 'screening_skipped', reason: 'proposal-item-mismatch' }],
+    });
+
+    const restrictedItem = storeItem.parse({
+      ...(proposal.material_inputs[0] as StoreItem),
+      id: 'said_applicant_pdf_injection_restricted',
+      tags: ['conf:case', 'purpose:grant-assessment'],
+    });
+    const restrictedProposal = freezeProposal({
+      ...proposalBody,
+      proposal_id: 'prp_screening_injection_restricted',
+      action_id: 'act_screening_injection_restricted',
+      material_inputs: [restrictedItem],
+    });
+    const restrictedFixture: ScreeningFixture = {
+      proposal_hash: restrictedProposal.proposal_hash,
+      gate: 'submit',
+      provider: 'openai-gpt-5.5',
+      suspect_item_ids: [restrictedItem.id],
+      signals: [
+        {
+          kind: 'screening_signal',
+          signal: 'injection_suspicion',
+          suspect_item_id: restrictedItem.id,
+          confidence_pct: 100,
+          rationale: 'Synthetic restricted beat-5 fixture.',
+          model_id: 'deterministic-screening-fixture',
+          model_version_reported: 'deterministic-screening-fixture-v1',
+        },
+      ],
+    };
+    const restricted = await createSetup([restrictedFixture], { selectInitial: false });
+    await restricted.core.putConversationItems({ caseId: 'case_demo', items: [restrictedItem], actor: AUTHZ });
+    expect(
+      restricted.service.screening({ proposal: restrictedProposal, gate: 'submit', caseId: 'case_demo' }),
+    ).toMatchObject({
+      performed: false,
+      signals: [],
+      evidenceRefs: [
+        {
+          kind: 'submit_projection',
+          included: 0,
+          dropped: 1,
+          dropped_item_ids: [restrictedItem.id],
+        },
+        {
+          kind: 'screening_skipped',
+          reason: 'disclosure-restricted',
+          suspect_item_ids: [restrictedItem.id],
+        },
+      ],
     });
   });
 
