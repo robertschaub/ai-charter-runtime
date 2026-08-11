@@ -3,7 +3,8 @@
 
 **Status date:** 2026-08-11
 
-**Current milestone:** M4 and bounded M5 complete; M6 has not started and remains approval-gated.
+**Current milestone:** M4 and bounded M5 complete; the M6 definition is proposed in ADR-016. M6 implementation and
+live capture have not started and remain review- and approval-gated.
 
 This file tracks implementation status and sequencing in `ai-charter-runtime`. It does not replace or
 reinterpret the authoritative specification. On divergence, the specification and its linked Charter
@@ -103,7 +104,8 @@ code one. Either define the disposition or drop it from both enums; do not leave
 | M3 — vertical slice | Implemented | Deterministic authorize → propose → rule → commit-verify → effect → receipt path, adapters, service ledger, and signed cards are present. |
 | M4 — escalation + governance console | **Complete** | Final exact-SHA review of `e326562` returned GO with no findings; the offline acceptance ledger preserves the remaining partial and not-assessed boundaries. |
 | M5 — screening + empathy + switching | **Complete within the bounded POC acceptance** | M5.1–M5.12 culminate in the authority-bearing baseline `5b27b0e`. ADR-015's zero-route M5.13 definition received GO at `a08fa98`; its fixture/test/acceptance implementation at `5251500` received GO with no findings. The acceptance ledger retains four partial and two not-assessed empathy red-line families. This is not assurance, semantic clearance, or deployment readiness. |
-| M6–M7 | Not started | Full capture/publication work follows the implementation milestones. |
+| M6 — full pass + demo capture | **Definition proposed; implementation not started** | [ADR-016](adr/ADR-016-m6-evidence-capture.md) separates authorization-owned live screening, native commitment continuation, deterministic two-lane full pass, and live observational capture. No provider call, checkpoint push, or capture artifact is authorized by the definition. |
+| M7 — article | Not started | Publication claims follow a reviewed and explicitly published M6 artifact. |
 
 These labels describe repository implementation status, not assurance, certification, or independent
 review. Test-family coverage continues to be reported as exercised, partial, or not assessed.
@@ -695,14 +697,27 @@ authorization route. The bounded handoff and session implementation was independ
 
 ## Ordered next slices
 
-1. **Do not begin M6 without explicit maintainer approval.** Live dual-model capture is now sequenced after reviewed
-   M5 acceptance but remains a separate, approval-gated milestone.
-2. **Keep deferred findings separate.** The anchoring-flow distinction and the unimplemented general `reverse`
-   disposition require their own bounded decisions; M5 closure does not authorize either correction.
+1. **Review the M6 definition at an exact committed SHA.** ADR-016 is documentation only and authorizes no code,
+   provider call, capture, checkpoint operation, or publication.
+2. **M6.0 — close two prerequisites separately.** Define and review the anchoring-flow distinction and the
+   unsupported general `reverse` disposition. ADR-016 makes both prerequisites to live completion but does not
+   authorize either correction.
+3. **M6.1 — authorization-owned live screening protocol.** After definition GO and separate maintainer approval,
+   add the paused fixed-precommit screening-call lifecycle with synthetic loopback providers only. Stop for
+   exact-SHA review; no live provider call is authorized.
+4. **M6.2 — native commitment continuation.** After M6.1 GO and separate approval, implement only
+   the proposal-bound execution-preparation → services-host Commit/verify → local mock-effect path with synthetic
+   loopback tests. Stop for exact-SHA review.
+5. **M6.3 — offline full pass and capture contract.** After M6.2 GO and separate approval, implement the strict
+   plan/artifact schemas, two-lane twenty-two-beat and adversarial matrix, acceptance ledger, gitignored staging,
+   sanitization checks, and dry-run assets. No live provider call or push. Stop for exact-SHA review.
+6. **M6.4 — live capture and publication.** Freeze one plan, obtain action-time approval for its bounded acting and
+   screening-provider calls and separate approval for checkpoint pushes, capture through `runtime:start`, sanitize and review the
+   candidate artifact, then obtain separate commit/push approval. Only a published exact SHA and final cross-model
+   README/spec review permit a documentation-only M6 closure.
 
 Substantive tranches are committed and reviewed at bounded integration points. A documentation-only status
 acknowledgement does not trigger a recursive review round; changes to ADRs, gates, invariants, ACLs,
 projections, provenance pins, or safety restrictions are substantive and remain reviewable. No tranche
-authorizes live probes, key generation or
-rotation, model-card signing, editing generated or append-only records outside a synthetic test harness,
-pushing, or starting an additional M5 slice.
+authorizes live probes or provider calls, key generation or rotation, model-card signing, editing generated or
+append-only records outside a synthetic test harness, capture publication, or pushing.

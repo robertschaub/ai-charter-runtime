@@ -136,6 +136,25 @@ credential, or authority path. The reviewed inventory remains exactly twenty-one
 routes plus dedicated case-session-handoff redemption and close routes. Fixed precommit remains the only
 authority-changing M5.11/M5.12 process mutation available to the orchestrator.
 
+**Proposed M6 definition (not implemented):** ADR-016 keeps the headless `/actions/execute` seam synthetic-test-only.
+It first adds two non-authorizing screening terminal routes and a paused, authorization-owned extension of fixed
+precommit, raising the `proc:orchestrator` gate/data inventory from twenty-one to twenty-three. It then defines a
+native execution preparation for an exact authorization-owned proposal run that has ended precommit with Verify
+`allow`; that non-authorizing process route raises the future inventory to twenty-four. Only `proc:services_host`
+may consume the preparation at the future Commit boundary. The browser and orchestrator may carry no signal,
+proposal, intent, gate, ruling, reservation, nonce, or commit token. Fixed precommit remains the only
+authority-changing route available to `proc:orchestrator`. This paragraph freezes a reviewable proposal only and
+authorizes no route or implementation.
+
+The proposed process additions are exactly `POST /w/{world_id}/screening-calls/{screening_call_id}/outputs`,
+`POST /w/{world_id}/screening-calls/{screening_call_id}/failures`, and
+`POST /w/{world_id}/cases/{case_id}/proposal-runs/{proposal_run_id}/execution-preparations` for
+`proc:orchestrator`; all three are Origin-guarded, access-recorded, and `authorityChanging: false`. The proposed
+Commit boundary is exactly
+`POST /w/{world_id}/execution-preparations/{execution_preparation_id}/commit-verify` for
+`proc:services_host` only. The orchestrator-side browser and services-host carrier routes, strict inputs, projections,
+and limits are fixed by ADR-016 §§3–4.
+
 ## Context
 
 Three OS processes make "the model proposes, a component outside the model decides, the executing service

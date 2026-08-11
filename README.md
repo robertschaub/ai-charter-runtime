@@ -10,7 +10,9 @@ selection/switch protocol, a reviewed native selected-lane call into sealed quar
 authorization-owned message ingestion and single-use output release, and hash-chained action records sealed before
 effect. M5.11, reviewed at `8364745`, adds governed proposal intake and fixed pre-commit evidence. M5.12, reviewed
 at `5b27b0e`, adds an authorization-derived dialogue trigger and response-bound native proposal revision; it still
-cannot reach Commit or effect execution.
+cannot reach Commit or effect execution. [ADR-016](docs/adr/ADR-016-m6-evidence-capture.md) now proposes the M6
+full-pass, authorization-owned live-screening, native commitment-continuation, and dual-model capture contract; no
+M6 implementation, live run, checkpoint push, or capture artifact exists yet.
 
 The authoritative build specification lives in the documentation repository:
 [runtime-gates-poc-spec.md](https://github.com/robertschaub/our-ai-charter/blob/main/docs/wip/runtime-gates-poc-spec.md).
@@ -173,11 +175,13 @@ routes to the dynamic case session. Startup itself makes no provider request, no
 for that tranche. M5.10, reviewed at `8a904f3`, adds the separately defined message-ingress, release, and transcript
 path without proposal construction, empathy completion, a live provider run, or M6 capture. M5.11, reviewed at
 `8364745`, implements only ADR-013's native proposal preparation, schema-bound intake/freeze, replayable origin evidence,
- fixed precommit sequence, and exact-key browser projection. M5.12, reviewed at `5b27b0e`, implements only ADR-014's focused
- Verify dialogue trigger, direct response basis, revision preparation/use, immutable successor lineage, and repeated
- precommit checks. It makes no live provider claim and never reaches Commit or an executing service. The M5.13
- implementation reviewed at `5251500` adds fixture-pinned beat-5 conformance and an honest acceptance map. This
- completes the bounded M5 milestone, not the partial or unassessed areas recorded in that map.
+fixed precommit sequence, and exact-key browser projection. M5.12, reviewed at `5b27b0e`, implements only ADR-014's focused
+Verify dialogue trigger, direct response basis, revision preparation/use, immutable successor lineage, and repeated
+precommit checks. It makes no live provider claim and never reaches Commit or an executing service. The M5.13
+implementation reviewed at `5251500` adds fixture-pinned beat-5 conformance and an honest acceptance map. This
+completes the bounded M5 milestone, not the partial or unassessed areas recorded in that map. ADR-016 is a
+definition-only M6 proposal. It preserves those limits and requires separate reviewed implementation, action-time
+live-provider approval, checkpoint-push approval, artifact review, and publication approval.
 
 Offline and deterministic verification uses synthetic records and skips only the remote-presence step:
 
