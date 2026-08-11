@@ -24,12 +24,16 @@ cannot answer or consume a dialogue escalation, create `confirmed` or `permitted
 requirement, or inherit the responder authority of this direct role-token channel. Only this ADR's
 authorization-origin response route can perform those transitions.
 
-**M5.12 implementation candidate (native dialogue continuation):** reviewed ADR-014 binds a Verify-stage
+**Implemented and reviewed at `5b27b0e` (M5.12 native dialogue continuation):** ADR-014 binds a Verify-stage
 `unconfirmed_inference_as_fact` trigger to one exact active inferred item in the frozen proposal. Authorization
 derives the focused question, standing, route, and six-field contract; the signal and caller supply none of them.
 Every state-changing response must name that exact bound item. After an eligible response, one explicit
 authorization-owned preparation may open a schema-bound native proposal revision over the refreshed conversation.
 The response itself still starts no model, issues no ruling, and creates no action authority.
+
+**M5.13 definition (bounded empathy conformance):** ADR-015 keeps that reviewed Verify path as the POC's only
+native empathy dialogue trigger. The conformance tranche adds no response route, disposition, standing class, or
+authority transition; remaining semantic red-line families are reported as partial or not assessed.
 
 ## Context
 A dialogue trigger is an ordinary escalation routed to the conversation partner — same single-use state machine, same six-field intervention contract — but two boundary rules constrain the channel. The answer posts **directly from the browser to the authorization service** under the responder's role token, from a control served by the **authorization service's own origin**, so the orchestrator neither serves the credential-bearing control nor carries the answer. And standing is **evidentiary, not managerial**: a responder answers only within their own standing; a third party's facts are resolved by cited evidence or routed to that party, never by bare assertion.

@@ -48,7 +48,10 @@ The exact upstream revision, digest, reviewed runtime baseline, and remaining mi
   `442397a`, adds replayable
   headless selection and switching through orchestrator-authenticated authorization routes. M5.8, reviewed at
   `ff9e438`, adds a dynamic-session-only browser caller with a two-minute, single-use preparation, redacted
-  recovery, and no model request as part of selection. Empathy triggers are also inactive.
+  recovery, and no model request as part of selection. The M5.12 Verify-stage
+  `unconfirmed_inference_as_fact` trigger is the only active native empathy dialogue path; broader semantic
+  red-line coverage remains partial or not assessed. Proposed ADR-015 defines the final bounded M5 conformance
+  slice without adding a route, model capability, Commit, or effect path.
 - **A deterministic gate proves declared rules were applied** — not that the rules are lawful, fair, or legitimate.
 - **Commit-token window (interpretive choice).** Commitment binds at `commit-verify`; a revocation landing in the
   token's short TTL is too late for that action by definition. On the stricter reading of "authority in flight",

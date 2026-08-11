@@ -321,8 +321,9 @@ conversation-bound, model-proposed,
 authorization-frozen artifact and fixed pre-commit evidence sequence. It does not make a proposal true, safe,
 lawful, approved, committed, or executed, and it does not complete M5.
 
-The M5.12 candidate implements ADR-014's semantic `unconfirmed_inference_as_fact` dialogue-trigger routing and
-response-driven proposal revision. Commit/effect initiation from the dynamic case session, broader ingestion
-roles, retention and deletion propagation, live provider runs, and M6 capture remain deferred. The two non-blocking
-M5.10 transaction-shape hardening observations remain separately deferred rather than being hidden inside this
-slice.
+The M5.12 implementation reviewed at `5b27b0e` implements ADR-014's exact
+`unconfirmed_inference_as_fact` dialogue-trigger routing and response-driven proposal revision. ADR-015 separately
+defines the zero-route M5 acceptance tranche without turning that exact path into a general semantic-clearance
+claim. Commit/effect initiation from the dynamic case session, broader ingestion roles, retention and deletion
+propagation, live provider runs, and M6 capture remain deferred. The two non-blocking M5.10 transaction-shape
+hardening observations remain separately deferred rather than being hidden inside this slice.

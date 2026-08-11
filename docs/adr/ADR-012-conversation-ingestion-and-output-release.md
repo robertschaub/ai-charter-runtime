@@ -309,6 +309,7 @@ The resulting transcript is still a synthetic POC surface, not a safe-chat, fact
 certification claim. Model output remains one coarse, turn-level `inferred` item; no model-generated sentence is
 silently promoted to `said`, `confirmed`, or `permitted`.
 
-Still deferred to separately approved slices: proposal construction from conversation state, semantic empathy
-trigger completion, broader ingestion sources/roles, retention and deletion propagation, live provider runs, and
-M6 capture. The reviewed implementation does not authorize another slice.
+Proposal construction and the bounded Verify dialogue now exist through reviewed ADR-013/ADR-014 implementations.
+ADR-015 separately defines M5 acceptance without recharacterizing this output admission as semantic clearance.
+Broader semantic red-line classification, ingestion sources/roles, retention and deletion propagation, live
+provider runs, and M6 capture remain deferred. The reviewed M5.10 implementation authorizes none of them.

@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: CC-BY-4.0 -->
 # Runtime implementation plan
 
-**Status date:** 2026-08-10
+**Status date:** 2026-08-11
 
 **Current milestone:** M4 complete; M5 implementation is in progress.
 
@@ -95,7 +95,7 @@ code one. Either define the disposition or drop it from both enums; do not leave
 | M2 — transactional core | Implemented and fault-tested | Authorization remains the single durable serialization point; authority defects fail closed. |
 | M3 — vertical slice | Implemented | Deterministic authorize → propose → rule → commit-verify → effect → receipt path, adapters, service ledger, and signed cards are present. |
 | M4 — escalation + governance console | **Complete** | Final exact-SHA review of `e326562` returned GO with no findings; the offline acceptance ledger preserves the remaining partial and not-assessed boundaries. |
-| M5 — screening + empathy + switching | **In progress** | M5.1 is reviewed at `c1b5eb0`; M5.2 at `1973515`; M5.3 at `1cc7fb2`, with its Low wording finding closed at `2b7b45a`; M5.4 at `b247d5b`; M5.5 durable call evidence at `1d992fa`; M5.6 system-use decisions at `b57c01e`; M5.7 headless governed selection at `442397a`; M5.8 browser initiation at `ff9e438`; M5.9 native provider ingress at `e58d397`; M5.10 conversation ingestion and output release at `8a904f3`; M5.11 governed proposal intake at `8364745`; and M5.12 native dialogue continuation at `5b27b0e`. Wider empathy completion and M6 remain incomplete. |
+| M5 — screening + empathy + switching | **In progress** | M5.1 is reviewed at `c1b5eb0`; M5.2 at `1973515`; M5.3 at `1cc7fb2`, with its Low wording finding closed at `2b7b45a`; M5.4 at `b247d5b`; M5.5 durable call evidence at `1d992fa`; M5.6 system-use decisions at `b57c01e`; M5.7 headless governed selection at `442397a`; M5.8 browser initiation at `ff9e438`; M5.9 native provider ingress at `e58d397`; M5.10 conversation ingestion and output release at `8a904f3`; M5.11 governed proposal intake at `8364745`; and M5.12 native dialogue continuation at `5b27b0e`. ADR-015 proposes a final, zero-route M5.13 conformance slice; it is not yet reviewed or implemented. M6 remains blocked. |
 | M6–M7 | Not started | Full capture/publication work follows the implementation milestones. |
 
 These labels describe repository implementation status, not assurance, certification, or independent
@@ -641,6 +641,31 @@ received focused re-review with **GO — finding closed; no new findings**. The 
 Git-safety tests, 378/378 Vitest tests across 43 files, both unchanged signed-card verifications, and the regression's
 failure against the unguarded parent.
 
+### M5.13 proposed definition — bounded empathy conformance and M5 acceptance
+
+ADR-015 narrows the remaining milestone work to evidence the POC can actually support. It does not propose a new
+semantic empathy classifier or dialogue class. The reviewed M5.12 Verify trigger remains the only native empathy
+dialogue path, and its signal remains evidence that can raise allow to Stop + escalate but can never lower a deny.
+
+The later implementation tranche, if the definition receives exact-SHA GO and the maintainer approves it, is
+limited to synthetic fixtures, conformance tests, an offline M5 acceptance ledger, and truthful status
+documentation:
+
+- add one exact applicant-document injection fixture and end-to-end Submit test for spec beat 5
+  (`injection_suspicion` → Stop), including exact hash/gate/item binding and proof that no later gate or effect path
+  runs;
+- preserve the reviewed beat-4 dialogue/revision path, deny precedence, lexical output withholding, four-store
+  separation, and beats 19–21 evidence;
+- map all six published empathy red lines and the relevant test families as exercised, partial, or not assessed;
+  narrow lexical checks and one grant-scenario inference must not be described as general semantic clearance; and
+- keep ADR-002's process inventory at exactly twenty-one gate/data routes. Add no production route, handler,
+  schema, credential, model call, ruling, mandate, commitment, token, service call, effect, or memory/training
+  capability.
+
+If conformance tests reveal a production defect, work stops for a separately defined correction; ADR-015 does not
+pre-authorize production changes. M5 remains in progress until a later exact-SHA implementation review returns GO
+and the acceptance ledger records the bounded completion without upgrading partial or not-assessed areas.
+
 ## Resolved browser credential-handoff protocol
 
 The normative decision is pinned above at Charter commit `51b408c`: a user-initiated authorization-origin
@@ -658,12 +683,14 @@ authorization route. The bounded handoff and session implementation was independ
 
 ## Ordered next slices
 
-1. **Treat `5b27b0e` as the reviewed M5.12 integration baseline.** This documentation-only status acknowledgement
-   closes the review cycle and does not trigger recursive review.
-2. **Define any remaining M5 slice separately before implementation.** Keep dynamic Commit/effect initiation,
-   live-provider work, the `reverse` finding, and unrelated hardening outside the M5.12 closure.
-3. **Do not begin M6.** Live dual-model capture remains gated on the remaining reviewed M5 work and explicit
-   approval.
+1. **Review the ADR-015 M5.13 definition at its exact committed SHA.** It is substantive because it fixes the
+   acceptance boundary; definition review does not authorize implementation.
+2. **After GO and explicit maintainer approval, implement only the bounded conformance tranche.** Keep production
+   runtime code, new routes, dynamic Commit/effect initiation, live-provider work, the `reverse` finding, and
+   unrelated hardening out of scope. A discovered production defect requires a separate correction decision.
+3. **Review the exact M5.13 implementation SHA before marking M5 complete.** A later documentation-only GO
+   acknowledgement may close the review without a recursive round.
+4. **Do not begin M6.** Live dual-model capture remains gated on reviewed M5 acceptance and explicit approval.
 
 Substantive tranches are committed and reviewed at bounded integration points. A documentation-only status
 acknowledgement does not trigger a recursive review round; changes to ADRs, gates, invariants, ACLs,

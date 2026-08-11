@@ -1,7 +1,8 @@
 <!-- SPDX-License-Identifier: CC-BY-4.0 -->
 # ADR-014 — Native dialogue trigger and proposal-revision continuation
 
-**Status:** accepted definition at `0c3cac9` (GO — no findings); bounded implementation candidate awaiting exact-SHA review.
+**Status:** accepted definition at `0c3cac9` (GO — no findings); implementation reviewed at `5b27b0e`
+(GO — deny-precedence finding closed; no new findings).
 **Spec:** §4 (proposal revisions, screening signals, intervention contract), §5 (empathy layer and disposition
 continuation), §6 criteria 1, 2, 4, and 5, §7 beat 4, and §10 M5.
 **Depends on:** ADR-004, ADR-005, ADR-009, ADR-012, and ADR-013.
@@ -246,7 +247,11 @@ Dynamic-session Commit/effect initiation, service execution, wider dialogue clas
 retention/deletion propagation, live provider runs, M6 capture, and the `reverse` disposition decision remain
 separate and unapproved. M5.12 does not complete M5.
 
-## Acceptance tests for a later implementation tranche
+ADR-015 separately defines a bounded M5.13 conformance and acceptance tranche. It keeps this reviewed Verify path
+as the POC's only native empathy dialogue trigger, adds no route or authority path, and does not reinterpret M5.12
+as general semantic empathy or output clearance.
+
+## Acceptance tests for the reviewed implementation tranche
 
 - A Verify-stage `unconfirmed_inference_as_fact` signal opens a dialogue escalation only for exactly one active,
   case-local, exact inferred item in the frozen proposal and recorded projection. Missing, multiple, material,
@@ -293,7 +298,7 @@ separate and unapproved. M5.12 does not complete M5.
 
 ## Consequences
 
-This definition would complete the native beat-4 bridge from an exact unconfirmed inference through a direct
+The reviewed implementation completes the native beat-4 bridge from an exact unconfirmed inference through a direct
 authorization-owned response to a fresh, fully re-gated proposal revision. It preserves the boundary that the model
 proposes, authorization decides, and no effect exists without a later executing-service commitment check.
 
