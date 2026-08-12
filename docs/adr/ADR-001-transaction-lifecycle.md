@@ -43,6 +43,12 @@ its post-response `authorization-invalidated` reason. Model-call, proposal, and 
 selection id; `commit-verify` compares current selection as the lazy backstop. An `A → B → A` sequence therefore
 cannot revive authority issued under the earlier A selection.
 
+**Proposed amendment (M6.0b unsupported `reverse`, ADR-017):** the POC's active general-disposition set will omit
+`reverse`. The source vocabulary remains broader, but post-commit reversal and compensation are not assessed here,
+and this pre-commit escalation machine has no legitimate reversal transition. Policy, transport, state, record, and
+console inputs carrying the unsupported token must fail closed or omit it; they are never coerced to a terminal
+deny. This amendment remains definition-only until ADR-017 and its implementation receive separate exact-SHA review.
+
 ## Context
 
 The authorization service is the single serialization point. Commitment is two-phase: `commit-verify`
@@ -261,6 +267,10 @@ created and the action fails closed.
 | deny / cancel | `disposed` | Terminal; the reservation is `released`. |
 | seek review / route to remedy | `disposed` | Recorded routing obligation, case parked; reservation `released`. No independent institution exists (spec §3). |
 | timeout | `timed_out` | Only the declared fallback, which must itself lie within existing authority; if the fallback acts it is a new proposal. Otherwise the Stop remains and the reservation is `released`. |
+
+The Charter vocabulary also names `reverse`, but this POC does not implement a generic post-commit reversal.
+ADR-017 proposes removing that unsupported token from the active core and console disposition sets rather than
+letting it fall through to terminal-denial behaviour. Compensation remains a new, separately gated action under §5.
 
 Dialogue escalations are the same machine with the extended disposition set ADR-004 defines
 (`confirm | correct | narrow | permit | abstain | route`); all of them land in the `disposed` row above,

@@ -24,8 +24,9 @@ second layer exposes variance; it is not a controlled model-quality comparison o
 
 At definition time, M6 had two unresolved prerequisites: ADR-003's remote check could not distinguish an honest
 unpushed latest checkpoint from confirmed remote rollback, and the general `reverse` disposition was a known
-unreachable-but-empty token. The first prerequisite was separately implemented and reviewed at `be7f2ef`; `reverse`
-remains parked for M6.0b. This decision does not silently fold either correction into capture work.
+unreachable-but-empty token. The first prerequisite was separately implemented and reviewed at `be7f2ef`; the
+second now has a definition candidate in [ADR-017](ADR-017-unsupported-reverse-disposition.md), with implementation
+still unauthorized. This decision does not silently fold either correction into capture work.
 
 ## Decision
 
@@ -281,7 +282,8 @@ Definition review authorizes no code. Subject to separate maintainer approval af
 is:
 
 1. **M6.0 prerequisites:** separately define, correct, test, and review the ADR-003 failed-push distinction and the
-   unsupported `reverse` disposition. Neither change is included in this definition commit.
+   unsupported `reverse` disposition. M6.0a is reviewed at `be7f2ef`; M6.0b is defined by ADR-017 but remains
+   implementation- and review-gated. Neither change was included in the ADR-016 definition commit.
 2. **M6.1 authorization-owned live screening protocol:** implement §3 and its paused fixed-precommit state machine
    with synthetic loopback providers only. Prove projection minimization, exact call/evidence binding, signal
    monotonicity, fail-closed terminal states, no retry/fallback, ACLs, and raw-byte exclusion. Stop for exact-SHA

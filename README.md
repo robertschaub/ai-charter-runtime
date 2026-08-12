@@ -67,6 +67,9 @@ The exact upstream revision, digest, reviewed runtime baseline, and remaining mi
 - **Provider-side model substitution is detectable, not preventable**; the served-model id is itself
   provider-supplied evidence.
 - **Screening models fail.** Their signals can only Flag or force Escalate — never allow.
+- **Post-commit reversal is not implemented.** The source vocabulary names `reverse`, but this POC currently has no
+  effect-specific reversal or compensation path and no remedy decider. ADR-017 proposes removing the empty active
+  token rather than presenting a power the runtime does not have; implementation remains separately review-gated.
 - **Minimal cryptography** (hash chains + HMAC; composite-head checkpoints pushed to this public repo bound —
   but do not eliminate — the rollback window). Split custody is future work.
 - **Synthetic scenario, demo-grade authentication, free-tier model endpoints without an SLA.**
