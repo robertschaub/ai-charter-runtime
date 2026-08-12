@@ -263,9 +263,22 @@ export const recordVerificationProjection = z
   .object({
     status: z.literal('no-divergence-detected'),
     mode: z.enum(['local', 'remote']),
+    remote_status: z.enum(['not_checked', 'acknowledged', 'unanchored_local_candidate', 'unavailable']),
     checkpoint: checkpointFactProjection.nullable(),
     latest_pushed_checkpoint: z
       .object({ checkpoint: checkpointFactProjection, commit_sha: z.string().regex(/^[0-9a-f]{40,64}$/), repo_url: z.string().url() })
+      .strict()
+      .nullable(),
+    remotely_acknowledged: z
+      .object({
+        checkpoint_id: id,
+        composite_digest: hexDigest,
+        checkpoint_commit_sha: z.string().regex(/^[0-9a-f]{40,64}$/),
+        remote_head_sha: z.string().regex(/^[0-9a-f]{40,64}$/),
+        repo_url: z.string().url(),
+        branch: z.string().min(1),
+        observed_at: timestamp,
+      })
       .strict()
       .nullable(),
     open_window: z.object({ entries: integer.min(0), minutes: integer.min(0).nullable() }).strict(),
@@ -284,7 +297,8 @@ export const recordVerificationAlarmProjection = z
       'chain-tamper',
       'rollback',
       'missing-stream',
-      'remote-mismatch',
+      'remote-rollback',
+      'remote-acknowledgment-ambiguous',
     ]),
     message: z.literal('record verification detected a divergence'),
   })

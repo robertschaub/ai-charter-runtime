@@ -445,8 +445,10 @@ export class AuthorizationReadSide {
         body: recordVerificationProjection.parse({
           status: 'no-divergence-detected',
           mode: report.mode,
+          remote_status: report.remoteStatus,
           checkpoint,
           latest_pushed_checkpoint: latest,
+          remotely_acknowledged: report.remotelyAcknowledged,
           open_window: { entries: report.unanchoredWindowEntries, minutes: report.unanchoredWindowMinutes },
           warnings: report.warnings,
           message: report.message,

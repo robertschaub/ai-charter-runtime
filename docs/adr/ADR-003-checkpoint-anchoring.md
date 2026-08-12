@@ -1,8 +1,8 @@
 <!-- SPDX-License-Identifier: CC-BY-4.0 -->
 # ADR-003 — Composite-head checkpoint anchoring
 
-**Status:** accepted (M1, 2026-08-01); M6.0a acknowledgment-classification amendment proposed
-(2026-08-11), definition only and not implemented. **Spec:** §3 record layer, §9 (cryptography limits).
+**Status:** accepted (M1, 2026-08-01); M6.0a acknowledgment-classification implementation candidate
+(2026-08-12), exact-SHA review pending. **Spec:** §3 record layer, §9 (cryptography limits).
 
 ## Context
 Local streams cannot detect their own tail rollback: a truncated chain is still internally valid. A composite head digest — write-ahead state, action chain, access-log chain — is written to a checkpoint file in this public repo and pushed, so the remote copy pins a prefix the local process can no longer silently drop. All canonicalization, hashing, and encoding follow ADR-007.
@@ -63,7 +63,7 @@ that every absent latest commit is an honest failed push.
 
 **The one fail-closed case is its mirror:** if verification at run start finds tampering or rollback against the last anchor, the run **halts**. A rewound or corrupted record layer is not a base to keep acting from.
 
-### M6.0a definition — acknowledgment evidence and fail-safe classification
+### M6.0a — acknowledgment evidence and fail-safe classification
 
 This amendment closes one deferred ambiguity before M6 capture. The M1 verifier asks whether the latest local
 checkpoint commit is on the configured remote branch, but an absent result can mean either an honestly unpushed
@@ -146,6 +146,10 @@ Every ambiguity in a reachable-remote result resolves toward halt, never toward 
 unavailability remains the one availability result; it cannot convert missing or unknown evidence into definite
 failure.
 
+The classifier trusts terminal-attempt evidence from the verified local access chain. An operator able to forge
+that chain and also roll back the force-push-protected remote can defeat this single-custodian mechanism; that
+combined control is the no-independent-custody limit disclosed below, not an assurance this POC claims to solve.
+
 `latestPushedCheckpoint`, receipts, and the open-window calculation use the most recent checkpoint proved present
 by the current remote observation, not merely `latest.json`. When a newer candidate is honestly unpushed, receipts
 continue to name the prior acknowledged checkpoint and the open window includes every record after that prior
@@ -166,9 +170,10 @@ mis-bound terminal events; receipts and window counts based on the prior anchor;
 tamper, truncation, and pointer-rollback alarms. Tests use synthetic records through the harness only. They perform
 no push or network operation and edit no generated or append-only record by hand.
 
-This definition authorizes classification and reporting only. It adds no checkpoint writer, retry, recovery,
-provider call, capture, key or card operation, record edit, or push. Implementation remains gated by separate
-approval and exact-SHA review. The unrelated general `reverse` disposition remains parked for M6.0b.
+The implementation candidate adds classification and reporting only. It adds no checkpoint writer, retry,
+recovery, provider call, capture, key or card operation, generated/append-only record edit outside the synthetic
+test harness, or push. Its exact-SHA review remains pending. The unrelated general `reverse` disposition remains
+parked for M6.0b.
 
 ### Verification procedure (beat 15)
 `npm run verify:records`, a `tooling/` CLI over the gate-core verifier (combined artifact per LICENSE.md):
@@ -178,13 +183,14 @@ approval and exact-SHA review. The unrelated general `reverse` disposition remai
 3. Recompute every local chain from entry 0, link by link: **in-line tampering** fails loudly at index k (beat 15a).
 4. For each anchored head, require local `length ≥ anchored length` **and** that the local entry at index `anchored_length − 1` hashes to `head_hash` — the local chain must *extend* the anchor. Equality would be wrong: chains legitimately grow after a checkpoint. Failure is a **rollback alarm** naming world, stream, and divergence index (beat 15b: the truncated prefix is internally valid, and only the anchor exposes it).
 5. Streams listed in the anchor must exist. A world appearing only after the anchor is unconstrained — and a world created *and* destroyed inside one window leaves no trace (§9).
-6. After local validation, the separately approved M6.0a implementation resolves terminal attempt evidence and
+6. After local validation, M6.0a resolves terminal attempt evidence and
    applies the current-remote outcome matrix above rather than treating every absent latest commit as rollback or
    honest failure. `--local` skips only this remote step, for the test suite and offline runs, and says so in the
    report. With no remotely acknowledged checkpoint, the report states "no prior acknowledged checkpoint".
 7. The verification run appends its own access-log entry **after** reading, recording the lengths it read, so verification never mutates the chain it verifies and the access chain's self-reference is explicit rather than circular.
 
-The pass state is reported as *"no divergence detected as of checkpoint 0007; un-anchored window 14 min / 23 entries"* — never a green check. Any alarm exits non-zero; the record viewer renders the same two facts.
+The pass state reports the latest locally validated checkpoint, current remote-acknowledgment basis, and open
+window separately — never as a green check. Any alarm exits non-zero; the record viewer renders the same facts.
 
 ### Receipts (beat 16)
 The applicant's record receipt names the latest **pushed** checkpoint: `checkpoint_id`, `composite_digest`, the remote commit sha and repo URL, the world's action-chain length at anchor, and this action's entry index — so the receipt states plainly whether the action falls inside the anchored prefix or in the open window. Its own text says it is a local receipt: a true lodgment receipt needs the independent custody that is out of scope (§9).

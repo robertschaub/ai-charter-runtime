@@ -944,8 +944,10 @@ describe('M4 native three-process boundary', () => {
       expect(recordVerification.status).toBe(200);
       await expect(recordVerification.json()).resolves.toMatchObject({
         status: 'no-divergence-detected',
+        remote_status: 'not_checked',
         checkpoint: null,
         latest_pushed_checkpoint: null,
+        remotely_acknowledged: null,
         open_window: { entries: expect.any(Number), minutes: null },
       });
 

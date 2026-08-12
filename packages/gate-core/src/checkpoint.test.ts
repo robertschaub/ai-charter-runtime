@@ -10,8 +10,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { appendEntry, verifyChain } from './chain.js';
 import {
   checkpointReceiptReference,
-  checkpointPointer,
-  verifyCheckpointRemote,
+  resolveCheckpointCommit,
   verifyRecords,
   writeCheckpoint,
 } from './checkpoint.js';
@@ -20,6 +19,10 @@ import { WalStore } from './walStore.js';
 const ROOT = fileURLToPath(new URL('../../..', import.meta.url));
 const roots: string[] = [];
 const DIGEST = 'a'.repeat(64);
+const COMMIT_1 = 'b'.repeat(40);
+const COMMIT_2 = 'c'.repeat(40);
+const REMOTE_HEAD = 'd'.repeat(40);
+const REPO_URL = 'https://github.com/example/runtime';
 
 afterEach(() => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
@@ -59,6 +62,44 @@ function appendSynthetic(recordsRoot: string, stream: (typeof streamDefinitions)
   });
 }
 
+function appendAnchorAttempt(
+  recordsRoot: string,
+  value:
+    | {
+        readonly event: 'anchor';
+        readonly checkpoint_id: string;
+        readonly composite_digest: string;
+        readonly remote_sha: string;
+      }
+    | { readonly event: 'anchor_failed'; readonly checkpoint_id: string; readonly error_class: string },
+): void {
+  appendEntry(join(recordsRoot, 'w-demo', 'access.jsonl'), 'access-entry', {
+    ...value,
+    world_id: 'w-demo',
+    at: '2026-08-02T14:00:30.000Z',
+  });
+}
+
+function localCommits(values: Readonly<Record<string, string | null>>) {
+  return async ({ artifact }: { readonly artifact: { readonly checkpoint_id: string } }) => {
+    const commitSha = values[artifact.checkpoint_id];
+    if (commitSha === undefined) throw new Error(`missing synthetic local evidence for ${artifact.checkpoint_id}`);
+    return commitSha === null
+      ? { status: 'uncommitted' as const }
+      : { status: 'committed' as const, commitSha };
+  };
+}
+
+function remoteRef(contains: Readonly<Record<string, boolean>>) {
+  return async () => ({
+    status: 'ref_present' as const,
+    remoteHeadSha: REMOTE_HEAD,
+    repoUrl: REPO_URL,
+    branch: 'main',
+    contains,
+  });
+}
+
 async function checkpoint(
   recordsRoot: string,
   checkpointsRoot: string,
@@ -75,6 +116,21 @@ async function checkpoint(
     now: () => createdAt,
     mode: 'write-only',
   });
+}
+
+async function pairedCheckpoints(label: string) {
+  const rootsForCase = temporaryRoots(label);
+  createSyntheticStreams(rootsForCase.recordsRoot);
+  const first = await checkpoint(rootsForCase.recordsRoot, rootsForCase.checkpointsRoot, '2026-08-02T14:00:00.000Z');
+  appendAnchorAttempt(rootsForCase.recordsRoot, {
+    event: 'anchor',
+    checkpoint_id: first.checkpoint_id,
+    composite_digest: first.composite_digest,
+    remote_sha: COMMIT_1,
+  });
+  appendSynthetic(rootsForCase.recordsRoot, 'action', 2);
+  const second = await checkpoint(rootsForCase.recordsRoot, rootsForCase.checkpointsRoot, '2026-08-02T14:05:00.000Z');
+  return { ...rootsForCase, first, second };
 }
 
 function systemEnvironment(): NodeJS.ProcessEnv {
@@ -112,8 +168,8 @@ describe('ADR-003 local checkpoint detector', () => {
         appendSynthetic(recordsRoot, 'access', 3);
       },
     });
-    expect(extended.unanchoredWindowEntries).toBe(3);
-    expect(extended.unanchoredWindowMinutes).toBe(5);
+    expect(extended.unanchoredWindowEntries).toBe(6);
+    expect(extended.unanchoredWindowMinutes).toBeNull();
     expect(extended.latestPushedCheckpoint).toBeNull();
     expect(extended.message).toContain('local mode; remote presence not checked');
     expect(recordedLengths).toEqual({ 'w-demo/access': 2, 'w-demo/action': 2, 'w-demo/wal': 2 });
@@ -132,7 +188,7 @@ describe('ADR-003 local checkpoint detector', () => {
       local: true,
       now: () => '2026-08-02T10:06:00.000Z',
     });
-    expect(verified.unanchoredWindowEntries).toBe(0);
+    expect(verified.unanchoredWindowEntries).toBe(7);
   });
 
   it('detects in-line chain tampering at the first changed index', async () => {
@@ -215,19 +271,24 @@ describe('ADR-003 local checkpoint detector', () => {
       checkpointsRoot,
       local: false,
       now: () => '2026-08-02T14:01:00.000Z',
-      remoteVerifier: async () => ({
-        status: 'confirmed',
-        commitSha: 'b'.repeat(40),
-        remoteHeadSha: 'c'.repeat(40),
-        repoUrl: 'https://github.com/example/runtime',
-        branch: 'main',
-      }),
+      localCommitResolver: localCommits({ 'cp-0001': COMMIT_1 }),
+      remoteObserver: remoteRef({ [COMMIT_1]: true }),
+    });
+    expect(report.remoteStatus).toBe('acknowledged');
+    expect(report.remotelyAcknowledged).toEqual({
+      checkpoint_id: 'cp-0001',
+      composite_digest: report.checkpoint?.composite_digest,
+      checkpoint_commit_sha: COMMIT_1,
+      remote_head_sha: REMOTE_HEAD,
+      repo_url: REPO_URL,
+      branch: 'main',
+      observed_at: '2026-08-02T14:01:00.000Z',
     });
     expect(checkpointReceiptReference(report, 'w-demo', 0)).toEqual({
       checkpoint_id: 'cp-0001',
       composite_digest: report.checkpoint?.composite_digest,
-      remote_commit_sha: 'b'.repeat(40),
-      repo_url: 'https://github.com/example/runtime',
+      remote_commit_sha: COMMIT_1,
+      repo_url: REPO_URL,
       world_action_chain_length_at_anchor: 1,
       action_entry_index: 0,
       action_inside_anchored_prefix: true,
@@ -243,21 +304,31 @@ describe('ADR-003 local checkpoint detector', () => {
       now: () => '2026-08-02T14:01:00.000Z',
     });
     expect(checkpointReceiptReference(local, 'w-demo', 0)).toBeNull();
+    expect(local.remotelyAcknowledged).toBeNull();
   });
 
-  it('reports remote unavailability but fails on a confirmed remote mismatch', async () => {
+  it('reports remote unavailability but halts when a previously acknowledged checkpoint disappears', async () => {
     const { recordsRoot, checkpointsRoot } = temporaryRoots('remote-asymmetry');
     createSyntheticStreams(recordsRoot);
-    await checkpoint(recordsRoot, checkpointsRoot, '2026-08-02T15:00:00.000Z');
+    const artifact = await checkpoint(recordsRoot, checkpointsRoot, '2026-08-02T15:00:00.000Z');
+    appendAnchorAttempt(recordsRoot, {
+      event: 'anchor',
+      checkpoint_id: artifact.checkpoint_id,
+      composite_digest: artifact.composite_digest,
+      remote_sha: COMMIT_1,
+    });
 
     const unavailable = await verifyRecords({
       recordsRoot,
       checkpointsRoot,
       local: false,
       now: () => '2026-08-02T15:01:00.000Z',
-      remoteVerifier: async () => ({ status: 'unavailable', reason: 'synthetic remote outage' }),
+      localCommitResolver: localCommits({ 'cp-0001': COMMIT_1 }),
+      remoteObserver: async () => ({ status: 'unavailable', reason: 'synthetic remote outage' }),
     });
+    expect(unavailable.remoteStatus).toBe('unavailable');
     expect(unavailable.latestPushedCheckpoint).toBeNull();
+    expect(unavailable.remotelyAcknowledged).toBeNull();
     expect(unavailable.warnings).toContain('synthetic remote outage');
 
     await expect(
@@ -266,62 +337,279 @@ describe('ADR-003 local checkpoint detector', () => {
         checkpointsRoot,
         local: false,
         now: () => '2026-08-02T15:01:00.000Z',
-        remoteVerifier: async () => ({ status: 'mismatch', reason: 'synthetic remote rollback' }),
+        localCommitResolver: localCommits({ 'cp-0001': COMMIT_1 }),
+        remoteObserver: async () => ({ status: 'ref_absent', repoUrl: REPO_URL, branch: 'main' }),
       }),
-    ).rejects.toMatchObject({ code: 'remote-mismatch' });
+    ).rejects.toMatchObject({ code: 'remote-rollback' });
   });
 
-  it('binds remote confirmation to the exact committed artifact and pointer bytes', async () => {
-    const root = mkdtempSync(join(tmpdir(), 'checkpoint-remote-bytes-'));
+  it('uses the current prior acknowledgment for a definitely unacknowledged latest candidate', async () => {
+    const { recordsRoot, checkpointsRoot, second } = await pairedCheckpoints('prior-anchor-window');
+    appendAnchorAttempt(recordsRoot, {
+      event: 'anchor_failed',
+      checkpoint_id: second.checkpoint_id,
+      error_class: 'remote_definite_absence',
+    });
+    const report = await verifyRecords({
+      recordsRoot,
+      checkpointsRoot,
+      local: false,
+      now: () => '2026-08-02T14:10:00.000Z',
+      localCommitResolver: localCommits({ 'cp-0001': COMMIT_1, 'cp-0002': COMMIT_2 }),
+      remoteObserver: remoteRef({ [COMMIT_1]: true, [COMMIT_2]: false }),
+    });
+
+    expect(report.remoteStatus).toBe('unanchored_local_candidate');
+    expect(report.latestPushedCheckpoint).toMatchObject({
+      artifact: { checkpoint_id: 'cp-0001' },
+      commitSha: COMMIT_1,
+      remoteHeadSha: REMOTE_HEAD,
+    });
+    expect(report.remotelyAcknowledged).toBeNull();
+    expect(report.unanchoredWindowEntries).toBe(3);
+    expect(report.unanchoredWindowMinutes).toBe(10);
+    expect(checkpointReceiptReference(report, 'w-demo', 0)).toMatchObject({
+      checkpoint_id: 'cp-0001',
+      remote_commit_sha: COMMIT_1,
+    });
+  });
+
+  it('accepts current positive presence after an ambiguous push without synthesizing recovery evidence', async () => {
+    const { recordsRoot, checkpointsRoot, second } = await pairedCheckpoints('positive-after-ambiguous');
+    appendAnchorAttempt(recordsRoot, {
+      event: 'anchor_failed',
+      checkpoint_id: second.checkpoint_id,
+      error_class: 'acknowledgment_unknown',
+    });
+    const report = await verifyRecords({
+      recordsRoot,
+      checkpointsRoot,
+      local: false,
+      now: () => '2026-08-02T14:06:00.000Z',
+      localCommitResolver: localCommits({ 'cp-0001': COMMIT_1, 'cp-0002': COMMIT_2 }),
+      remoteObserver: remoteRef({ [COMMIT_1]: true, [COMMIT_2]: true }),
+    });
+
+    expect(report.remoteStatus).toBe('acknowledged');
+    expect(report.remotelyAcknowledged).toMatchObject({
+      checkpoint_id: 'cp-0002',
+      checkpoint_commit_sha: COMMIT_2,
+      remote_head_sha: REMOTE_HEAD,
+      observed_at: '2026-08-02T14:06:00.000Z',
+    });
+    expect(report.unanchoredWindowEntries).toBe(1);
+    expect(report.unanchoredWindowMinutes).toBe(1);
+  });
+
+  it('checks prior-anchor containment before candidate presence', async () => {
+    const { recordsRoot, checkpointsRoot, second } = await pairedCheckpoints('dropped-prior');
+    appendAnchorAttempt(recordsRoot, {
+      event: 'anchor_failed',
+      checkpoint_id: second.checkpoint_id,
+      error_class: 'acknowledgment_unknown',
+    });
+    await expect(
+      verifyRecords({
+        recordsRoot,
+        checkpointsRoot,
+        local: false,
+        localCommitResolver: localCommits({ 'cp-0001': COMMIT_1, 'cp-0002': COMMIT_2 }),
+        remoteObserver: remoteRef({ [COMMIT_1]: false, [COMMIT_2]: true }),
+      }),
+    ).rejects.toMatchObject({ code: 'remote-rollback' });
+  });
+
+  it('classifies a definitely failed uncommitted first checkpoint without claiming remote acknowledgment', async () => {
+    const { recordsRoot, checkpointsRoot } = temporaryRoots('uncommitted-first');
+    createSyntheticStreams(recordsRoot);
+    const artifact = await checkpoint(recordsRoot, checkpointsRoot, '2026-08-02T14:00:00.000Z');
+    appendAnchorAttempt(recordsRoot, {
+      event: 'anchor_failed',
+      checkpoint_id: artifact.checkpoint_id,
+      error_class: 'pre_remote_failure',
+    });
+    const report = await verifyRecords({
+      recordsRoot,
+      checkpointsRoot,
+      local: false,
+      localCommitResolver: localCommits({ 'cp-0001': null }),
+      remoteObserver: async () => ({ status: 'ref_absent', repoUrl: REPO_URL, branch: 'main' }),
+    });
+    expect(report.remoteStatus).toBe('unanchored_local_candidate');
+    expect(report.latestPushedCheckpoint).toBeNull();
+    expect(report.remotelyAcknowledged).toBeNull();
+    expect(report.unanchoredWindowEntries).toBe(4);
+    expect(report.unanchoredWindowMinutes).toBeNull();
+  });
+
+  it('does not infer honest-unpushed from remote absence when no prior acknowledgment or terminal evidence exists', async () => {
+    const { recordsRoot, checkpointsRoot } = temporaryRoots('no-prior-ambiguous');
+    createSyntheticStreams(recordsRoot);
+    await checkpoint(recordsRoot, checkpointsRoot, '2026-08-02T14:00:00.000Z');
+    await expect(
+      verifyRecords({
+        recordsRoot,
+        checkpointsRoot,
+        local: false,
+        localCommitResolver: localCommits({ 'cp-0001': COMMIT_1 }),
+        remoteObserver: async () => ({ status: 'ref_absent', repoUrl: REPO_URL, branch: 'main' }),
+      }),
+    ).rejects.toMatchObject({ code: 'remote-acknowledgment-ambiguous' });
+  });
+
+  it.each([
+    ['missing terminal evidence', (_recordsRoot: string, _second: Awaited<ReturnType<typeof checkpoint>>) => undefined],
+    ['unknown failure class', (recordsRoot: string, second: Awaited<ReturnType<typeof checkpoint>>) => {
+      appendAnchorAttempt(recordsRoot, {
+        event: 'anchor_failed',
+        checkpoint_id: second.checkpoint_id,
+        error_class: 'synthetic_unknown',
+      });
+    }],
+    ['duplicate terminal evidence', (recordsRoot: string, second: Awaited<ReturnType<typeof checkpoint>>) => {
+      for (let index = 0; index < 2; index += 1) {
+        appendAnchorAttempt(recordsRoot, {
+          event: 'anchor_failed',
+          checkpoint_id: second.checkpoint_id,
+          error_class: 'remote_definite_absence',
+        });
+      }
+    }],
+    ['contradictory terminal evidence', (recordsRoot: string, second: Awaited<ReturnType<typeof checkpoint>>) => {
+      appendAnchorAttempt(recordsRoot, {
+        event: 'anchor',
+        checkpoint_id: second.checkpoint_id,
+        composite_digest: second.composite_digest,
+        remote_sha: COMMIT_2,
+      });
+      appendAnchorAttempt(recordsRoot, {
+        event: 'anchor_failed',
+        checkpoint_id: second.checkpoint_id,
+        error_class: 'remote_definite_absence',
+      });
+    }],
+    ['mis-bound terminal evidence', (recordsRoot: string, second: Awaited<ReturnType<typeof checkpoint>>) => {
+      appendAnchorAttempt(recordsRoot, {
+        event: 'anchor',
+        checkpoint_id: second.checkpoint_id,
+        composite_digest: 'f'.repeat(64),
+        remote_sha: COMMIT_2,
+      });
+    }],
+  ])('halts on %s with a reachable remote', async (label, appendAttempt) => {
+    const { recordsRoot, checkpointsRoot, second } = await pairedCheckpoints(`ambiguous-${label.replaceAll(' ', '-')}`);
+    appendAttempt(recordsRoot, second);
+    await expect(
+      verifyRecords({
+        recordsRoot,
+        checkpointsRoot,
+        local: false,
+        localCommitResolver: localCommits({ 'cp-0001': COMMIT_1, 'cp-0002': COMMIT_2 }),
+        remoteObserver: remoteRef({ [COMMIT_1]: true, [COMMIT_2]: false }),
+      }),
+    ).rejects.toMatchObject({ code: 'remote-acknowledgment-ambiguous' });
+  });
+
+  it('halts when the observer omits a required containment result', async () => {
+    const { recordsRoot, checkpointsRoot, second } = await pairedCheckpoints('missing-containment');
+    appendAnchorAttempt(recordsRoot, {
+      event: 'anchor_failed',
+      checkpoint_id: second.checkpoint_id,
+      error_class: 'remote_definite_absence',
+    });
+    await expect(
+      verifyRecords({
+        recordsRoot,
+        checkpointsRoot,
+        local: false,
+        localCommitResolver: localCommits({ 'cp-0001': COMMIT_1, 'cp-0002': COMMIT_2 }),
+        remoteObserver: remoteRef({ [COMMIT_1]: true }),
+      }),
+    ).rejects.toMatchObject({ code: 'remote-acknowledgment-ambiguous' });
+  });
+
+  it('rejects definite remote-absence evidence for an uncommitted checkpoint before observing the remote', async () => {
+    const { recordsRoot, checkpointsRoot, second } = await pairedCheckpoints('uncommitted-definite-absence');
+    appendAnchorAttempt(recordsRoot, {
+      event: 'anchor_failed',
+      checkpoint_id: second.checkpoint_id,
+      error_class: 'remote_definite_absence',
+    });
+    let observed = false;
+    await expect(
+      verifyRecords({
+        recordsRoot,
+        checkpointsRoot,
+        local: false,
+        localCommitResolver: localCommits({ 'cp-0001': COMMIT_1, 'cp-0002': null }),
+        remoteObserver: async () => {
+          observed = true;
+          return { status: 'ref_absent', repoUrl: REPO_URL, branch: 'main' };
+        },
+      }),
+    ).rejects.toMatchObject({ code: 'remote-acknowledgment-ambiguous' });
+    expect(observed).toBe(false);
+  });
+
+  it('binds local commit evidence to the exact checkpoint artifact and matching pointer bytes', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'checkpoint-commit-bytes-'));
     roots.push(root);
     const recordsRoot = join(root, 'records');
     const checkpointsRoot = join(root, 'docs', 'checkpoints');
     createSyntheticStreams(recordsRoot);
     const artifact = await checkpoint(recordsRoot, checkpointsRoot, '2026-08-02T16:00:00.000Z');
-    const pointer = checkpointPointer.parse(
-      JSON.parse(readFileSync(join(checkpointsRoot, 'latest.json'), 'utf8')) as unknown,
-    );
-    const artifactFile = join(checkpointsRoot, pointer.file);
+    const file = '0001-20260802T160000Z.json';
+    const artifactFile = join(checkpointsRoot, file);
     const committedArtifact = readFileSync(artifactFile, 'utf8');
     const committedPointer = readFileSync(join(checkpointsRoot, 'latest.json'), 'utf8');
-    const commitSha = 'b'.repeat(40);
-    const remoteHeadSha = 'c'.repeat(40);
     const gitRunner = async (_cwd: string, args: readonly string[]) => {
       const command = args.join(' ');
-      if (command === 'symbolic-ref --short HEAD') return { stdout: 'main\n', exitCode: 0 as const };
-      if (command.startsWith('log -n 1 --format=%H -- ')) return { stdout: `${commitSha}\n`, exitCode: 0 as const };
-      if (command === `show ${commitSha}:docs/checkpoints/${pointer.file}`) {
+      if (command.startsWith('log --format=%H -- ')) return { stdout: `${COMMIT_1}\n`, exitCode: 0 as const };
+      if (command === `show ${COMMIT_1}:docs/checkpoints/${file}`) {
         return { stdout: committedArtifact, exitCode: 0 as const };
       }
-      if (command === `show ${commitSha}:docs/checkpoints/latest.json`) {
+      if (command === `show ${COMMIT_1}:docs/checkpoints/latest.json`) {
         return { stdout: committedPointer, exitCode: 0 as const };
-      }
-      if (command === 'remote get-url origin') {
-        return { stdout: 'https://github.com/example/runtime.git\n', exitCode: 0 as const };
-      }
-      if (command === 'ls-remote --heads origin refs/heads/main') {
-        return { stdout: `${remoteHeadSha}\trefs/heads/main\n`, exitCode: 0 as const };
-      }
-      if (command === `merge-base --is-ancestor ${commitSha} ${remoteHeadSha}`) {
-        return { stdout: '', exitCode: 0 as const };
       }
       throw new Error(`unexpected git command ${command}`);
     };
 
     await expect(
-      verifyCheckpointRemote({ artifact, pointer, checkpointsRoot, repoRoot: root, gitRunner }),
-    ).resolves.toMatchObject({
-      status: 'confirmed',
-      commitSha,
-      remoteHeadSha,
-      repoUrl: 'https://github.com/example/runtime',
-      branch: 'main',
-    });
+      resolveCheckpointCommit({ artifact, file, latest: true, checkpointsRoot, repoRoot: root, gitRunner }),
+    ).resolves.toEqual({ status: 'committed', commitSha: COMMIT_1 });
+
+    const supportOnlyRunner = async (cwd: string, args: readonly string[]) => {
+      const command = args.join(' ');
+      if (command === `show ${COMMIT_1}:docs/checkpoints/latest.json`) {
+        return { stdout: '{"checkpoint_id":"cp-0002"}\n', exitCode: 0 as const };
+      }
+      return gitRunner(cwd, args);
+    };
+    await expect(
+      resolveCheckpointCommit({
+        artifact,
+        file,
+        latest: false,
+        checkpointsRoot,
+        repoRoot: root,
+        gitRunner: supportOnlyRunner,
+      }),
+    ).resolves.toEqual({ status: 'uncommitted' });
+    await expect(
+      resolveCheckpointCommit({
+        artifact,
+        file,
+        latest: true,
+        checkpointsRoot,
+        repoRoot: root,
+        gitRunner: supportOnlyRunner,
+      }),
+    ).rejects.toMatchObject({ code: 'remote-acknowledgment-ambiguous' });
 
     writeFileSync(artifactFile, `${committedArtifact.trim()} \n`, 'utf8');
     await expect(
-      verifyCheckpointRemote({ artifact, pointer, checkpointsRoot, repoRoot: root, gitRunner }),
-    ).resolves.toMatchObject({ status: 'mismatch', reason: 'local checkpoint bytes differ from the committed checkpoint' });
+      resolveCheckpointCommit({ artifact, file, latest: true, checkpointsRoot, repoRoot: root, gitRunner }),
+    ).rejects.toMatchObject({ code: 'remote-acknowledgment-ambiguous' });
   });
 
   it('runs verify:records --local and records the lengths only after reading', async () => {
@@ -353,7 +641,7 @@ describe('ADR-003 local checkpoint detector', () => {
     });
 
     expect(result.status).toBe(0);
-    expect(result.stdout).toContain('no divergence detected as of checkpoint 0001');
+    expect(result.stdout).toContain('no local divergence detected as of checkpoint 0001');
     expect(result.stdout).toContain('local mode; remote presence not checked');
     expect(result.stderr).toContain('remote checkpoint presence was not checked');
     expect(verifyChain(join(recordsRoot, 'w-demo', 'wal.jsonl'), 'wal-entry').ok).toBe(true);

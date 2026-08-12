@@ -219,6 +219,7 @@ export async function startAuthorizationProcess(
       verifyRecordLayer({
         recordsRoot,
         checkpointsRoot,
+        worldId: world,
         local: verifyLocally,
         repoRoot: process.cwd(),
         ...(env['RUNTIME_CHECKPOINT_BRANCH'] === undefined

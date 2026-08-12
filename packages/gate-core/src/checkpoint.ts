@@ -19,10 +19,19 @@ import { basename, dirname, join, relative, resolve } from 'node:path';
 import { z } from 'zod';
 
 import { canonicalize } from './canonicalize.js';
-import { verifyChain } from './chain.js';
+import { readVerifiedChainEntries, verifyChain } from './chain.js';
 import type { ChainDomainTag } from './domain.js';
 import { digestFor, isHexDigest, verifyDigest } from './hash.js';
-import { accessEntry, hexDigest, id, integer, timestamp, worldId } from './schemas/index.js';
+import {
+  accessEntry,
+  anchorEvent,
+  anchorFailedEvent,
+  hexDigest,
+  id,
+  integer,
+  timestamp,
+  worldId,
+} from './schemas/index.js';
 import type { WalStore } from './walStore.js';
 
 const streamName = z.enum(['access', 'action', 'wal']);
@@ -87,7 +96,8 @@ export type RecordVerificationErrorCode =
   | 'chain-tamper'
   | 'missing-stream'
   | 'rollback'
-  | 'remote-mismatch';
+  | 'remote-rollback'
+  | 'remote-acknowledgment-ambiguous';
 
 export class RecordVerificationError extends Error {
   constructor(
@@ -102,30 +112,45 @@ export class RecordVerificationError extends Error {
   }
 }
 
-export type RemoteCheckpointStatus =
+export type LocalCheckpointCommitEvidence =
+  | { readonly status: 'committed'; readonly commitSha: string }
+  | { readonly status: 'uncommitted' };
+
+export interface LocalCheckpointCommitContext {
+  readonly artifact: CheckpointArtifact;
+  readonly file: string;
+  readonly latest: boolean;
+  readonly checkpointsRoot: string;
+  readonly repoRoot: string;
+  readonly gitRunner?: CheckpointGitRunner;
+}
+
+export type LocalCheckpointCommitResolver = (
+  context: LocalCheckpointCommitContext,
+) => Promise<LocalCheckpointCommitEvidence>;
+
+export type RemoteCheckpointObservation =
+  | { readonly status: 'unavailable'; readonly reason: string }
+  | { readonly status: 'ref_absent'; readonly repoUrl: string; readonly branch: string }
   | {
-      readonly status: 'confirmed';
-      readonly commitSha: string;
+      readonly status: 'ref_present';
       readonly remoteHeadSha: string;
       readonly repoUrl: string;
       readonly branch: string;
-    }
-  | { readonly status: 'unavailable'; readonly reason: string }
-  | { readonly status: 'mismatch'; readonly reason: string };
+      readonly contains: Readonly<Record<string, boolean>>;
+    };
 
-export interface RemoteCheckpointContext {
-  readonly artifact: CheckpointArtifact;
-  readonly pointer: CheckpointPointer;
-  readonly checkpointsRoot: string;
+export interface RemoteCheckpointObservationContext {
   readonly repoRoot: string;
+  readonly commitShas: readonly string[];
   readonly branch?: string;
   readonly repoUrl?: string;
   readonly gitRunner?: CheckpointGitRunner;
 }
 
-export type RemoteCheckpointVerifier = (
-  context: RemoteCheckpointContext,
-) => Promise<RemoteCheckpointStatus>;
+export type RemoteCheckpointObserver = (
+  context: RemoteCheckpointObservationContext,
+) => Promise<RemoteCheckpointObservation>;
 
 export type CheckpointGitRunner = (
   cwd: string,
@@ -136,13 +161,28 @@ export type CheckpointGitRunner = (
 export interface LatestPushedCheckpoint {
   readonly artifact: CheckpointArtifact;
   readonly commitSha: string;
+  readonly remoteHeadSha: string;
   readonly repoUrl: string;
+  readonly branch: string;
+  readonly observedAt: string;
+}
+
+export interface RemotelyAcknowledgedCheckpoint {
+  readonly checkpoint_id: string;
+  readonly composite_digest: string;
+  readonly checkpoint_commit_sha: string;
+  readonly remote_head_sha: string;
+  readonly repo_url: string;
+  readonly branch: string;
+  readonly observed_at: string;
 }
 
 export interface RecordsVerificationReport {
   readonly mode: 'local' | 'remote';
+  readonly remoteStatus: 'not_checked' | 'acknowledged' | 'unanchored_local_candidate' | 'unavailable';
   readonly checkpoint: CheckpointArtifact | null;
   readonly latestPushedCheckpoint: LatestPushedCheckpoint | null;
+  readonly remotelyAcknowledged: RemotelyAcknowledgedCheckpoint | null;
   readonly readLengths: Readonly<Record<string, number>>;
   readonly unanchoredWindowEntries: number;
   readonly unanchoredWindowMinutes: number | null;
@@ -153,12 +193,14 @@ export interface RecordsVerificationReport {
 export interface VerifyRecordsOptions {
   readonly recordsRoot: string;
   readonly checkpointsRoot: string;
+  readonly worldId?: string;
   readonly local: boolean;
   readonly repoRoot?: string;
   readonly branch?: string;
   readonly repoUrl?: string;
   readonly now?: () => string;
-  readonly remoteVerifier?: RemoteCheckpointVerifier;
+  readonly localCommitResolver?: LocalCheckpointCommitResolver;
+  readonly remoteObserver?: RemoteCheckpointObserver;
   readonly recordVerification?: (readLengths: Readonly<Record<string, number>>) => Promise<void>;
 }
 
@@ -185,6 +227,36 @@ interface LocalChains {
   readonly readLengths: Readonly<Record<string, number>>;
 }
 
+type AnchorAttempt =
+  | { readonly kind: 'anchor'; readonly value: z.infer<typeof anchorEvent> }
+  | {
+      readonly kind: 'anchor_failed';
+      readonly failureClass: 'pre_remote_failure' | 'remote_definite_absence' | 'acknowledgment_unknown';
+      readonly value: z.infer<typeof anchorFailedEvent>;
+    };
+
+interface CheckpointEvidence {
+  readonly file: string;
+  readonly artifact: CheckpointArtifact;
+  readonly commit: LocalCheckpointCommitEvidence;
+  readonly attempt: AnchorAttempt | null;
+}
+
+type RemoteAcknowledgmentDecision =
+  | {
+      readonly status: 'acknowledged';
+      readonly checkpoint: CheckpointEvidence;
+      readonly observation: Extract<RemoteCheckpointObservation, { readonly status: 'ref_present' }>;
+    }
+  | {
+      readonly status: 'unanchored_local_candidate';
+      readonly priorAcknowledged: CheckpointEvidence | null;
+      readonly observation: Exclude<RemoteCheckpointObservation, { readonly status: 'unavailable' }>;
+    }
+  | { readonly status: 'unavailable'; readonly reason: string }
+  | { readonly status: 'remote_rollback'; readonly reason: string }
+  | { readonly status: 'remote_acknowledgment_ambiguous'; readonly reason: string };
+
 function compareText(left: string, right: string): number {
   return left < right ? -1 : left > right ? 1 : 0;
 }
@@ -207,6 +279,15 @@ function compactTimestamp(value: string): string {
 
 function expectedCheckpointFile(artifact: CheckpointArtifact): string {
   return `${checkpointNumber(artifact.seq)}-${compactTimestamp(artifact.created_at)}.json`;
+}
+
+function pointerForArtifact(file: string, artifact: CheckpointArtifact): CheckpointPointer {
+  return checkpointPointer.parse({
+    seq: artifact.seq,
+    file,
+    checkpoint_id: artifact.checkpoint_id,
+    composite_digest: artifact.composite_digest,
+  });
 }
 
 function decodeUtf8(bytes: Buffer, label: string): string {
@@ -389,6 +470,62 @@ function verifyLocalChains(recordsRoot: string): LocalChains {
     }
   }
   return { heads: sortedHeads(heads), files, readLengths };
+}
+
+function acknowledgmentAmbiguous(message: string): RecordVerificationError {
+  return new RecordVerificationError('remote-acknowledgment-ambiguous', message);
+}
+
+function anchorFailureClass(
+  value: string,
+): 'pre_remote_failure' | 'remote_definite_absence' | 'acknowledgment_unknown' {
+  if (value === 'pre_remote_failure' || value === 'remote_definite_absence') return value;
+  return 'acknowledgment_unknown';
+}
+
+function readAnchorAttempts(
+  recordsRoot: string,
+  configuredWorldId: string,
+  checkpoints: CheckpointSet,
+): ReadonlyMap<string, AnchorAttempt> {
+  const world = worldId.parse(configuredWorldId);
+  const known = new Map(checkpoints.artifacts.map((item) => [item.artifact.checkpoint_id, item.artifact]));
+  const attempts = new Map<string, AnchorAttempt>();
+  const accessFile = join(recordsRoot, world, 'access.jsonl');
+  if (!existsSync(accessFile)) return attempts;
+  const entries = readVerifiedChainEntries(accessFile, 'access-entry');
+  for (const envelope of entries) {
+    const { seq: _seq, prev_hash: _prevHash, entry_hash: _entryHash, ...payload } = envelope;
+    if (payload['event'] !== 'anchor' && payload['event'] !== 'anchor_failed') continue;
+    const parsed = payload['event'] === 'anchor' ? anchorEvent.safeParse(payload) : anchorFailedEvent.safeParse(payload);
+    if (!parsed.success) throw acknowledgmentAmbiguous('anchor attempt evidence is malformed');
+    const checkpoint = known.get(parsed.data.checkpoint_id);
+    if (checkpoint === undefined) {
+      throw acknowledgmentAmbiguous(`anchor attempt names unknown checkpoint ${parsed.data.checkpoint_id}`);
+    }
+    if (parsed.data.world_id !== world) {
+      throw acknowledgmentAmbiguous(`anchor attempt for ${parsed.data.checkpoint_id} names another world`);
+    }
+    if (attempts.has(parsed.data.checkpoint_id)) {
+      throw acknowledgmentAmbiguous(`checkpoint ${parsed.data.checkpoint_id} has multiple terminal anchor attempts`);
+    }
+    if (parsed.data.event === 'anchor') {
+      if (!verifyDigest(parsed.data.composite_digest, checkpoint.composite_digest)) {
+        throw acknowledgmentAmbiguous(`anchor for ${parsed.data.checkpoint_id} does not bind its composite digest`);
+      }
+      if (!gitCommitSha.safeParse(parsed.data.remote_sha).success) {
+        throw acknowledgmentAmbiguous(`anchor for ${parsed.data.checkpoint_id} has an invalid commit sha`);
+      }
+      attempts.set(parsed.data.checkpoint_id, { kind: 'anchor', value: parsed.data });
+    } else {
+      attempts.set(parsed.data.checkpoint_id, {
+        kind: 'anchor_failed',
+        failureClass: anchorFailureClass(parsed.data.error_class),
+        value: parsed.data,
+      });
+    }
+  }
+  return attempts;
 }
 
 function entryHashAt(file: string, index: number): string {
@@ -586,130 +723,369 @@ function runGit(
   });
 }
 
-export async function verifyCheckpointRemote(
-  context: RemoteCheckpointContext,
-): Promise<RemoteCheckpointStatus> {
+export async function resolveCheckpointCommit(
+  context: LocalCheckpointCommitContext,
+): Promise<LocalCheckpointCommitEvidence> {
+  const executeGit = context.gitRunner ?? runGit;
+  const repoRoot = resolve(context.repoRoot);
+  const artifactPath = resolve(context.checkpointsRoot, context.file);
+  const relativeArtifact = relative(repoRoot, artifactPath).replaceAll('\\', '/');
+  const relativePointer = relative(repoRoot, resolve(context.checkpointsRoot, 'latest.json')).replaceAll('\\', '/');
+  if (
+    relativeArtifact.startsWith('../') ||
+    relativeArtifact === '' ||
+    relativePointer.startsWith('../') ||
+    relativePointer === ''
+  ) {
+    throw acknowledgmentAmbiguous('checkpoint artifact or pointer is outside the configured repository');
+  }
+  try {
+    const history = (await executeGit(repoRoot, ['log', '--format=%H', '--', relativeArtifact])).stdout
+      .split(/\r?\n/)
+      .map((value) => value.trim())
+      .filter((value) => value.length > 0);
+    for (const commitSha of history) {
+      if (!gitCommitSha.safeParse(commitSha).success) {
+        throw acknowledgmentAmbiguous(`checkpoint ${context.artifact.checkpoint_id} has an invalid local commit sha`);
+      }
+    }
+    const localArtifact = decodeUtf8(readFileSync(artifactPath), context.file);
+    const expectedPointer = `${canonicalize(pointerForArtifact(context.file, context.artifact))}\n`;
+    for (const commitSha of history) {
+      let committedArtifact: string;
+      let committedPointer: string;
+      try {
+        committedArtifact = (await executeGit(repoRoot, ['show', `${commitSha}:${relativeArtifact}`])).stdout;
+        committedPointer = (await executeGit(repoRoot, ['show', `${commitSha}:${relativePointer}`])).stdout;
+      } catch {
+        continue;
+      }
+      if (committedPointer !== expectedPointer) continue;
+      if (committedArtifact !== localArtifact) {
+        throw acknowledgmentAmbiguous(`checkpoint commit ${commitSha} differs from the exact artifact bytes`);
+      }
+      return { status: 'committed', commitSha };
+    }
+    if (context.latest && history.length > 0) {
+      throw acknowledgmentAmbiguous(
+        `latest checkpoint ${context.artifact.checkpoint_id} is committed without its exact matching pointer`,
+      );
+    }
+    return { status: 'uncommitted' };
+  } catch (error) {
+    if (error instanceof RecordVerificationError) throw error;
+    throw acknowledgmentAmbiguous(`local commit evidence for ${context.artifact.checkpoint_id} is unavailable`);
+  }
+}
+
+export async function observeCheckpointRemote(
+  context: RemoteCheckpointObservationContext,
+): Promise<RemoteCheckpointObservation> {
+  if (context.branch !== undefined && !validBranch(context.branch)) {
+    throw acknowledgmentAmbiguous('configured checkpoint branch is invalid');
+  }
+  const requestedUrl = context.repoUrl === undefined ? undefined : safeRepoUrl(context.repoUrl);
+  if (context.repoUrl !== undefined && requestedUrl === null) {
+    throw acknowledgmentAmbiguous('configured checkpoint repository is not a public HTTP URL');
+  }
   try {
     const executeGit = context.gitRunner ?? runGit;
     const repoRoot = resolve(context.repoRoot);
-    const artifactPath = resolve(context.checkpointsRoot, context.pointer.file);
-    const relativeArtifact = relative(repoRoot, artifactPath).replaceAll('\\', '/');
-    if (relativeArtifact.startsWith('../') || relativeArtifact === '') {
-      return { status: 'mismatch', reason: 'checkpoint artifact is outside the repository' };
-    }
     const branchResult = context.branch === undefined
       ? await executeGit(repoRoot, ['symbolic-ref', '--short', 'HEAD'])
       : { stdout: context.branch, exitCode: 0 as const };
     const branch = branchResult.stdout.trim();
     if (!validBranch(branch)) return { status: 'unavailable', reason: 'repository has no verifiable branch' };
-    const commitResult = await executeGit(repoRoot, ['log', '-n', '1', '--format=%H', '--', relativeArtifact]);
-    const commitSha = commitResult.stdout.trim();
-    if (!gitCommitSha.safeParse(commitSha).success) {
-      return { status: 'mismatch', reason: 'latest checkpoint is not contained in a local commit' };
-    }
-    const relativePointer = relative(repoRoot, resolve(context.checkpointsRoot, 'latest.json')).replaceAll('\\', '/');
-    if (relativePointer.startsWith('../') || relativePointer === '') {
-      return { status: 'mismatch', reason: 'checkpoint pointer is outside the repository' };
-    }
-    let committedArtifact: string;
-    let committedPointer: string;
-    try {
-      committedArtifact = (await executeGit(repoRoot, ['show', `${commitSha}:${relativeArtifact}`])).stdout;
-      committedPointer = (await executeGit(repoRoot, ['show', `${commitSha}:${relativePointer}`])).stdout;
-    } catch {
-      return { status: 'mismatch', reason: 'checkpoint commit does not contain the artifact and pointer' };
-    }
-    const localArtifact = decodeUtf8(readFileSync(artifactPath), context.pointer.file);
-    const localPointer = decodeUtf8(readFileSync(resolve(context.checkpointsRoot, 'latest.json')), 'latest.json');
-    if (committedArtifact !== localArtifact || committedPointer !== localPointer) {
-      return { status: 'mismatch', reason: 'local checkpoint bytes differ from the committed checkpoint' };
-    }
     const originUrl = safeRepoUrl((await executeGit(repoRoot, ['remote', 'get-url', 'origin'])).stdout.trim());
-    if (originUrl === null) return { status: 'unavailable', reason: 'origin is not a public HTTP repository URL' };
-    const configuredUrl = context.repoUrl === undefined ? originUrl : safeRepoUrl(context.repoUrl);
-    if (configuredUrl === null || configuredUrl !== originUrl) {
-      return { status: 'mismatch', reason: 'configured checkpoint repository does not match origin' };
+    if (originUrl === null) throw acknowledgmentAmbiguous('origin is not a public HTTP repository URL');
+    if (requestedUrl !== undefined && requestedUrl !== originUrl) {
+      throw acknowledgmentAmbiguous('configured checkpoint repository does not match origin');
     }
-    const repoUrl = configuredUrl;
+    const repoUrl = requestedUrl ?? originUrl;
     const ref = `refs/heads/${branch}`;
     const remoteOutput = (await executeGit(repoRoot, ['ls-remote', '--heads', 'origin', ref])).stdout.trim();
     const remoteLine = remoteOutput
       .split(/\r?\n/)
+      .filter((line) => line.length > 0)
       .map((line) => line.trim().split(/\s+/))
       .find((parts) => parts[1] === ref);
-    const remoteHeadSha = remoteLine?.[0] ?? '';
+    if (remoteLine === undefined) return { status: 'ref_absent', repoUrl, branch };
+    const remoteHeadSha = remoteLine[0] ?? '';
     if (!gitCommitSha.safeParse(remoteHeadSha).success) {
-      return { status: 'mismatch', reason: `remote branch ${branch} does not resolve` };
+      throw acknowledgmentAmbiguous(`remote branch ${branch} returned an invalid commit sha`);
     }
-    if (remoteHeadSha !== commitSha) {
+    const contains: Record<string, boolean> = {};
+    for (const commitSha of [...new Set(context.commitShas)]) {
+      if (!gitCommitSha.safeParse(commitSha).success) {
+        throw acknowledgmentAmbiguous('remote observation received an invalid local checkpoint commit sha');
+      }
+      if (commitSha === remoteHeadSha) {
+        contains[commitSha] = true;
+        continue;
+      }
       const ancestor = await executeGit(repoRoot, ['merge-base', '--is-ancestor', commitSha, remoteHeadSha], true);
-      if (ancestor.exitCode === 1) {
-        return { status: 'mismatch', reason: 'remote branch does not contain the checkpoint commit' };
+      contains[commitSha] = ancestor.exitCode === 0;
+    }
+    return { status: 'ref_present', remoteHeadSha, repoUrl, branch, contains };
+  } catch (error) {
+    if (error instanceof RecordVerificationError) throw error;
+    return { status: 'unavailable', reason: 'remote checkpoint observation is unavailable' };
+  }
+}
+
+function containsCommit(
+  observation: Extract<RemoteCheckpointObservation, { readonly status: 'ref_present' }>,
+  commitSha: string,
+): boolean | undefined {
+  return Object.prototype.hasOwnProperty.call(observation.contains, commitSha)
+    ? observation.contains[commitSha]
+    : undefined;
+}
+
+function validateRemoteObservation(
+  observation: RemoteCheckpointObservation,
+  options: VerifyRecordsOptions,
+): RemoteCheckpointObservation {
+  if (observation.status === 'unavailable') {
+    if (observation.reason.length === 0) throw acknowledgmentAmbiguous('remote unavailability has no reason');
+    return observation;
+  }
+  const observedUrl = safeRepoUrl(observation.repoUrl);
+  if (observedUrl === null || observedUrl !== observation.repoUrl || !validBranch(observation.branch)) {
+    throw acknowledgmentAmbiguous('remote observation has an invalid repository or branch binding');
+  }
+  const configuredUrl = options.repoUrl === undefined ? undefined : safeRepoUrl(options.repoUrl);
+  if (options.repoUrl !== undefined && configuredUrl === null) {
+    throw acknowledgmentAmbiguous('configured checkpoint repository is not a public HTTP URL');
+  }
+  if (
+    (options.branch !== undefined && options.branch !== observation.branch) ||
+    (configuredUrl !== undefined && configuredUrl !== observedUrl)
+  ) {
+    throw acknowledgmentAmbiguous('remote observation does not match the configured repository and branch');
+  }
+  if (observation.status === 'ref_present') {
+    if (!gitCommitSha.safeParse(observation.remoteHeadSha).success) {
+      throw acknowledgmentAmbiguous('remote observation has an invalid head commit sha');
+    }
+    for (const [commitSha, contained] of Object.entries(observation.contains)) {
+      if (!gitCommitSha.safeParse(commitSha).success || typeof contained !== 'boolean') {
+        throw acknowledgmentAmbiguous('remote observation has an invalid containment result');
       }
     }
-    return { status: 'confirmed', commitSha, remoteHeadSha, repoUrl, branch };
-  } catch {
-    return { status: 'unavailable', reason: 'remote checkpoint verification is unavailable' };
   }
+  return observation;
+}
+
+function definitelyUnacknowledged(candidate: CheckpointEvidence): boolean {
+  if (candidate.attempt?.kind !== 'anchor_failed') return false;
+  if (candidate.attempt.failureClass === 'pre_remote_failure') return true;
+  return candidate.attempt.failureClass === 'remote_definite_absence' && candidate.commit.status === 'committed';
+}
+
+/**
+ * Trust boundary: classification trusts the verified-local terminal attempt evidence. An operator able to forge
+ * that chain and also roll back the force-push-protected remote defeats this single-custodian POC; ADR-003's
+ * no-independent-custody limit bounds that combined attack out of scope rather than presenting false assurance.
+ */
+function classifyRemoteAcknowledgment(
+  evidence: readonly CheckpointEvidence[],
+  observation: RemoteCheckpointObservation,
+): RemoteAcknowledgmentDecision {
+  const candidate = evidence.at(-1);
+  if (candidate === undefined) {
+    return { status: 'remote_acknowledgment_ambiguous', reason: 'no checkpoint candidate exists' };
+  }
+  if (observation.status === 'unavailable') return observation;
+  const priorAcknowledged = [...evidence]
+    .slice(0, -1)
+    .reverse()
+    .find((item) => item.attempt?.kind === 'anchor') ?? null;
+  if (observation.status === 'ref_present' && priorAcknowledged?.commit.status === 'committed') {
+    const priorContained = containsCommit(observation, priorAcknowledged.commit.commitSha);
+    if (priorContained === undefined) {
+      return {
+        status: 'remote_acknowledgment_ambiguous',
+        reason: 'remote observation omitted the prior acknowledged checkpoint containment result',
+      };
+    }
+    if (!priorContained) {
+      return { status: 'remote_rollback', reason: 'remote dropped the most recent prior acknowledged checkpoint' };
+    }
+  } else if (priorAcknowledged !== null) {
+    return { status: 'remote_rollback', reason: 'remote branch is absent after a prior acknowledgment' };
+  }
+  if (observation.status === 'ref_present' && candidate.commit.status === 'committed') {
+    const candidateContained = containsCommit(observation, candidate.commit.commitSha);
+    if (candidateContained === undefined) {
+      return {
+        status: 'remote_acknowledgment_ambiguous',
+        reason: 'remote observation omitted the latest checkpoint containment result',
+      };
+    }
+    if (candidateContained) return { status: 'acknowledged', checkpoint: candidate, observation };
+  }
+  if (candidate.attempt?.kind === 'anchor') {
+    return { status: 'remote_rollback', reason: 'remote dropped the latest acknowledged checkpoint' };
+  }
+  if (definitelyUnacknowledged(candidate)) {
+    return { status: 'unanchored_local_candidate', priorAcknowledged, observation };
+  }
+  return {
+    status: 'remote_acknowledgment_ambiguous',
+    reason: 'latest checkpoint lacks affirmative definite-failure evidence',
+  };
+}
+
+async function resolveCheckpointEvidence(
+  checkpoints: CheckpointSet,
+  attempts: ReadonlyMap<string, AnchorAttempt>,
+  options: VerifyRecordsOptions,
+): Promise<readonly CheckpointEvidence[]> {
+  const resolver = options.localCommitResolver ?? resolveCheckpointCommit;
+  const evidence = await Promise.all(
+    checkpoints.artifacts.map(async (item, index): Promise<CheckpointEvidence> => ({
+      ...item,
+      commit: await resolver({
+        artifact: item.artifact,
+        file: item.file,
+        latest: index === checkpoints.artifacts.length - 1,
+        checkpointsRoot: options.checkpointsRoot,
+        repoRoot: options.repoRoot ?? process.cwd(),
+      }),
+      attempt: attempts.get(item.artifact.checkpoint_id) ?? null,
+    })),
+  );
+  for (const item of evidence) {
+    if (item.commit.status === 'committed' && !gitCommitSha.safeParse(item.commit.commitSha).success) {
+      throw acknowledgmentAmbiguous(`local commit evidence for ${item.artifact.checkpoint_id} has an invalid sha`);
+    }
+    if (item.attempt?.kind === 'anchor') {
+      if (item.commit.status !== 'committed' || item.attempt.value.remote_sha !== item.commit.commitSha) {
+        throw acknowledgmentAmbiguous(`anchor for ${item.artifact.checkpoint_id} does not bind its exact commit`);
+      }
+    }
+    if (
+      item.attempt?.kind === 'anchor_failed' &&
+      item.attempt.failureClass === 'remote_definite_absence' &&
+      item.commit.status !== 'committed'
+    ) {
+      throw acknowledgmentAmbiguous(
+        `remote definite-absence evidence for ${item.artifact.checkpoint_id} has no exact local commit`,
+      );
+    }
+  }
+  return evidence;
+}
+
+function allLocalEntries(local: LocalChains): number {
+  return local.heads.reduce((total, head) => total + head.length, 0);
+}
+
+function openWindow(
+  anchor: CheckpointArtifact | null,
+  local: LocalChains,
+  now: string,
+): { readonly entries: number; readonly minutes: number | null } {
+  if (anchor === null) return { entries: allLocalEntries(local), minutes: null };
+  return {
+    entries: assertExtendsCheckpoint(anchor, local),
+    minutes: Math.max(0, Math.floor((Date.parse(now) - Date.parse(anchor.created_at)) / 60_000)),
+  };
 }
 
 export async function verifyRecords(options: VerifyRecordsOptions): Promise<RecordsVerificationReport> {
   const checkpoints = readCheckpointSet(options.checkpointsRoot);
   const local = verifyLocalChains(options.recordsRoot);
   const latest = checkpoints.artifacts.at(-1)?.artifact ?? null;
-  const pointer = checkpoints.pointer;
-  const unanchoredWindowEntries = latest === null
-    ? local.heads.reduce((total, head) => total + head.length, 0)
-    : assertExtendsCheckpoint(latest, local);
+  if (latest !== null) assertExtendsCheckpoint(latest, local);
+  const attempts = readAnchorAttempts(options.recordsRoot, options.worldId ?? 'w-demo', checkpoints);
   const now = timestamp.parse((options.now ?? (() => new Date().toISOString()))());
-  const unanchoredWindowMinutes = latest === null
-    ? null
-    : Math.max(0, Math.floor((Date.parse(now) - Date.parse(latest.created_at)) / 60_000));
   const warnings: string[] = [];
   let latestPushedCheckpoint: LatestPushedCheckpoint | null = null;
-  if (latest !== null && pointer !== null) {
-    if (options.local) {
-      warnings.push('local mode: remote checkpoint presence was not checked');
-    } else {
-      const remote = await (options.remoteVerifier ?? verifyCheckpointRemote)({
-        artifact: latest,
-        pointer,
-        checkpointsRoot: options.checkpointsRoot,
+  let remotelyAcknowledged: RemotelyAcknowledgedCheckpoint | null = null;
+  let remoteStatus: RecordsVerificationReport['remoteStatus'] = 'not_checked';
+  if (options.local) {
+    warnings.push('local mode: remote checkpoint presence was not checked');
+  } else if (latest !== null && checkpoints.pointer !== null) {
+    const evidence = await resolveCheckpointEvidence(checkpoints, attempts, options);
+    const commits = evidence.flatMap((item) => item.commit.status === 'committed' ? [item.commit.commitSha] : []);
+    const observation = validateRemoteObservation(
+      await (options.remoteObserver ?? observeCheckpointRemote)({
         repoRoot: options.repoRoot ?? process.cwd(),
+        commitShas: commits,
         ...(options.branch === undefined ? {} : { branch: options.branch }),
         ...(options.repoUrl === undefined ? {} : { repoUrl: options.repoUrl }),
-      });
-      if (remote.status === 'mismatch') {
-        throw new RecordVerificationError('remote-mismatch', `remote checkpoint mismatch: ${remote.reason}`);
-      }
-      if (remote.status === 'unavailable') warnings.push(remote.reason);
-      else {
+      }),
+      options,
+    );
+    const decision = classifyRemoteAcknowledgment(evidence, observation);
+    if (decision.status === 'remote_rollback') {
+      throw new RecordVerificationError('remote-rollback', `remote checkpoint rollback: ${decision.reason}`);
+    }
+    if (decision.status === 'remote_acknowledgment_ambiguous') {
+      throw acknowledgmentAmbiguous(`remote checkpoint acknowledgment is ambiguous: ${decision.reason}`);
+    }
+    remoteStatus = decision.status;
+    if (decision.status === 'unavailable') {
+      warnings.push(decision.reason);
+    } else if (decision.status === 'unanchored_local_candidate') {
+      warnings.push(`latest local checkpoint ${latest.checkpoint_id} is definitely unacknowledged`);
+      if (decision.priorAcknowledged?.commit.status === 'committed' && observation.status === 'ref_present') {
         latestPushedCheckpoint = {
-          artifact: latest,
-          commitSha: remote.commitSha,
-          repoUrl: remote.repoUrl,
+          artifact: decision.priorAcknowledged.artifact,
+          commitSha: decision.priorAcknowledged.commit.commitSha,
+          remoteHeadSha: observation.remoteHeadSha,
+          repoUrl: observation.repoUrl,
+          branch: observation.branch,
+          observedAt: now,
         };
       }
+    } else {
+      if (decision.checkpoint.commit.status !== 'committed') {
+        throw acknowledgmentAmbiguous('acknowledged checkpoint has no exact local commit');
+      }
+      latestPushedCheckpoint = {
+        artifact: decision.checkpoint.artifact,
+        commitSha: decision.checkpoint.commit.commitSha,
+        remoteHeadSha: decision.observation.remoteHeadSha,
+        repoUrl: decision.observation.repoUrl,
+        branch: decision.observation.branch,
+        observedAt: now,
+      };
+      remotelyAcknowledged = {
+        checkpoint_id: decision.checkpoint.artifact.checkpoint_id,
+        composite_digest: decision.checkpoint.artifact.composite_digest,
+        checkpoint_commit_sha: decision.checkpoint.commit.commitSha,
+        remote_head_sha: decision.observation.remoteHeadSha,
+        repo_url: decision.observation.repoUrl,
+        branch: decision.observation.branch,
+        observed_at: now,
+      };
     }
-  } else if (options.local) {
-    warnings.push('local mode: remote checkpoint presence was not checked');
   }
+  const window = openWindow(latestPushedCheckpoint?.artifact ?? null, local, now);
   const checkpointLabel = latest === null
-    ? 'no prior anchor'
-    : `no divergence detected as of checkpoint ${checkpointNumber(latest.seq)}`;
-  const windowLabel = latest === null
-    ? `${unanchoredWindowEntries} entries are unanchored`
-    : `un-anchored window ${unanchoredWindowMinutes} min / ${unanchoredWindowEntries} entries`;
+    ? 'no local checkpoint'
+    : `no local divergence detected as of checkpoint ${checkpointNumber(latest.seq)}`;
+  const anchorLabel = latestPushedCheckpoint === null
+    ? 'no prior acknowledged checkpoint'
+    : `remote acknowledgment ${checkpointNumber(latestPushedCheckpoint.artifact.seq)}`;
+  const windowLabel = window.minutes === null
+    ? `${window.entries} entries are unanchored`
+    : `un-anchored window ${window.minutes} min / ${window.entries} entries`;
   const modeLabel = options.local ? 'local mode; remote presence not checked' : 'remote mode';
-  const message = `${checkpointLabel}; ${windowLabel}; ${modeLabel}`;
+  const message = `${checkpointLabel}; ${anchorLabel}; ${windowLabel}; ${modeLabel}`;
   await options.recordVerification?.(local.readLengths);
   return {
     mode: options.local ? 'local' : 'remote',
+    remoteStatus,
     checkpoint: latest,
     latestPushedCheckpoint,
+    remotelyAcknowledged,
     readLengths: local.readLengths,
-    unanchoredWindowEntries,
-    unanchoredWindowMinutes,
+    unanchoredWindowEntries: window.entries,
+    unanchoredWindowMinutes: window.minutes,
     warnings,
     message,
   };

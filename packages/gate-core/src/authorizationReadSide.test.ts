@@ -58,23 +58,26 @@ describe('authorization read side', () => {
     );
   });
 
-  it('projects record-verification alarms and keeps the route role-scoped', async () => {
-    const { reads } = harness(async () => {
-      throw new RecordVerificationError('rollback', 'synthetic rollback detail');
-    });
+  it.each(['rollback', 'remote-rollback', 'remote-acknowledgment-ambiguous'] as const)(
+    'projects the %s record-verification alarm and keeps the route role-scoped',
+    async (code) => {
+      const { reads } = harness(async () => {
+        throw new RecordVerificationError(code, 'synthetic rollback detail');
+      });
 
-    await expect(reads.verification(PRINCIPAL)).resolves.toEqual({
-      body: {
-        status: 'alarm',
-        code: 'rollback',
-        message: 'record verification detected a divergence',
-      },
-      readLengths: {},
-    });
-    await expect(reads.verification(APPLICANT)).rejects.toMatchObject({
-      code: 'forbidden',
-    });
-  });
+      await expect(reads.verification(PRINCIPAL)).resolves.toEqual({
+        body: {
+          status: 'alarm',
+          code,
+          message: 'record verification detected a divergence',
+        },
+        readLengths: {},
+      });
+      await expect(reads.verification(APPLICANT)).rejects.toMatchObject({
+        code: 'forbidden',
+      });
+    },
+  );
 
   it('returns verified chain envelopes and refuses in-line tamper or valid-prefix rollback', async () => {
     const { reads, recordsRoot, store } = harness(async () => {

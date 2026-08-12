@@ -45,6 +45,7 @@ async function main() {
     const report = await verifyRecords({
       recordsRoot,
       checkpointsRoot,
+      worldId,
       local,
       repoRoot: process.cwd(),
       ...(process.env.RUNTIME_CHECKPOINT_BRANCH === undefined
