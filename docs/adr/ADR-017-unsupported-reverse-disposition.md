@@ -1,9 +1,9 @@
 <!-- SPDX-License-Identifier: CC-BY-4.0 -->
 # ADR-017 — Unsupported `reverse` disposition
 
-**Status:** proposed M6.0b definition (2026-08-12); exact-SHA review pending. Implementation is not authorized by
-this commit. **Spec:** §4 intervention contract; §5 escalation state machine; §7 family 9 coverage; §9
-effect-specific terminal enforcement and institutional limits.
+**Status:** M6.0b definition reviewed at `2eb14ba` (2026-08-12), GO — no findings. Implementation remains
+unauthorized pending separate maintainer approval. **Spec:** §4 intervention contract; §5 escalation state machine;
+§7 family 9 coverage; §9 effect-specific terminal enforcement and institutional limits.
 
 ## Context
 

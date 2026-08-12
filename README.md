@@ -68,8 +68,9 @@ The exact upstream revision, digest, reviewed runtime baseline, and remaining mi
   provider-supplied evidence.
 - **Screening models fail.** Their signals can only Flag or force Escalate — never allow.
 - **Post-commit reversal is not implemented.** The source vocabulary names `reverse`, but this POC currently has no
-  effect-specific reversal or compensation path and no remedy decider. ADR-017 proposes removing the empty active
-  token rather than presenting a power the runtime does not have; implementation remains separately review-gated.
+  effect-specific reversal or compensation path and no remedy decider. ADR-017's definition, reviewed at `2eb14ba`,
+  removes the empty active token rather than presenting a power the runtime does not have; implementation remains
+  separately approval- and review-gated.
 - **Minimal cryptography** (hash chains + HMAC; composite-head checkpoints pushed to this public repo bound —
   but do not eliminate — the rollback window). Split custody is future work.
 - **Synthetic scenario, demo-grade authentication, free-tier model endpoints without an SLA.**

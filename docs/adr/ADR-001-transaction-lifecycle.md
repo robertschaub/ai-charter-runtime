@@ -47,7 +47,8 @@ cannot revive authority issued under the earlier A selection.
 `reverse`. The source vocabulary remains broader, but post-commit reversal and compensation are not assessed here,
 and this pre-commit escalation machine has no legitimate reversal transition. Policy, transport, state, record, and
 console inputs carrying the unsupported token must fail closed or omit it; they are never coerced to a terminal
-deny. This amendment remains definition-only until ADR-017 and its implementation receive separate exact-SHA review.
+deny. ADR-017's definition received GO at `2eb14ba`; this proposed amendment remains unimplemented pending separate
+maintainer approval and exact-SHA implementation review.
 
 ## Context
 
