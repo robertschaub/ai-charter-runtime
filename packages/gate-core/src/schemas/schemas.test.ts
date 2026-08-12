@@ -7,6 +7,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { canonicalize } from '../canonicalize.js';
+import { escalationListItemProjection } from '../authorizationProjection.js';
 import {
   accessEntry,
   cardRevocation,
@@ -14,6 +15,9 @@ import {
   escalationRecord,
   frozenProposal,
   gateRuling,
+  DIALOGUE_DISPOSITIONS,
+  GENERAL_DISPOSITIONS,
+  generalDisposition,
   interventionContract,
   mandate,
   modelCard,
@@ -197,6 +201,31 @@ function validContract(overrides: Record<string, unknown> = {}): Record<string, 
       record_events: ['dialogue_trigger_raised', 'dialogue_response_recorded'],
       feedback_consequence: 'Increments the escalation-pattern counter.',
     },
+    ...overrides,
+  };
+}
+
+function validGeneralContract(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    ...validContract(),
+    trigger_and_state: { trigger: 'evidence-conflict', state: 'open' },
+    response_bound_and_default: {
+      response_bound_ms: 900_000,
+      safe_default: {
+        kind: 'stop-remains',
+        disposition: 'cancel',
+        authority_basis: { kind: 'no-new-authority' },
+        reversible: true,
+      },
+    },
+    permitted_dispositions: [
+      'allow-within-scope',
+      'deny',
+      'narrow-or-modify',
+      'seek-review',
+      'cancel',
+      'route-to-remedy',
+    ],
     ...overrides,
   };
 }
@@ -815,6 +844,151 @@ describe('schemas — accept the shapes the ADRs specify', () => {
 });
 
 describe('schemas — reject what fails closed', () => {
+  it('rejects the unsupported reverse token at contract, policy, persistence, and projection boundaries', () => {
+    expect(GENERAL_DISPOSITIONS).toEqual([
+      'allow-within-scope',
+      'deny',
+      'narrow-or-modify',
+      'seek-review',
+      'cancel',
+      'route-to-remedy',
+    ]);
+    expect(DIALOGUE_DISPOSITIONS).toEqual(['confirm', 'correct', 'narrow', 'permit', 'abstain', 'route']);
+    expect(generalDisposition.safeParse('reverse').success).toBe(false);
+    expect(interventionContract.safeParse(validGeneralContract()).success).toBe(true);
+    expect(
+      interventionContract.safeParse(validGeneralContract({ permitted_dispositions: ['reverse'] })).success,
+    ).toBe(false);
+    expect(
+      interventionContract.safeParse(
+        validGeneralContract({ permitted_dispositions: ['cancel', 'reverse'] }),
+      ).success,
+    ).toBe(false);
+
+    const policyFixture = {
+      policy_version: '2026-08-01.reverse-rejected',
+      ordering: 'deny-escalate-allow-then-priority',
+      default_escalation_contract: validGeneralContract(),
+      aggregate_ceiling_contract: validGeneralContract(),
+      recovery_escalation_contract: validGeneralContract(),
+      escalation_pattern: {
+        window_ms: 3_600_000,
+        escalation_count: 3,
+        timeout_count: 2,
+        override_count: 2,
+        consequence: 'narrow-pending-reauthorization',
+      },
+      rules: [
+        {
+          id: 'rule_reverse_rejection_fixture',
+          priority: 1,
+          gate: 'submit',
+          matcher: { kind: 'always' },
+          verdict: 'deny',
+          ux_class: 'stop',
+          reason_template: 'Synthetic policy rejection fixture.',
+        },
+      ],
+    };
+    expect(policySet.safeParse(policyFixture).success).toBe(true);
+    expect(
+      policySet.safeParse({
+        ...policyFixture,
+        default_escalation_contract: validGeneralContract({
+          permitted_dispositions: ['cancel', 'reverse'],
+        }),
+      }).success,
+    ).toBe(false);
+
+    const escalationFixture = {
+      world_id: 'w-demo',
+      escalation_id: 'esc_reverse_rejected',
+      ruling_id: 'rul_reverse_rejected',
+      source_commitment_id: null,
+      frozen_proposal_hash: DIGEST,
+      contract: validGeneralContract(),
+      opened_at: '2026-08-01T09:00:00.000Z',
+      expires_at: '2026-08-01T09:15:00.000Z',
+      state: 'disposed',
+      terminal_disposition: 'cancel',
+      successor_ruling_id: null,
+    };
+    expect(escalationRecord.safeParse(escalationFixture).success).toBe(true);
+    expect(
+      escalationRecord.safeParse({
+        ...escalationFixture,
+        terminal_disposition: 'reverse',
+      }).success,
+    ).toBe(false);
+    const recordEventFixture = {
+      event: 'late_disposition_ignored',
+      escalation_id: 'esc_reverse_rejected',
+      attempted_disposition: 'cancel',
+      authenticated_actor: 'role:case_officer',
+      terminal_state: 'disposed',
+      at: '2026-08-01T09:10:00.000Z',
+    };
+    expect(recordEvent.safeParse(recordEventFixture).success).toBe(true);
+    expect(
+      recordEvent.safeParse({
+        ...recordEventFixture,
+        attempted_disposition: 'reverse',
+      }).success,
+    ).toBe(false);
+    const walFixture = {
+      kind: 'transaction',
+      world_id: 'w-demo',
+      ts: '2026-08-01T09:10:00.000Z',
+      txn: 'escalation_dispose',
+      run_id: 'run_reverse_rejected',
+      actor: { credential: 'role:case_officer', claimed_role: 'case_officer' },
+      ops: [
+        {
+          op: 'escalation.dispose',
+          escalation_id: 'esc_reverse_rejected',
+          disposition: 'cancel',
+        },
+      ],
+    };
+    expect(walTransaction.safeParse(walFixture).success).toBe(true);
+    expect(
+      walTransaction.safeParse({
+        ...walFixture,
+        ops: [
+          {
+            op: 'escalation.dispose',
+            escalation_id: 'esc_reverse_rejected',
+            disposition: 'reverse',
+          },
+        ],
+      }).success,
+    ).toBe(false);
+    const projectionFixture = {
+      escalation_id: 'esc_reverse_rejected',
+      ruling_id: 'rul_reverse_rejected',
+      status: 'open',
+      trigger: 'evidence-conflict',
+      eligible_role: 'case_officer',
+      substitute_roles: [],
+      opened_at: '2026-08-01T09:00:00.000Z',
+      expires_at: '2026-08-01T09:15:00.000Z',
+      permitted_dispositions: ['deny'],
+      terminal_disposition: null,
+      proposal_revision_ref: {
+        proposal_id: 'prp_reverse_rejected',
+        revision: 1,
+        action_id: 'act_reverse_rejected',
+      },
+    };
+    expect(escalationListItemProjection.safeParse(projectionFixture).success).toBe(true);
+    expect(
+      escalationListItemProjection.safeParse({
+        ...projectionFixture,
+        permitted_dispositions: ['deny', 'reverse'],
+      }).success,
+    ).toBe(false);
+  });
+
   it('a float amount', () => {
     expect(mandate.safeParse(validMandate({ limits: { ...(validMandate()['limits'] as object), amount_minor_units: 25.5 } })).success).toBe(
       false,

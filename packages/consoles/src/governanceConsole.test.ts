@@ -7,6 +7,8 @@ import { describe, expect, it } from 'vitest';
 import {
   acceptsHandoffReady,
   consoleApiPath,
+  DIALOGUE_CONSOLE_DISPOSITIONS,
+  GENERAL_CONSOLE_DISPOSITIONS,
   parseGovernanceRuntimeConfig,
   parseConsoleDeepLink,
   permittedDialogueDispositions,
@@ -40,8 +42,24 @@ describe('authorization-origin governance console contract', () => {
   });
 
   it('renders only open, contract-permitted general dispositions', () => {
+    expect(GENERAL_CONSOLE_DISPOSITIONS).toEqual([
+      'allow-within-scope',
+      'deny',
+      'narrow-or-modify',
+      'seek-review',
+      'cancel',
+      'route-to-remedy',
+    ]);
+    expect(DIALOGUE_CONSOLE_DISPOSITIONS).toEqual([
+      'confirm',
+      'correct',
+      'narrow',
+      'permit',
+      'abstain',
+      'route',
+    ]);
     expect(
-      permittedGeneralDispositions('open', ['deny', 'confirm', 'route-to-remedy', 'invented']),
+      permittedGeneralDispositions('open', ['deny', 'confirm', 'reverse', 'route-to-remedy', 'invented']),
     ).toEqual(['deny', 'route-to-remedy']);
     expect(permittedGeneralDispositions('disposed', ['deny'])).toEqual([]);
     expect(permittedGeneralDispositions('open', 'deny')).toEqual([]);

@@ -18,6 +18,7 @@ import {
   accessEntry,
   commitToken,
   DIALOGUE_DISPOSITIONS,
+  disposition as dispositionSchema,
   effectIntent,
   evidenceRef,
   GENERAL_DISPOSITIONS,
@@ -1676,7 +1677,9 @@ export class AuthorizationCore {
 
   async disposeEscalation(input: DisposeEscalationInput): Promise<DisposeEscalationResult> {
     const escalationId = id.parse(input.escalationId);
-    const disposition = input.disposition;
+    // ADR-017: validate even direct, untyped callers before screening or transaction
+    // construction so unsupported vocabulary can never enter a refusal record.
+    const disposition = dispositionSchema.parse(input.disposition);
     let allowScreening: ScreeningResolution = {
       signals: [],
       performed: false,

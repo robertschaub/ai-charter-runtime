@@ -1538,6 +1538,29 @@ describe('M2 authorization transactions', () => {
       .toMatchObject({ payload: { kind: 'disposition_recorded', disposition: 'cancel' } });
   });
 
+  it('rejects an untyped reverse disposition before transaction or refusal-record construction', async () => {
+    const h = harness();
+    await initialize(h);
+    const frozen = proposal(132, { action_id: 'act_reverse_rejected' });
+    h.setScreening(frozen.proposal_id, [conflictSignal()]);
+    const ruled = await h.core.ruleProposal(ruleInput(frozen, { gate: 'verify' }));
+    if (ruled.escalationId === null) throw new Error('expected escalation');
+    const before = h.store.snapshot();
+
+    await expect(
+      h.core.disposeEscalation({
+        escalationId: ruled.escalationId,
+        disposition: 'reverse' as never,
+        actor: CASE_OFFICER,
+      }),
+    ).rejects.toThrow();
+
+    const after = h.store.snapshot();
+    expect(after).toEqual(before);
+    expect(after.escalations.get(ruled.escalationId)?.state).toBe('open');
+    expect(JSON.stringify(after.actionRecords)).not.toContain('reverse');
+  });
+
   it('ignores caller screening claims when authorization-owned screening is unavailable', async () => {
     const h = harness();
     await initialize(h);
@@ -2666,6 +2689,35 @@ describe('M2 authorization transactions', () => {
       scope: { item_ref: 'inf_7', applies_to: 'this_case_only' },
     };
     try {
+      const beforeReverse = h.store.snapshot();
+      const unsupportedReverse = await fetch(
+        `${address.origin}/w/w-demo/escalations/${escalationId}/disposition`,
+        {
+          method: 'POST',
+          headers: {
+            authorization: `Bearer ${tokens.caseOfficer}`,
+            'content-type': 'application/json',
+          },
+          body: JSON.stringify({ disposition: 'reverse' }),
+        },
+      );
+      expect(unsupportedReverse.status).toBe(422);
+      await expect(unsupportedReverse.json()).resolves.toEqual({ error: 'invalid-request' });
+      const afterReverse = h.store.snapshot();
+      expect(afterReverse.escalations).toEqual(beforeReverse.escalations);
+      expect(afterReverse.rulings).toEqual(beforeReverse.rulings);
+      expect(afterReverse.reservations).toEqual(beforeReverse.reservations);
+      expect(afterReverse.actionRecords).toEqual(beforeReverse.actionRecords);
+      expect(afterReverse.commitments).toEqual(beforeReverse.commitments);
+      expect(afterReverse.effects).toEqual(beforeReverse.effects);
+      expect(afterReverse.accessRecords).toHaveLength(beforeReverse.accessRecords.length + 1);
+      expect(afterReverse.accessRecords.at(-1)).toMatchObject({
+        route: 'POST /w/{world_id}/escalations/{id}/disposition',
+        authenticated_actor: 'role:case_officer',
+        outcome: 'served',
+        http_status: 422,
+      });
+
       const legacyDispositionBypass = await fetch(
         `${address.origin}/w/w-demo/escalations/${escalationId}/disposition`,
         {

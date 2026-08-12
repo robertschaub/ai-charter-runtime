@@ -24,7 +24,6 @@ export const GENERAL_CONSOLE_DISPOSITIONS = [
   'narrow-or-modify',
   'seek-review',
   'cancel',
-  'reverse',
   'route-to-remedy',
 ] as const;
 

@@ -17,7 +17,6 @@ export const GENERAL_DISPOSITIONS = [
   'narrow-or-modify',
   'seek-review',
   'cancel',
-  'reverse',
   'route-to-remedy',
 ] as const;
 
