@@ -1,8 +1,8 @@
 <!-- SPDX-License-Identifier: CC-BY-4.0 -->
 # ADR-003 — Composite-head checkpoint anchoring
 
-**Status:** accepted (M1, 2026-08-01); M6.0a acknowledgment-classification implementation candidate
-(2026-08-12), exact-SHA review pending. **Spec:** §3 record layer, §9 (cryptography limits).
+**Status:** accepted (M1, 2026-08-01); M6.0a acknowledgment-classification implementation reviewed at
+`be7f2ef` (2026-08-12), GO — no findings. **Spec:** §3 record layer, §9 (cryptography limits).
 
 ## Context
 Local streams cannot detect their own tail rollback: a truncated chain is still internally valid. A composite head digest — write-ahead state, action chain, access-log chain — is written to a checkpoint file in this public repo and pushed, so the remote copy pins a prefix the local process can no longer silently drop. All canonicalization, hashing, and encoding follow ADR-007.
@@ -170,10 +170,10 @@ mis-bound terminal events; receipts and window counts based on the prior anchor;
 tamper, truncation, and pointer-rollback alarms. Tests use synthetic records through the harness only. They perform
 no push or network operation and edit no generated or append-only record by hand.
 
-The implementation candidate adds classification and reporting only. It adds no checkpoint writer, retry,
-recovery, provider call, capture, key or card operation, generated/append-only record edit outside the synthetic
-test harness, or push. Its exact-SHA review remains pending. The unrelated general `reverse` disposition remains
-parked for M6.0b.
+The implementation reviewed at `be7f2ef` adds classification and reporting only. It adds no checkpoint writer,
+retry, recovery, provider call, capture, key or card operation, generated/append-only record edit outside the
+synthetic test harness, or push. Exact-SHA review returned GO with no findings. The unrelated general `reverse`
+disposition remains parked for M6.0b.
 
 ### Verification procedure (beat 15)
 `npm run verify:records`, a `tooling/` CLI over the gate-core verifier (combined artifact per LICENSE.md):

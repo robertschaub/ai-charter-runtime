@@ -1,8 +1,9 @@
 <!-- SPDX-License-Identifier: CC-BY-4.0 -->
 # ADR-016 — M6 full-pass evidence and dual-model capture
 
-**Status:** proposed definition; implementation, live provider use, capture, checkpoint push, and publication have
-not started and remain separately approval-gated.
+**Status:** definition reviewed at `582eaeb`, GO — no findings; implementation, live provider use, capture,
+checkpoint push, and publication have not started and remain separately approval-gated. The separate M6.0a
+anchoring prerequisite was reviewed at `be7f2ef`.
 **Spec:** §§1, 3, 5, 6, 7, 9, and 10 (M6), especially the two-layer comparison rule in §7.
 **Depends on:** ADR-001 through ADR-015 and the reviewed M5 baseline at `5251500`.
 
@@ -21,9 +22,10 @@ do not depend on which model produced the evidence. Second, a live dual-model ru
 real proposals, provider-specific Submit projections, requested-versus-served identities, and containment. The
 second layer exposes variance; it is not a controlled model-quality comparison or an independent evaluation.
 
-M6 also has two unresolved prerequisites. ADR-003's implemented remote check currently cannot distinguish an
-honest unpushed latest checkpoint from confirmed remote rollback, and the general `reverse` disposition is a known
-unreachable-but-empty token. This decision does not silently fold either correction into capture work.
+At definition time, M6 had two unresolved prerequisites: ADR-003's remote check could not distinguish an honest
+unpushed latest checkpoint from confirmed remote rollback, and the general `reverse` disposition was a known
+unreachable-but-empty token. The first prerequisite was separately implemented and reviewed at `be7f2ef`; `reverse`
+remains parked for M6.0b. This decision does not silently fold either correction into capture work.
 
 ## Decision
 
@@ -254,9 +256,10 @@ notification, payment, account change, or other external effect may occur.
 
 ### 8. Anchoring and publication remain explicit, reviewable operations
 
-M6 exercises the real ADR-003 run-start and run-end checkpoint flow. The deferred implementation finding must first
-be resolved in its own bounded definition and exact-SHA review so an honest failed push remains an explicitly
-extended unanchored window while a confirmed rollback still halts. This ADR does not authorize that correction.
+M6 exercises the real ADR-003 run-start and run-end checkpoint flow. The deferred implementation finding was
+resolved in its own bounded definition and exact-SHA review at `be7f2ef`, so an honest failed push remains an
+explicitly extended unanchored window while a confirmed rollback still halts. ADR-016 did not itself authorize or
+silently include that correction.
 A failed push remains evidence rather than a hidden success: it does not retroactively invent an anchor or erase a
 completed synthetic run, but that capture cannot close M6 as remotely anchored. Any later attempt uses a new capture
 id and fresh approval; M6 completion requires one reviewed capture with remotely acknowledged start and end anchors.

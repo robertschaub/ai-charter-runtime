@@ -11,8 +11,9 @@ authorization-owned message ingestion and single-use output release, and hash-ch
 effect. M5.11, reviewed at `8364745`, adds governed proposal intake and fixed pre-commit evidence. M5.12, reviewed
 at `5b27b0e`, adds an authorization-derived dialogue trigger and response-bound native proposal revision; it still
 cannot reach Commit or effect execution. [ADR-016](docs/adr/ADR-016-m6-evidence-capture.md) now proposes the M6
-full-pass, authorization-owned live-screening, native commitment-continuation, and dual-model capture contract; no
-M6 implementation, live run, checkpoint push, or capture artifact exists yet.
+full-pass, authorization-owned live-screening, native commitment-continuation, and dual-model capture contract.
+The separate M6.0a anchoring prerequisite was reviewed at `be7f2ef`; no M6 live-screening, commitment-continuation,
+capture-runner, live run, checkpoint push, or capture artifact exists yet.
 
 The authoritative build specification lives in the documentation repository:
 [runtime-gates-poc-spec.md](https://github.com/robertschaub/our-ai-charter/blob/main/docs/wip/runtime-gates-poc-spec.md).
