@@ -132,25 +132,27 @@ proposal use/status, model-call, intake, and precommit routes carry the later re
 caller-carried response, proposal, gate, or successor.
 
 **M5.13 definition (bounded empathy conformance and M5 acceptance):** ADR-015 adds no route, handler, schema,
-credential, or authority path. The reviewed inventory remains exactly twenty-one orchestrator process gate/data
-routes plus dedicated case-session-handoff redemption and close routes. Fixed precommit remains the only
-authority-changing M5.11/M5.12 process mutation available to the orchestrator.
+credential, or authority path. At M5.13 the reviewed inventory remained exactly twenty-one orchestrator process
+gate/data routes plus dedicated case-session-handoff redemption and close routes. Fixed precommit remains the
+only authority-changing M5.11/M5.12 process mutation available to the orchestrator.
 
-**Proposed M6 definition (not implemented):** ADR-016 keeps the headless `/actions/execute` seam synthetic-test-only.
-It first adds two non-authorizing screening terminal routes and a paused, authorization-owned extension of fixed
-precommit, raising the `proc:orchestrator` gate/data inventory from twenty-one to twenty-three. It then defines a
-native execution preparation for an exact authorization-owned proposal run that has ended precommit with Verify
-`allow`; that non-authorizing process route raises the future inventory to twenty-four. Only `proc:services_host`
-may consume the preparation at the future Commit boundary. The browser and orchestrator may carry no signal,
-proposal, intent, gate, ruling, reservation, nonce, or commit token. Fixed precommit remains the only
-authority-changing route available to `proc:orchestrator`. This paragraph freezes a reviewable proposal only and
-authorizes no route or implementation.
+**M6 definition and reviewed M6.1 implementation:** ADR-016 keeps the headless `/actions/execute` seam
+synthetic-test-only. M6.1, reviewed at `5f51caa`, adds exactly two non-authorizing screening terminal routes and a
+paused, authorization-owned extension of fixed precommit, raising the `proc:orchestrator` gate/data inventory from
+twenty-one to twenty-three. ADR-016 separately defines a future native execution preparation for an exact
+authorization-owned proposal run that has ended precommit with Verify `allow`; that non-authorizing process route
+would raise the M6.2 inventory to twenty-four. Only `proc:services_host` may consume the preparation at the future
+Commit boundary. The browser and orchestrator may carry no signal, proposal, intent, gate, ruling, reservation,
+nonce, or commit token. Fixed precommit remains the only authority-changing route available to
+`proc:orchestrator`. M6.1 authorizes no live provider call; M6.2 remains unimplemented and separately gated.
 
-The proposed process additions are exactly `POST /w/{world_id}/screening-calls/{screening_call_id}/outputs`,
-`POST /w/{world_id}/screening-calls/{screening_call_id}/failures`, and
+The two implemented M6.1 process additions are exactly
+`POST /w/{world_id}/screening-calls/{screening_call_id}/outputs` and
+`POST /w/{world_id}/screening-calls/{screening_call_id}/failures`; both are Origin-guarded, access-recorded, and
+`authorityChanging: false`. The proposed M6.2 process addition is exactly
 `POST /w/{world_id}/cases/{case_id}/proposal-runs/{proposal_run_id}/execution-preparations` for
-`proc:orchestrator`; all three are Origin-guarded, access-recorded, and `authorityChanging: false`. The proposed
-Commit boundary is exactly
+`proc:orchestrator`, also Origin-guarded, access-recorded, and `authorityChanging: false`. Its proposed Commit
+boundary is exactly
 `POST /w/{world_id}/execution-preparations/{execution_preparation_id}/commit-verify` for
 `proc:services_host` only. The orchestrator-side browser and services-host carrier routes, strict inputs, projections,
 and limits are fixed by ADR-016 §§3–4.
@@ -253,6 +255,8 @@ Authorization service, all data routes under `/w/{world_id}/…`:
 | `POST /model-calls/begin` (durably bind one attempt, then return its authorization-resolved projection) | `proc:orchestrator` only; non-authorizing, Origin-guarded, and access-recorded |
 | `POST /model-outputs/admit` (consume the call reference and classify one bounded model result) | `proc:orchestrator` only; non-authorizing, Origin-guarded, and access-recorded |
 | `POST /model-calls/failures` (consume the call reference with fixed failure metadata) | `proc:orchestrator` only; non-authorizing, Origin-guarded, and access-recorded |
+| `POST /screening-calls/{screening_call_id}/outputs` (consume one paused-gate screening call with bounded output) | `proc:orchestrator` only; non-authorizing, Origin-guarded, and access-recorded |
+| `POST /screening-calls/{screening_call_id}/failures` (consume one paused-gate screening call with fixed failure metadata) | `proc:orchestrator` only; non-authorizing, Origin-guarded, and access-recorded |
 | `GET /cases/{case_id}/model-selection` (current selection and latest confirmed observation) | `proc:orchestrator` only; non-authorizing, Origin-guarded, and access-recorded |
 | `POST /cases/{case_id}/model-selection-checks` (resolve one exact card-evidence check) | `proc:orchestrator` only; non-authorizing, Origin-guarded, access-recorded, maximum five-minute boot-bound reference |
 | `POST /cases/{case_id}/model-selections` (consume a check and append the current selection) | `proc:orchestrator` only; non-authorizing, Origin-guarded, and access-recorded |
@@ -341,9 +345,12 @@ and the persistent services-ledger id; only absence under the same ledger id can
 
 **The reviewed M5.11 implementation exposes the orchestrator's process credential on exactly twenty gate/data
 routes plus dedicated case-session-handoff redemption and close routes. The reviewed M5.12 implementation adds one
-gate/data route, making exactly twenty-one; M5.13 adds none.** The resulting twenty-one are proposal submission, proposal-intake consumption,
+gate/data route, making exactly twenty-one; M5.13 adds none. M6.1 adds exactly two non-authorizing screening
+terminal routes, making exactly twenty-three.** The resulting twenty-three are proposal submission,
+proposal-intake consumption,
 proposal-intake status, proposal-run status, proposal precommit, proposal-precommit status, model-call begin,
-model-output admission, model-call failure, conversation-message ingestion, model-output-release consumption,
+model-output admission, model-call failure, screening-output admission, screening-call failure,
+conversation-message ingestion, model-output-release consumption,
 model-output-release status, conversation read,
 model-selection read, model-selection check, model selection, dialogue-revision preparation,
 revised-proposal continuation, ruling read,

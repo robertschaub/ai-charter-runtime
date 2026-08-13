@@ -1,7 +1,8 @@
 <!-- SPDX-License-Identifier: CC-BY-4.0 -->
 # ADR-016 — M6 full-pass evidence and dual-model capture
 
-**Status:** definition reviewed at `582eaeb`, GO — no findings; implementation, live provider use, capture,
+**Status:** definition reviewed at `582eaeb`, GO — no findings; M6.1 implementation reviewed at `5f51caa`, GO —
+no blocking findings, using synthetic loopback providers only. M6.2 implementation, live provider use, capture,
 checkpoint push, and publication have not started and remain separately approval-gated. The separate M6.0a
 anchoring prerequisite was reviewed at `be7f2ef`, and the M6.0b unsupported-`reverse` prerequisite was reviewed at
 `36126fa`.
@@ -10,12 +11,12 @@ anchoring prerequisite was reviewed at `be7f2ef`, and the M6.0b unsupported-`rev
 
 ## Context
 
-The bounded M5 milestone is complete, but the repository does not yet contain an M6 capture runner, public M6
-artifact contract, live screening-model protocol, or native continuation from an authorization-owned verified
-proposal through Commit to the mock services host. The reviewed screening path is deliberately fixture-backed,
-and the browser path deliberately stops after Authorize → Submit → Verify. Reusing the legacy headless action route
-for a live demonstration would weaken that boundary: the route accepts a complete caller-carried proposal and is
-retained only as a synthetic HTTP-test seam.
+The bounded M5 milestone is complete. The repository now contains the reviewed M6.1 authorization-owned live
+screening protocol, exercised only with synthetic loopback providers, but it does not yet contain an M6 capture
+runner, public M6 artifact contract, live-provider capture, or native continuation from an authorization-owned
+verified proposal through Commit to the mock services host. The browser path therefore still stops after
+Authorize → Submit → Verify. Reusing the legacy headless action route for a live demonstration would weaken that
+boundary: the route accepts a complete caller-carried proposal and is retained only as a synthetic HTTP-test seam.
 
 The authoritative specification requires two different kinds of M6 evidence. First, every scripted beat and the
 adversarial set must run deterministically under both acting-model lane configurations to show that gate semantics
@@ -285,10 +286,10 @@ is:
 1. **M6.0 prerequisites:** separately define, correct, test, and review the ADR-003 failed-push distinction and the
    unsupported `reverse` disposition. M6.0a is reviewed at `be7f2ef`; M6.0b is reviewed at `36126fa`. Neither change
    was included in the ADR-016 definition commit.
-2. **M6.1 authorization-owned live screening protocol:** implement §3 and its paused fixed-precommit state machine
-   with synthetic loopback providers only. Prove projection minimization, exact call/evidence binding, signal
-   monotonicity, fail-closed terminal states, no retry/fallback, ACLs, and raw-byte exclusion. Stop for exact-SHA
-   review; no live provider call is authorized.
+2. **M6.1 authorization-owned live screening protocol:** §3 and its paused fixed-precommit state machine were
+   implemented with synthetic loopback providers only and reviewed at `5f51caa`, GO — no blocking findings. Review
+   confirmed projection minimization, exact call/evidence binding, signal monotonicity, fail-closed terminal
+   states, no retry/fallback, ACLs, and raw-byte exclusion. No live provider call was made or authorized.
 3. **M6.2 native commitment continuation:** implement §4 with synthetic loopback tests only. Prove exact binding,
    ACLs, denial/escalation, races, invalidation, ambiguous failure, idempotent recovery, and no headless/browser
    bypass. Stop for exact-SHA review.

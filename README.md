@@ -10,11 +10,12 @@ selection/switch protocol, a reviewed native selected-lane call into sealed quar
 authorization-owned message ingestion and single-use output release, and hash-chained action records sealed before
 effect. M5.11, reviewed at `8364745`, adds governed proposal intake and fixed pre-commit evidence. M5.12, reviewed
 at `5b27b0e`, adds an authorization-derived dialogue trigger and response-bound native proposal revision; it still
-cannot reach Commit or effect execution. [ADR-016](docs/adr/ADR-016-m6-evidence-capture.md) now proposes the M6
+cannot reach Commit or effect execution. [ADR-016](docs/adr/ADR-016-m6-evidence-capture.md) defines the M6
 full-pass, authorization-owned live-screening, native commitment-continuation, and dual-model capture contract.
 The separate M6.0a anchoring prerequisite was reviewed at `be7f2ef`, and the M6.0b unsupported-`reverse` removal
-was reviewed at `36126fa`; no M6.1 live-screening, commitment-continuation, capture-runner, live run, checkpoint
-push, or capture artifact exists yet.
+was reviewed at `36126fa`. M6.1's authorization-owned live-screening protocol was reviewed at `5f51caa` with
+synthetic loopback providers only; no M6.2 commitment continuation, capture runner, live run, checkpoint push, or
+capture artifact exists yet.
 
 The authoritative build specification lives in the documentation repository:
 [runtime-gates-poc-spec.md](https://github.com/robertschaub/our-ai-charter/blob/main/docs/wip/runtime-gates-poc-spec.md).
@@ -184,9 +185,11 @@ fixed precommit sequence, and exact-key browser projection. M5.12, reviewed at `
 Verify dialogue trigger, direct response basis, revision preparation/use, immutable successor lineage, and repeated
 precommit checks. It makes no live provider claim and never reaches Commit or an executing service. The M5.13
 implementation reviewed at `5251500` adds fixture-pinned beat-5 conformance and an honest acceptance map. This
-completes the bounded M5 milestone, not the partial or unassessed areas recorded in that map. ADR-016 is a
-definition-only M6 proposal. It preserves those limits and requires separate reviewed implementation, action-time
-live-provider approval, checkpoint-push approval, artifact review, and publication approval.
+completes the bounded M5 milestone, not the partial or unassessed areas recorded in that map. ADR-016 remains the
+reviewed M6 definition. Its M6.1 implementation, reviewed at `5f51caa`, adds a paused authorization-owned screening
+lifecycle exercised only with synthetic loopback providers; it makes no live-provider or capture claim and cannot
+reach Commit or effect execution. M6.2 onward still require separate reviewed implementation; live-provider use,
+checkpoint pushes, artifact review, and publication retain their own action-time approval gates.
 
 Offline and deterministic verification uses synthetic records and skips only the remote-presence step:
 
