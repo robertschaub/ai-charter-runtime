@@ -12,6 +12,7 @@ import {
   type ModelSelectionAccessEvidence,
   type ProposalIntakeAccessEvidence,
   type ProposalRevisionPreparationProjection,
+  type ScreeningCallTerminalProjection,
 } from './schemas/index.js';
 import { type AuthorizationCore } from './authorizationCore.js';
 import type { TransactionActor } from './walStore.js';
@@ -137,6 +138,24 @@ export const AUTHORIZATION_ROUTES = [
     id: 'proposal-precommit.read',
     method: 'GET',
     template: '/w/{world_id}/proposals/{id}/precommit',
+    allowed: ['proc:orchestrator'],
+    authorityChanging: false,
+    originGuarded: true,
+    accessLoggedOnServe: true,
+  },
+  {
+    id: 'screening-call.output',
+    method: 'POST',
+    template: '/w/{world_id}/screening-calls/{id}/outputs',
+    allowed: ['proc:orchestrator'],
+    authorityChanging: false,
+    originGuarded: true,
+    accessLoggedOnServe: true,
+  },
+  {
+    id: 'screening-call.failure',
+    method: 'POST',
+    template: '/w/{world_id}/screening-calls/{id}/failures',
     allowed: ['proc:orchestrator'],
     authorityChanging: false,
     originGuarded: true,
@@ -400,7 +419,8 @@ export interface AuthorizationOperationResult<T> {
     | ModelSelectionAccessEvidence
     | ConversationTransportAccessEvidence
     | ProposalIntakeAccessEvidence
-    | ProposalRevisionPreparationProjection;
+    | ProposalRevisionPreparationProjection
+    | ScreeningCallTerminalProjection;
 }
 
 export interface AuthorizationAdapterResponse<T> {

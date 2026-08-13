@@ -332,11 +332,11 @@ describe('ADR-002 authorization HTTP adapter', () => {
     expect(store.snapshot().accessRecords).toHaveLength(0);
   });
 
-  it('fixes the proposal route classifications and confines the M5.11/M5.12 routes to the orchestrator process', async () => {
+  it('fixes the proposal and M6.1 screening route classifications and confines them to the orchestrator process', async () => {
     const processRoutes = AUTHORIZATION_ROUTES.filter(
       (route) => route.allowed !== 'open' && Array.from(route.allowed).some((allowed) => allowed === 'proc:orchestrator'),
     );
-    expect(processRoutes.filter((route) => !['case-handoff.redeem', 'case-session.close'].includes(route.id))).toHaveLength(21);
+    expect(processRoutes.filter((route) => !['case-handoff.redeem', 'case-session.close'].includes(route.id))).toHaveLength(23);
     expect(AUTHORIZATION_ROUTES.find((route) => route.id === 'case-session.close')).toMatchObject({
       allowed: ['proc:orchestrator'],
       authorityChanging: false,
@@ -350,6 +350,8 @@ describe('ADR-002 authorization HTTP adapter', () => {
       'proposal-run.read': false,
       'proposal-precommit.run': true,
       'proposal-precommit.read': false,
+      'screening-call.output': false,
+      'screening-call.failure': false,
     } as const;
     const paths = {
       'proposal-intake.consume': '/w/w-demo/proposal-intakes/pint_one/consume',
@@ -358,6 +360,8 @@ describe('ADR-002 authorization HTTP adapter', () => {
       'proposal-run.read': '/w/w-demo/cases/case_demo/proposal-runs/prun_one',
       'proposal-precommit.run': '/w/w-demo/proposals/prp_one/precommit',
       'proposal-precommit.read': '/w/w-demo/proposals/prp_one/precommit',
+      'screening-call.output': '/w/w-demo/screening-calls/scr_one/outputs',
+      'screening-call.failure': '/w/w-demo/screening-calls/scr_one/failures',
     } as const;
     const { adapter, store } = setup();
     const operation = vi.fn(async () => ({ status: 200, body: { ok: true }, readLengths: { entries: 0 } }));
@@ -389,8 +393,8 @@ describe('ADR-002 authorization HTTP adapter', () => {
         origin: 'http://127.0.0.1:7801',
       }, operation)).resolves.toMatchObject({ status: 200, body: { ok: true } });
     }
-    expect(operation).toHaveBeenCalledTimes(6);
-    expect(store.snapshot().accessRecords.filter((record) => 'outcome' in record && record.outcome === 'served')).toHaveLength(6);
+    expect(operation).toHaveBeenCalledTimes(8);
+    expect(store.snapshot().accessRecords.filter((record) => 'outcome' in record && record.outcome === 'served')).toHaveLength(8);
   });
 
   it('begins a model call only for the orchestrator and records every attempt', async () => {

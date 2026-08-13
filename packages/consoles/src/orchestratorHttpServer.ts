@@ -1268,6 +1268,17 @@ export class OrchestratorHttpServer {
                     frozen.proposal.proposal_id,
                     claim,
                   );
+                  let screeningAttempts = 0;
+                  while (processStatus.kind === 'proposal_precommit_screening_required') {
+                    if (screeningAttempts >= 2) throw new ModelTurnError('authorization-refused');
+                    screeningAttempts += 1;
+                    await coordinator.runScreening(processStatus.screening_call, { onBehalfOf: claim });
+                    processStatus = await options.authorization.runProposalPrecommit(
+                      configuredWorld,
+                      frozen.proposal.proposal_id,
+                      claim,
+                    );
+                  }
                 } catch (error) {
                   if (error instanceof RuntimeDependencyError && error.httpStatus >= 400 && error.httpStatus < 500) throw error;
                   processStatus = await options.authorization.proposalPrecommitStatus(

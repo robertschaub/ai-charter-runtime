@@ -38,7 +38,7 @@ interface ActiveProposalPreparation {
   readonly target: BrowserModelTarget;
 }
 
-export interface BrowserProposalRunStatus {
+interface BrowserProposalNormalRunStatus {
   readonly proposal_run_id: string;
   readonly state: 'prepared' | 'running' | 'frozen' | 'denied' | 'escalated' | 'verified' | 'failed';
   readonly proposal?: Record<string, unknown>;
@@ -49,6 +49,15 @@ export interface BrowserProposalRunStatus {
     readonly source_proposal_run_id: string | null;
   };
 }
+
+interface BrowserProposalScreeningRunStatus {
+  readonly proposal_run_id: string;
+  readonly state: 'screening';
+  readonly current_gate: 'submit' | 'verify';
+  readonly gates: readonly Record<string, unknown>[];
+}
+
+export type BrowserProposalRunStatus = BrowserProposalNormalRunStatus | BrowserProposalScreeningRunStatus;
 
 export interface BrowserModelTurnStatus {
   readonly turn_id: string;
@@ -580,7 +589,7 @@ export function parseBrowserProposalPreparation(value: unknown): ActiveProposalP
   };
 }
 
-const PROPOSAL_STATES = new Set(['prepared', 'running', 'frozen', 'denied', 'escalated', 'verified', 'failed']);
+const PROPOSAL_STATES = new Set(['prepared', 'running', 'frozen', 'screening', 'denied', 'escalated', 'verified', 'failed']);
 const PROPOSAL_GATES = new Set(['authorize', 'submit', 'verify']);
 const PROPOSAL_VERDICTS = new Set(['allow', 'deny', 'escalate']);
 const PROPOSAL_UX = new Set(['silent', 'flag', 'stop']);
@@ -639,7 +648,6 @@ function validProposalProjection(value: unknown): value is Record<string, unknow
 export function parseBrowserProposalRunStatus(value: unknown): BrowserProposalRunStatus | null {
   if (
     !isRecord(value) ||
-    !hasExactKeys(value, ['proposal_run_id', 'state', 'gates', 'continuation'], ['proposal', 'escalation_id']) ||
     typeof value['proposal_run_id'] !== 'string' || !OPAQUE_ID.test(value['proposal_run_id']) ||
     typeof value['state'] !== 'string' || !PROPOSAL_STATES.has(value['state']) ||
     !Array.isArray(value['gates']) || value['gates'].length > 3 ||
@@ -652,7 +660,23 @@ export function parseBrowserProposalRunStatus(value: unknown): BrowserProposalRu
       typeof gateValue['reason'] === 'string' &&
       typeof gateValue['status'] === 'string' && PROPOSAL_RULING_STATES.has(gateValue['status']) &&
       isRecord(gateValue['validity_window']) && hasExactKeys(gateValue['validity_window'], ['not_before', 'not_after']) &&
-       validTimestamp(gateValue['validity_window']['not_before']) && validTimestamp(gateValue['validity_window']['not_after'])) ||
+       validTimestamp(gateValue['validity_window']['not_before']) && validTimestamp(gateValue['validity_window']['not_after']))
+  ) return null;
+  if (value['state'] === 'screening') {
+    if (
+      !hasExactKeys(value, ['proposal_run_id', 'state', 'current_gate', 'gates']) ||
+      !['submit', 'verify'].includes(String(value['current_gate'])) ||
+      value['gates'].length > 2
+    ) return null;
+    return {
+      proposal_run_id: value['proposal_run_id'],
+      state: 'screening',
+      current_gate: value['current_gate'] as 'submit' | 'verify',
+      gates: value['gates'] as Record<string, unknown>[],
+    };
+  }
+  if (
+    !hasExactKeys(value, ['proposal_run_id', 'state', 'gates', 'continuation'], ['proposal', 'escalation_id']) ||
     !isRecord(value['continuation']) ||
     !hasExactKeys(value['continuation'], ['state', 'source_proposal_run_id']) ||
     typeof value['continuation']['state'] !== 'string' ||
@@ -662,7 +686,7 @@ export function parseBrowserProposalRunStatus(value: unknown): BrowserProposalRu
         !OPAQUE_ID.test(value['continuation']['source_proposal_run_id'])))
   ) return null;
   const proposal = value['proposal'];
-  const state = value['state'] as BrowserProposalRunStatus['state'];
+  const state = value['state'] as BrowserProposalNormalRunStatus['state'];
   if (['frozen', 'denied', 'escalated', 'verified'].includes(state) && !validProposalProjection(proposal)) return null;
   if (proposal !== undefined && !validProposalProjection(proposal)) return null;
   if ((state === 'escalated') !== (typeof value['escalation_id'] === 'string' && OPAQUE_ID.test(value['escalation_id']))) return null;
@@ -673,7 +697,7 @@ export function parseBrowserProposalRunStatus(value: unknown): BrowserProposalRu
     gates: value['gates'] as Record<string, unknown>[],
     ...(value['escalation_id'] === undefined ? {} : { escalation_id: value['escalation_id'] as string }),
     continuation: {
-      state: value['continuation']['state'] as BrowserProposalRunStatus['continuation']['state'],
+      state: value['continuation']['state'] as BrowserProposalNormalRunStatus['continuation']['state'],
       source_proposal_run_id: value['continuation']['source_proposal_run_id'] as string | null,
     },
   };
@@ -683,12 +707,14 @@ function renderProposalStatus(value: BrowserProposalRunStatus): void {
   const statusTarget = document.getElementById('proposal-status');
   const evidence = document.getElementById('proposal-evidence');
   if (statusTarget !== null) {
-    statusTarget.textContent =
-      `Proposal run ${value.proposal_run_id}: ${value.state}; continuation ${value.continuation.state}. ` +
-      'This is pre-commit evidence only.';
+    statusTarget.textContent = value.state === 'screening'
+      ? `Proposal run ${value.proposal_run_id}: screening at ${value.current_gate}. This is pre-commit evidence only.`
+      : `Proposal run ${value.proposal_run_id}: ${value.state}; continuation ${value.continuation.state}. ` +
+        'This is pre-commit evidence only.';
   }
   if (evidence === null) return;
   clearChildren(evidence);
+  if (value.state === 'screening') return;
   if (value.proposal === undefined) return;
   evidence.append(text('h3', 'Model-proposed fields'));
   evidence.append(text('p', `Objective: ${String(value.proposal['declared_objective'] ?? '')}`));
@@ -1103,8 +1129,9 @@ function configureProposalControls(
   use.disabled = proposalOperationPending || activeProposalPreparation === null;
 
   const armRevision = (statusValue: BrowserProposalRunStatus): void => {
-    revise.disabled = proposalOperationPending || statusValue.continuation.state !== 'available';
-    revise.onclick = statusValue.continuation.state !== 'available'
+    const revisionAvailable = statusValue.state !== 'screening' && statusValue.continuation.state === 'available';
+    revise.disabled = proposalOperationPending || !revisionAvailable;
+    revise.onclick = !revisionAvailable
       ? null
       : () => {
           if (proposalOperationPending) return;

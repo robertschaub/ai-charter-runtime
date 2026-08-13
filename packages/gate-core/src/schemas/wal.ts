@@ -17,7 +17,8 @@ import {
 } from './proposalRevision.js';
 import { accessChainEntry, recordEntry } from './record.js';
 import { gateRuling } from './ruling.js';
-import { modelCallFailureReason, modelCallOpenRecord } from './modelCall.js';
+import { modelCallFailureReason, modelCallOpenRecord, modelCallReportableFailureReason } from './modelCall.js';
+import { liveScreeningSignal, screeningCallOpenRecord } from './screeningCall.js';
 import {
   modelSelectionCheckRecord,
   modelSelectionObservation,
@@ -227,6 +228,38 @@ export const walOp = z.discriminatedUnion('op', [
       provider_disclosure: z.enum(['possible', 'confirmed']),
       served_id: modelId.nullable(),
       failure_reason: modelCallFailureReason,
+      completed_at: timestamp,
+    })
+    .strict(),
+  z.object({ op: z.literal('screening_call.open'), call: screeningCallOpenRecord }).strict(),
+  z
+    .object({
+      op: z.literal('screening_call.complete'),
+      call_id: id,
+      served_id: modelId,
+      model_resolution: z.enum(['exact', 'benign-resolution']),
+      output_digest: hexDigest,
+      signals: z.array(liveScreeningSignal).max(16),
+      completed_at: timestamp,
+    })
+    .strict(),
+  z
+    .object({
+      op: z.literal('screening_call.fail'),
+      call_id: id,
+      provider_disclosure: z.enum(['possible', 'confirmed']),
+      served_id: modelId.nullable(),
+      model_resolution: z.enum(['exact', 'benign-resolution', 'mismatch']).nullable(),
+      output_digest: hexDigest.nullable(),
+      failure_reason: modelCallReportableFailureReason,
+      completed_at: timestamp,
+    })
+    .strict(),
+  z
+    .object({
+      op: z.literal('screening_call.invalidate'),
+      call_id: id,
+      failure_reason: z.enum(['authorization-invalidated', 'system-use-invalidated']),
       completed_at: timestamp,
     })
     .strict(),

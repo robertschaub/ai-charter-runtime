@@ -27,6 +27,7 @@ import { modelSelectionAccessEvidence } from './modelSelection.js';
 import { conversationTransportAccessEvidence } from './conversationTransport.js';
 import { proposalIntakeAccessEvidence } from './proposalIntake.js';
 import { proposalRevisionPreparationProjection } from './proposalRevision.js';
+import { screeningCallTerminalProjection } from './screeningCall.js';
 import { systemUseDecisionReference } from './systemUseDecision.js';
 
 export const EFFECT_OUTCOMES = ['success', 'failed', 'no-effect', 'unknown-reconciliation-required'] as const;
@@ -316,6 +317,7 @@ export const accessEntry = z
         conversationTransportAccessEvidence,
         proposalIntakeAccessEvidence,
         proposalRevisionPreparationProjection,
+        screeningCallTerminalProjection,
       ])
       .optional(),
   })
@@ -347,7 +349,11 @@ export const accessEntry = z
     if (entry.operation_evidence !== undefined) {
       const evidence = entry.operation_evidence;
       const expectedRoute =
-        evidence.kind === 'proposal_revision_preparation'
+        evidence.kind === 'screening_call_terminal'
+          ? evidence.output_digest === null
+            ? 'POST /w/{world_id}/screening-calls/{id}/failures'
+            : 'POST /w/{world_id}/screening-calls/{id}/outputs'
+          : evidence.kind === 'proposal_revision_preparation'
           ? 'POST /w/{world_id}/cases/{case_id}/proposal-runs/{id}/revision-preparations'
           : evidence.kind === 'proposal_intake_consumption_result'
           ? 'POST /w/{world_id}/proposal-intakes/{id}/consume'

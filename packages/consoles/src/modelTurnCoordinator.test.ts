@@ -17,6 +17,7 @@ import {
   ConversationTransportService,
   ProposalIntakeService,
   ProposalPrecommitService,
+  ScreeningCallService,
   proposalRevisionPreparationBlocksReplacement,
   digestFor,
   Keyring,
@@ -141,7 +142,7 @@ async function loopbackProvider(): Promise<LoopbackProvider> {
   };
 }
 
-async function authorizationHarness() {
+async function authorizationHarness(options: { readonly liveScreening?: boolean } = {}) {
   const root = mkdtempSync(join(tmpdir(), 'model-turn-coordinator-'));
   roots.push(root);
   let at = '2026-08-01T09:00:00.000Z';
@@ -162,15 +163,20 @@ async function authorizationHarness() {
   const systemUse = syntheticSystemUseForTests(store);
   const cards = CardRegistry.load(CARDS);
   const screeningByGate = new Map<'submit' | 'verify', ScreeningResolution>();
+  let screeningCalls: ScreeningCallService | undefined;
   const core = new AuthorizationCore({
     store,
     keyring,
     policy,
     systemUse,
     resolveAuthorizedAgent: (actor) => (actor.credential === 'proc:orchestrator' ? 'agent_demo' : undefined),
-    resolveScreening: (_proposal, gate) =>
-      screeningByGate.get(gate) ?? { performed: true, signals: [], evidenceRefs: [] },
-    validateScreeningResolution: () => true,
+    resolveScreening: (proposal, gate, caseId) => options.liveScreening === true
+      ? screeningCalls?.resolve(proposal, gate, caseId) ?? { performed: false, signals: [], evidenceRefs: [] }
+      : screeningByGate.get(gate) ?? { performed: true, signals: [], evidenceRefs: [] },
+    validateScreeningResolution: (resolution, proposal, gate, caseId, state, now) =>
+      options.liveScreening === true && screeningCalls !== undefined && state !== undefined && now !== undefined
+        ? screeningCalls.validate(resolution, proposal, gate, caseId, state, now)
+        : true,
     resolveModelEvidence: (value) => cards.resolve(value),
   });
   await core.activatePolicy();
@@ -240,7 +246,19 @@ async function authorizationHarness() {
     proposalIntakes,
     now: () => at,
   });
-  const proposalPrecommit = new ProposalPrecommitService({ store, authorization: core, proposalIntakes });
+  screeningCalls = new ScreeningCallService({
+    store,
+    projections,
+    policy,
+    authorizationBootId: 'authz_boot_model_turn_1',
+    now: () => at,
+  });
+  const proposalPrecommit = new ProposalPrecommitService({
+    store,
+    authorization: core,
+    proposalIntakes,
+    ...(options.liveScreening === true ? { screeningCalls } : {}),
+  });
   const adapter = new AuthorizationHttpAdapter({
     authorization: core,
     ownOrigin: 'http://127.0.0.1:7801',
@@ -259,6 +277,7 @@ async function authorizationHarness() {
     conversationTransport,
     proposalIntakes,
     proposalPrecommit,
+    screeningCalls,
     reads: {} as AuthorizationReadSide,
     adapter,
     keyring,
@@ -340,6 +359,23 @@ function lane(provider: LoopbackProvider, overrides: Partial<ModelTurnLaneConfig
       timeoutMs: 2_000,
     }),
     ...overrides,
+  };
+}
+
+function screeningLane(provider: LoopbackProvider): ModelTurnLaneConfig {
+  return {
+    lane: 'openai',
+    cardId: 'openai-gpt-5.5',
+    cardVersion: 1,
+    requestedId: 'gpt-5.5',
+    adapter: new OpenAiCompatibleAdapter({
+      lane: 'openai',
+      baseUrl: provider.baseUrl,
+      requestedModel: 'gpt-5.5',
+      apiKey: 'test-loopback-screening-key',
+      tokenParameter: 'max_completion_tokens',
+      timeoutMs: 2_000,
+    }),
   };
 }
 
@@ -1181,6 +1217,7 @@ describe('M5.4 containment with M5.5 durable model-call evidence', () => {
     expect(final.reservations.size).toBe(0);
     expect(final.commitments.size).toBe(0);
     expect(final.effects.size).toBe(0);
+    expect(final.screeningCalls.size).toBe(0);
     expect(JSON.stringify(final.accessRecords)).not.toContain(content);
     await expect(
       h.authorization.proposalRunStatus('w-demo', 'case_demo', 'prun_native_test', claim),
@@ -1222,6 +1259,527 @@ describe('M5.4 containment with M5.5 durable model-call evidence', () => {
     expect([...reopened.snapshot().rulings.values()].filter(
       (ruling) => ruling.binding.frozen_proposal_hash === final.proposals.get('prp_test_native')?.proposal_hash,
     ).map((ruling) => ruling.status)).toEqual(['invalidated', 'invalidated', 'invalidated']);
+  });
+
+  it('pauses fixed precommit for two authorization-owned live screening calls and resumes without caller gate control', async () => {
+    const h = await authorizationHarness({ liveScreening: true });
+    const provider = await loopbackProvider();
+    const proposalContent = nativeProposalContent();
+    const submitRaw = '[ \n ]';
+    const verifyRaw = '[\n  ]';
+    provider.enqueue({ model: h.mandateBody.default_acting_model.requested_id, content: proposalContent });
+    provider.enqueue({ model: 'gpt-5.5-2026-04-23', content: submitRaw });
+    provider.enqueue({ model: 'gpt-5.5-2026-04-23', content: verifyRaw });
+    const coordinator = new ModelTurnCoordinator({
+      worldId: 'w-demo',
+      caseId: 'case_demo',
+      authorization: h.authorization,
+      lanes: [lane(provider), screeningLane(provider)],
+    });
+    const claim = { role: 'case_officer' as const, session_id: h.sessionId };
+    const frozen = await coordinator.runProposal({
+      proposalRunId: 'prun_live_screening',
+      conversationVersion: h.store.snapshot().conversationVersionByCase.get('case_demo') ?? 0,
+      turnId: 'turn_live_screening_proposal',
+      selectionId: h.selectionId,
+      cardId: h.mandateBody.default_acting_model.card_id,
+      cardVersion: h.mandateBody.default_acting_model.card_version,
+      requestedId: h.mandateBody.default_acting_model.requested_id,
+    }, { onBehalfOf: claim });
+
+    const [first, concurrent] = await Promise.all([
+      h.authorization.runProposalPrecommit('w-demo', frozen.proposal.proposal_id, claim),
+      h.authorization.runProposalPrecommit('w-demo', frozen.proposal.proposal_id, claim),
+    ]);
+    expect(first.kind).toBe('proposal_precommit_screening_required');
+    expect(concurrent.kind).toBe('proposal_precommit_screening_required');
+    if (
+      first.kind !== 'proposal_precommit_screening_required' ||
+      concurrent.kind !== 'proposal_precommit_screening_required'
+    ) throw new Error('expected Submit screening pause');
+    expect(first.current_gate).toBe('submit');
+    expect(concurrent.screening_call.call_id).toBe(first.screening_call.call_id);
+    expect(first.gates.map((entry) => entry.gate)).toEqual(['authorize']);
+    expect(Object.keys(first.screening_call).sort()).toEqual([
+      'call_id', 'card_id', 'card_version', 'expires_at', 'gate', 'kind', 'max_output_tokens',
+      'projection', 'proposal_id', 'proposal_run_id', 'requested_id', 'response_schema_digest',
+      'response_schema_id', 'tools_allowed',
+    ]);
+    expect(first.screening_call).toMatchObject({
+      card_id: 'openai-gpt-5.5',
+      requested_id: 'gpt-5.5',
+      max_output_tokens: 512,
+      tools_allowed: false,
+      projection: { role: 'screening', items: [{ id: 'said_public' }] },
+    });
+    expect(h.store.snapshot().screeningCalls.size).toBe(1);
+
+    const submitTerminal = await coordinator.runScreening(first.screening_call, { onBehalfOf: claim });
+    expect(submitTerminal).toMatchObject({ outcome: 'admitted', gate: 'submit', served_id: 'gpt-5.5-2026-04-23' });
+    await expect(
+      h.authorization.admitScreeningOutput(
+        'w-demo',
+        first.screening_call.call_id,
+        { content: submitRaw, served_id: 'gpt-5.5-2026-04-23' },
+        claim,
+      ),
+    ).resolves.toEqual(submitTerminal);
+
+    const second = await h.authorization.runProposalPrecommit('w-demo', frozen.proposal.proposal_id, claim);
+    expect(second.kind).toBe('proposal_precommit_screening_required');
+    if (second.kind !== 'proposal_precommit_screening_required') throw new Error('expected Verify screening pause');
+    expect(second.current_gate).toBe('verify');
+    expect(second.gates.map((entry) => entry.gate)).toEqual(['authorize', 'submit']);
+    expect(second.screening_call.call_id).not.toBe(first.screening_call.call_id);
+    const verifyTerminal = await coordinator.runScreening(second.screening_call, { onBehalfOf: claim });
+    expect(verifyTerminal).toMatchObject({ outcome: 'admitted', gate: 'verify' });
+
+    const final = await h.authorization.runProposalPrecommit('w-demo', frozen.proposal.proposal_id, claim);
+    expect(final.kind).toBe('proposal_precommit_status');
+    expect(final.state).toBe('verified');
+    expect(final.gates.map((entry) => entry.gate)).toEqual(['authorize', 'submit', 'verify']);
+    expect(provider.requests).toHaveLength(3);
+    for (const request of provider.requests.slice(1)) {
+      expect(request).toMatchObject({
+        model: 'gpt-5.5',
+        max_completion_tokens: 512,
+        response_format: { type: 'json_schema', json_schema: { name: 'screening_signals', strict: true } },
+      });
+      expect(request).not.toHaveProperty('tools');
+    }
+    const snapshot = h.store.snapshot();
+    expect([...snapshot.screeningCalls.values()].map((call) => ({ gate: call.gate, outcome: call.outcome }))).toEqual([
+      { gate: 'submit', outcome: 'admitted' },
+      { gate: 'verify', outcome: 'admitted' },
+    ]);
+    expect([...snapshot.rulings.values()].some((ruling) => ruling.gate === 'commit')).toBe(false);
+    expect(snapshot.reservations.size).toBe(0);
+    expect(snapshot.commitments.size).toBe(0);
+    expect(snapshot.effects.size).toBe(0);
+    const wal = readFileSync(join(h.root, 'w-demo', 'wal.jsonl'), 'utf8');
+    expect(wal).not.toContain(JSON.stringify(submitRaw).slice(1, -1));
+    expect(wal).not.toContain(JSON.stringify(verifyRaw).slice(1, -1));
+    expect(JSON.stringify(snapshot.accessRecords)).not.toContain(submitRaw);
+    expect(JSON.stringify(snapshot.accessRecords)).not.toContain(verifyRaw);
+
+    await h.closeAuthorization();
+    h.store.close();
+    const reopened = WalStore.open({
+      recordsRoot: h.root,
+      worldId: 'w-demo',
+      runId: 'run_live_screening_replay',
+      bootId: 'authz_boot_live_screening_replay',
+      policyVersion: h.policy.policy.policy_version,
+      policyContentDigest: h.policy.policyContentDigest,
+      evaluatorBuildDigest: h.buildDigest,
+      now: () => '2026-08-01T09:00:00.000Z',
+    });
+    stores.push(reopened);
+    expect([...reopened.snapshot().screeningCalls.values()].map((call) => ({ gate: call.gate, outcome: call.outcome }))).toEqual([
+      { gate: 'submit', outcome: 'admitted' },
+      { gate: 'verify', outcome: 'admitted' },
+    ]);
+  });
+
+  it('durably fails an empty authorization projection closed without disclosing to the screening provider', async () => {
+    const h = await authorizationHarness({ liveScreening: true });
+    const provider = await loopbackProvider();
+    provider.enqueue({
+      model: h.mandateBody.default_acting_model.requested_id,
+      content: nativeProposalContent({ material_input_ids: ['said_3'] }),
+    });
+    const coordinator = new ModelTurnCoordinator({
+      worldId: 'w-demo',
+      caseId: 'case_demo',
+      authorization: h.authorization,
+      lanes: [lane(provider), screeningLane(provider)],
+    });
+    const claim = { role: 'case_officer' as const, session_id: h.sessionId };
+    const frozen = await coordinator.runProposal({
+      proposalRunId: 'prun_live_screening_empty_projection',
+      conversationVersion: h.store.snapshot().conversationVersionByCase.get('case_demo') ?? 0,
+      turnId: 'turn_live_screening_empty_projection',
+      selectionId: h.selectionId,
+      cardId: h.mandateBody.default_acting_model.card_id,
+      cardVersion: h.mandateBody.default_acting_model.card_version,
+      requestedId: h.mandateBody.default_acting_model.requested_id,
+    }, { onBehalfOf: claim });
+
+    const stopped = await h.authorization.runProposalPrecommit('w-demo', frozen.proposal.proposal_id, claim);
+    expect(stopped).toMatchObject({ kind: 'proposal_precommit_status', state: 'escalated' });
+    const state = h.store.snapshot();
+    expect([...state.screeningCalls.values()]).toHaveLength(1);
+    expect([...state.screeningCalls.values()][0]).toMatchObject({
+      gate: 'submit',
+      projection_item_count: 0,
+      projection_item_ids: [],
+      outcome: 'failed',
+      failure_reason: 'authorization-invalidated',
+      provider_disclosure: 'possible',
+      signals: [],
+    });
+    expect([...state.rulings.values()].find((ruling) => ruling.gate === 'submit')).toMatchObject({
+      verdict: 'escalate',
+      matched_rule_id: 'default:required-screening-missing',
+    });
+    expect(provider.requests).toHaveLength(1);
+    expect(state.reservations.size).toBe(0);
+    expect(state.commitments.size).toBe(0);
+    expect(state.effects.size).toBe(0);
+  });
+
+  it('terminalizes duplicate-key screening output as malformed and fails required screening closed without a signal path', async () => {
+    const h = await authorizationHarness({ liveScreening: true });
+    const provider = await loopbackProvider();
+    const proposalContent = nativeProposalContent();
+    provider.enqueue({ model: h.mandateBody.default_acting_model.requested_id, content: proposalContent });
+    const coordinator = new ModelTurnCoordinator({
+      worldId: 'w-demo',
+      caseId: 'case_demo',
+      authorization: h.authorization,
+      lanes: [lane(provider), screeningLane(provider)],
+    });
+    const claim = { role: 'case_officer' as const, session_id: h.sessionId };
+    const frozen = await coordinator.runProposal({
+      proposalRunId: 'prun_live_screening_malformed',
+      conversationVersion: h.store.snapshot().conversationVersionByCase.get('case_demo') ?? 0,
+      turnId: 'turn_live_screening_malformed',
+      selectionId: h.selectionId,
+      cardId: h.mandateBody.default_acting_model.card_id,
+      cardVersion: h.mandateBody.default_acting_model.card_version,
+      requestedId: h.mandateBody.default_acting_model.requested_id,
+    }, { onBehalfOf: claim });
+    const paused = await h.authorization.runProposalPrecommit('w-demo', frozen.proposal.proposal_id, claim);
+    if (paused.kind !== 'proposal_precommit_screening_required') throw new Error('expected Submit screening pause');
+    const raw = '[{"signal":"evidence_conflict","signal":"scope_drift","suspect_item_id":"said_public","confidence_pct":100,"rationale":"must not persist"}]';
+    const failed = await h.authorization.admitScreeningOutput(
+      'w-demo',
+      paused.screening_call.call_id,
+      { content: raw, served_id: 'gpt-5.5-2026-04-23' },
+      claim,
+    );
+    expect(failed).toMatchObject({ outcome: 'failed', failure_reason: 'malformed-response', gate: 'submit' });
+    await expect(
+      h.authorization.admitScreeningOutput(
+        'w-demo',
+        paused.screening_call.call_id,
+        { content: raw, served_id: 'gpt-5.5-2026-04-23' },
+        claim,
+      ),
+    ).resolves.toEqual(failed);
+    const stopped = await h.authorization.runProposalPrecommit('w-demo', frozen.proposal.proposal_id, claim);
+    expect(stopped.kind).toBe('proposal_precommit_status');
+    expect(stopped.state).toBe('escalated');
+    const state = h.store.snapshot();
+    const submit = [...state.rulings.values()].find((ruling) => ruling.gate === 'submit');
+    expect(submit).toMatchObject({ verdict: 'escalate', matched_rule_id: 'default:required-screening-missing' });
+    expect(submit?.evidence_refs.some((entry) => entry.kind === 'screening_signal')).toBe(false);
+    expect([...state.screeningCalls.values()]).toHaveLength(1);
+    expect([...state.screeningCalls.values()][0]).toMatchObject({ outcome: 'failed', signals: [] });
+    expect(provider.requests).toHaveLength(1);
+    const wal = readFileSync(join(h.root, 'w-demo', 'wal.jsonl'), 'utf8');
+    expect(wal).not.toContain('must not persist');
+    expect(JSON.stringify(state.accessRecords)).not.toContain('must not persist');
+  });
+
+  it('rejects a model-selected suspect outside the authorization projection before it can become ruling evidence', async () => {
+    const h = await authorizationHarness({ liveScreening: true });
+    const provider = await loopbackProvider();
+    provider.enqueue({ model: h.mandateBody.default_acting_model.requested_id, content: nativeProposalContent() });
+    const coordinator = new ModelTurnCoordinator({
+      worldId: 'w-demo',
+      caseId: 'case_demo',
+      authorization: h.authorization,
+      lanes: [lane(provider), screeningLane(provider)],
+    });
+    const claim = { role: 'case_officer' as const, session_id: h.sessionId };
+    const frozen = await coordinator.runProposal({
+      proposalRunId: 'prun_live_screening_outside',
+      conversationVersion: h.store.snapshot().conversationVersionByCase.get('case_demo') ?? 0,
+      turnId: 'turn_live_screening_outside',
+      selectionId: h.selectionId,
+      cardId: h.mandateBody.default_acting_model.card_id,
+      cardVersion: h.mandateBody.default_acting_model.card_version,
+      requestedId: h.mandateBody.default_acting_model.requested_id,
+    }, { onBehalfOf: claim });
+    const paused = await h.authorization.runProposalPrecommit('w-demo', frozen.proposal.proposal_id, claim);
+    if (paused.kind !== 'proposal_precommit_screening_required') throw new Error('expected Submit screening pause');
+    const raw = JSON.stringify([{
+      signal: 'evidence_conflict',
+      suspect_item_id: 'said_not_in_projection',
+      confidence_pct: 100,
+      rationale: 'Model-selected out-of-scope item.',
+    }]);
+    const terminal = await h.authorization.admitScreeningOutput(
+      'w-demo',
+      paused.screening_call.call_id,
+      { content: raw, served_id: 'gpt-5.5-2026-04-23' },
+      claim,
+    );
+    expect(terminal).toMatchObject({ outcome: 'failed', failure_reason: 'malformed-response' });
+    const stopped = await h.authorization.runProposalPrecommit('w-demo', frozen.proposal.proposal_id, claim);
+    expect(stopped.state).toBe('escalated');
+    const state = h.store.snapshot();
+    expect([...state.rulings.values()].flatMap((ruling) => ruling.evidence_refs).some(
+      (evidence) => evidence.kind === 'screening_signal',
+    )).toBe(false);
+    expect(JSON.stringify(state.accessRecords)).not.toContain('Model-selected out-of-scope item.');
+  });
+
+  it('fails a substituted served-model identity before screening evidence can be admitted', async () => {
+    const h = await authorizationHarness({ liveScreening: true });
+    const provider = await loopbackProvider();
+    provider.enqueue({ model: h.mandateBody.default_acting_model.requested_id, content: nativeProposalContent() });
+    const coordinator = new ModelTurnCoordinator({
+      worldId: 'w-demo',
+      caseId: 'case_demo',
+      authorization: h.authorization,
+      lanes: [lane(provider), screeningLane(provider)],
+    });
+    const claim = { role: 'case_officer' as const, session_id: h.sessionId };
+    const frozen = await coordinator.runProposal({
+      proposalRunId: 'prun_live_screening_model_mismatch',
+      conversationVersion: h.store.snapshot().conversationVersionByCase.get('case_demo') ?? 0,
+      turnId: 'turn_live_screening_model_mismatch',
+      selectionId: h.selectionId,
+      cardId: h.mandateBody.default_acting_model.card_id,
+      cardVersion: h.mandateBody.default_acting_model.card_version,
+      requestedId: h.mandateBody.default_acting_model.requested_id,
+    }, { onBehalfOf: claim });
+    const paused = await h.authorization.runProposalPrecommit('w-demo', frozen.proposal.proposal_id, claim);
+    if (paused.kind !== 'proposal_precommit_screening_required') throw new Error('expected Submit screening pause');
+    await expect(h.authorization.admitScreeningOutput(
+      'w-demo',
+      paused.screening_call.call_id,
+      { content: '[]', served_id: 'substitute-model' },
+      claim,
+    )).resolves.toMatchObject({
+      outcome: 'failed',
+      failure_reason: 'authorization-invalidated',
+      served_id: 'substitute-model',
+    });
+
+    const state = h.store.snapshot();
+    expect([...state.screeningCalls.values()][0]).toMatchObject({ model_resolution: 'mismatch', signals: [] });
+    const stopped = await h.authorization.runProposalPrecommit('w-demo', frozen.proposal.proposal_id, claim);
+    expect(stopped).toMatchObject({ state: 'escalated' });
+    expect([...h.store.snapshot().rulings.values()].some((ruling) =>
+      ruling.evidence_refs.some((evidence) => evidence.kind === 'screening_signal'))).toBe(false);
+  });
+
+  it('normalizes an admitted live signal as evidence that can only raise allow to escalation', async () => {
+    const h = await authorizationHarness({ liveScreening: true });
+    const provider = await loopbackProvider();
+    provider.enqueue({ model: h.mandateBody.default_acting_model.requested_id, content: nativeProposalContent() });
+    provider.enqueue({
+      model: 'gpt-5.5-2026-04-23',
+      content: JSON.stringify([{
+        signal: 'injection_suspicion',
+        suspect_item_id: 'said_public',
+        confidence_pct: 87,
+        rationale: 'Synthetic model-generated signal rationale.',
+      }]),
+    });
+    const coordinator = new ModelTurnCoordinator({
+      worldId: 'w-demo',
+      caseId: 'case_demo',
+      authorization: h.authorization,
+      lanes: [lane(provider), screeningLane(provider)],
+    });
+    const claim = { role: 'case_officer' as const, session_id: h.sessionId };
+    const frozen = await coordinator.runProposal({
+      proposalRunId: 'prun_live_screening_signal',
+      conversationVersion: h.store.snapshot().conversationVersionByCase.get('case_demo') ?? 0,
+      turnId: 'turn_live_screening_signal',
+      selectionId: h.selectionId,
+      cardId: h.mandateBody.default_acting_model.card_id,
+      cardVersion: h.mandateBody.default_acting_model.card_version,
+      requestedId: h.mandateBody.default_acting_model.requested_id,
+    }, { onBehalfOf: claim });
+    const paused = await h.authorization.runProposalPrecommit('w-demo', frozen.proposal.proposal_id, claim);
+    if (paused.kind !== 'proposal_precommit_screening_required') throw new Error('expected Submit screening pause');
+    await coordinator.runScreening(paused.screening_call, { onBehalfOf: claim });
+    const stopped = await h.authorization.runProposalPrecommit('w-demo', frozen.proposal.proposal_id, claim);
+    expect(stopped.state).toBe('escalated');
+    const state = h.store.snapshot();
+    const submit = [...state.rulings.values()].find((ruling) => ruling.gate === 'submit');
+    expect(submit).toMatchObject({ verdict: 'escalate', matched_rule_id: 'escalate-submit-signal' });
+    expect(submit?.evidence_refs).toContainEqual({
+      kind: 'screening_signal',
+      signal: 'injection_suspicion',
+      suspect_item_id: 'said_public',
+      confidence_pct: 87,
+      rationale: 'Synthetic model-generated signal rationale.',
+      model_id: 'gpt-5.5',
+      model_version_reported: 'gpt-5.5-2026-04-23',
+    });
+    expect([...state.rulings.values()].some((ruling) => ruling.verdict === 'allow' &&
+      ruling.evidence_refs.some((evidence) => evidence.kind === 'screening_signal'))).toBe(false);
+    expect(state.reservations.size).toBe(0);
+    expect(state.commitments.size).toBe(0);
+    expect(state.effects.size).toBe(0);
+  });
+
+  it('records one closed screening-provider failure and refuses a second provider attempt for the same call', async () => {
+    const h = await authorizationHarness({ liveScreening: true });
+    const provider = await loopbackProvider();
+    provider.enqueue({ model: h.mandateBody.default_acting_model.requested_id, content: nativeProposalContent() });
+    provider.enqueue({ status: 503, rawBody: '{"error":"synthetic outage detail must not persist"}' });
+    const coordinator = new ModelTurnCoordinator({
+      worldId: 'w-demo',
+      caseId: 'case_demo',
+      authorization: h.authorization,
+      lanes: [lane(provider), screeningLane(provider)],
+    });
+    const claim = { role: 'case_officer' as const, session_id: h.sessionId };
+    const frozen = await coordinator.runProposal({
+      proposalRunId: 'prun_live_screening_failure',
+      conversationVersion: h.store.snapshot().conversationVersionByCase.get('case_demo') ?? 0,
+      turnId: 'turn_live_screening_failure',
+      selectionId: h.selectionId,
+      cardId: h.mandateBody.default_acting_model.card_id,
+      cardVersion: h.mandateBody.default_acting_model.card_version,
+      requestedId: h.mandateBody.default_acting_model.requested_id,
+    }, { onBehalfOf: claim });
+    const paused = await h.authorization.runProposalPrecommit('w-demo', frozen.proposal.proposal_id, claim);
+    if (paused.kind !== 'proposal_precommit_screening_required') throw new Error('expected Submit screening pause');
+    const failed = await coordinator.runScreening(paused.screening_call, { onBehalfOf: claim });
+    expect(failed).toMatchObject({
+      outcome: 'failed',
+      failure_reason: 'provider-unavailable',
+      provider_disclosure: 'confirmed',
+      served_id: null,
+    });
+    await expect(coordinator.runScreening(paused.screening_call, { onBehalfOf: claim })).rejects.toMatchObject({
+      code: 'turn-replay',
+    });
+    expect(provider.requests).toHaveLength(2);
+    const stopped = await h.authorization.runProposalPrecommit('w-demo', frozen.proposal.proposal_id, claim);
+    expect(stopped.state).toBe('escalated');
+    const state = h.store.snapshot();
+    expect([...state.rulings.values()].find((ruling) => ruling.gate === 'submit')).toMatchObject({
+      verdict: 'escalate',
+      matched_rule_id: 'default:required-screening-missing',
+    });
+    const serialized = JSON.stringify({
+      screening: [...state.screeningCalls.values()],
+      access: state.accessRecords,
+    });
+    expect(serialized).not.toContain('synthetic outage detail');
+  });
+
+  it('records an unavailable configured screening lane as a terminal failure without a provider attempt', async () => {
+    const h = await authorizationHarness({ liveScreening: true });
+    const provider = await loopbackProvider();
+    provider.enqueue({ model: h.mandateBody.default_acting_model.requested_id, content: nativeProposalContent() });
+    const coordinator = new ModelTurnCoordinator({
+      worldId: 'w-demo',
+      caseId: 'case_demo',
+      authorization: h.authorization,
+      lanes: [lane(provider)],
+    });
+    const claim = { role: 'case_officer' as const, session_id: h.sessionId };
+    const frozen = await coordinator.runProposal({
+      proposalRunId: 'prun_live_screening_lane_unavailable',
+      conversationVersion: h.store.snapshot().conversationVersionByCase.get('case_demo') ?? 0,
+      turnId: 'turn_live_screening_lane_unavailable',
+      selectionId: h.selectionId,
+      cardId: h.mandateBody.default_acting_model.card_id,
+      cardVersion: h.mandateBody.default_acting_model.card_version,
+      requestedId: h.mandateBody.default_acting_model.requested_id,
+    }, { onBehalfOf: claim });
+    const paused = await h.authorization.runProposalPrecommit('w-demo', frozen.proposal.proposal_id, claim);
+    if (paused.kind !== 'proposal_precommit_screening_required') throw new Error('expected Submit screening pause');
+
+    await expect(coordinator.runScreening(paused.screening_call, { onBehalfOf: claim })).resolves.toMatchObject({
+      outcome: 'failed',
+      failure_reason: 'provider-unavailable',
+      provider_disclosure: 'possible',
+      served_id: null,
+    });
+    expect(provider.requests).toHaveLength(1);
+    await expect(coordinator.runScreening(paused.screening_call, { onBehalfOf: claim })).rejects.toMatchObject({ code: 'turn-replay' });
+    await expect(
+      h.authorization.runProposalPrecommit('w-demo', frozen.proposal.proposal_id, claim),
+    ).resolves.toMatchObject({ state: 'escalated' });
+  });
+
+  it('terminalizes a screening response that exceeds the byte ceiling before admission transport', async () => {
+    const h = await authorizationHarness({ liveScreening: true });
+    const provider = await loopbackProvider();
+    provider.enqueue({ model: h.mandateBody.default_acting_model.requested_id, content: nativeProposalContent() });
+    provider.enqueue({ model: 'gpt-5.5-2026-04-23', content: 'é'.repeat(32_769) });
+    const coordinator = new ModelTurnCoordinator({
+      worldId: 'w-demo',
+      caseId: 'case_demo',
+      authorization: h.authorization,
+      lanes: [lane(provider), screeningLane(provider)],
+    });
+    const claim = { role: 'case_officer' as const, session_id: h.sessionId };
+    const frozen = await coordinator.runProposal({
+      proposalRunId: 'prun_live_screening_oversize',
+      conversationVersion: h.store.snapshot().conversationVersionByCase.get('case_demo') ?? 0,
+      turnId: 'turn_live_screening_oversize',
+      selectionId: h.selectionId,
+      cardId: h.mandateBody.default_acting_model.card_id,
+      cardVersion: h.mandateBody.default_acting_model.card_version,
+      requestedId: h.mandateBody.default_acting_model.requested_id,
+    }, { onBehalfOf: claim });
+    const paused = await h.authorization.runProposalPrecommit('w-demo', frozen.proposal.proposal_id, claim);
+    if (paused.kind !== 'proposal_precommit_screening_required') throw new Error('expected Submit screening pause');
+
+    await expect(coordinator.runScreening(paused.screening_call, { onBehalfOf: claim })).resolves.toMatchObject({
+      outcome: 'failed',
+      failure_reason: 'malformed-response',
+      provider_disclosure: 'confirmed',
+      served_id: 'gpt-5.5-2026-04-23',
+      output_digest: null,
+    });
+    const state = h.store.snapshot();
+    expect(JSON.stringify({ calls: [...state.screeningCalls.values()], access: state.accessRecords })).not.toContain('é');
+    await expect(
+      h.authorization.runProposalPrecommit('w-demo', frozen.proposal.proposal_id, claim),
+    ).resolves.toMatchObject({ state: 'escalated' });
+  });
+
+  it('revalidates admitted screening inside the ruling lock and durably invalidates an expired binding', async () => {
+    const h = await authorizationHarness({ liveScreening: true });
+    const provider = await loopbackProvider();
+    provider.enqueue({ model: h.mandateBody.default_acting_model.requested_id, content: nativeProposalContent() });
+    provider.enqueue({ model: 'gpt-5.5-2026-04-23', content: '[]' });
+    const coordinator = new ModelTurnCoordinator({
+      worldId: 'w-demo',
+      caseId: 'case_demo',
+      authorization: h.authorization,
+      lanes: [lane(provider), screeningLane(provider)],
+    });
+    const claim = { role: 'case_officer' as const, session_id: h.sessionId };
+    const frozen = await coordinator.runProposal({
+      proposalRunId: 'prun_live_screening_expired',
+      conversationVersion: h.store.snapshot().conversationVersionByCase.get('case_demo') ?? 0,
+      turnId: 'turn_live_screening_expired',
+      selectionId: h.selectionId,
+      cardId: h.mandateBody.default_acting_model.card_id,
+      cardVersion: h.mandateBody.default_acting_model.card_version,
+      requestedId: h.mandateBody.default_acting_model.requested_id,
+    }, { onBehalfOf: claim });
+    const paused = await h.authorization.runProposalPrecommit('w-demo', frozen.proposal.proposal_id, claim);
+    if (paused.kind !== 'proposal_precommit_screening_required') throw new Error('expected Submit screening pause');
+    await coordinator.runScreening(paused.screening_call, { onBehalfOf: claim });
+    expect([...h.store.snapshot().screeningCalls.values()][0]).toMatchObject({ outcome: 'admitted' });
+    h.setAt('2026-08-01T09:01:01.000Z');
+    const stopped = await h.authorization.runProposalPrecommit('w-demo', frozen.proposal.proposal_id, claim);
+    expect(stopped.state).toBe('escalated');
+    const state = h.store.snapshot();
+    expect([...state.screeningCalls.values()][0]).toMatchObject({
+      outcome: 'failed',
+      failure_reason: 'authorization-invalidated',
+      signals: [],
+    });
+    expect([...state.rulings.values()].find((ruling) => ruling.gate === 'submit')).toMatchObject({
+      verdict: 'escalate',
+      matched_rule_id: 'default:required-screening-missing',
+    });
   });
 
   it('runs the bounded dialogue continuation through a semantic-only revision and re-gates without Commit', async () => {
@@ -1270,6 +1828,7 @@ describe('M5.4 containment with M5.5 durable model-call evidence', () => {
       claim,
     );
     expect(stopped.state).toBe('escalated');
+    if (stopped.kind !== 'proposal_precommit_status') throw new Error('expected terminal precommit status');
     expect(stopped.continuation).toEqual({ state: 'response-required', source_proposal_run_id: null });
     const sourceState = h.store.snapshot();
     const sourceEscalation = [...sourceState.escalations.values()].find(
@@ -1625,6 +2184,7 @@ describe('M5.4 containment with M5.5 durable model-call evidence', () => {
     });
     const stopped = await h.authorization.runProposalPrecommit('w-demo', frozen.proposal.proposal_id, claim);
     expect(stopped.state).toBe('escalated');
+    if (stopped.kind !== 'proposal_precommit_status') throw new Error('expected terminal precommit status');
     expect(stopped.continuation).toEqual({ state: 'unavailable', source_proposal_run_id: null });
     const state = h.store.snapshot();
     const escalation = [...state.escalations.values()].find(

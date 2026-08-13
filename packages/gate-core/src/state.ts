@@ -29,12 +29,14 @@ import type {
   RecordEntry,
   ReservationRecord,
   ReviewObligation,
+  ScreeningCallRecord,
   SystemUseDecisionRecord,
   SystemUseDecisionStatus,
   WalOp,
 } from './schemas/index.js';
 import type { accessChainEntry } from './schemas/record.js';
 import { modelCallRecord } from './schemas/modelCall.js';
+import { screeningCallRecord } from './schemas/screeningCall.js';
 import { proposalIntakeRecord } from './schemas/proposalIntake.js';
 import { proposalRevisionPreparationRecord } from './schemas/proposalRevision.js';
 import {
@@ -98,6 +100,7 @@ export interface WorldState {
   readonly currentModelSelectionByCase: Map<string, string>;
   readonly modelSelectionObservations: Map<string, ModelSelectionObservation>;
   readonly modelCalls: Map<string, ModelCallRecord>;
+  readonly screeningCalls: Map<string, ScreeningCallRecord>;
   readonly outputReleases: Map<string, OutputReleaseRecord>;
   readonly reviews: Map<string, ReviewObligation>;
   readonly actionRecords: RecordEntry[];
@@ -145,6 +148,7 @@ export function createWorldState(worldId: string): WorldState {
     currentModelSelectionByCase: new Map(),
     modelSelectionObservations: new Map(),
     modelCalls: new Map(),
+    screeningCalls: new Map(),
     outputReleases: new Map(),
     reviews: new Map(),
     actionRecords: [],
@@ -185,6 +189,7 @@ export function cloneWorldState(state: WorldState): WorldState {
     currentModelSelectionByCase: new Map(state.currentModelSelectionByCase),
     modelSelectionObservations: new Map(state.modelSelectionObservations),
     modelCalls: new Map(state.modelCalls),
+    screeningCalls: new Map(state.screeningCalls),
     outputReleases: new Map(state.outputReleases),
     reviews: new Map(state.reviews),
     actionRecords: [...state.actionRecords],
@@ -1554,6 +1559,129 @@ export function applyWorldOp(state: WorldState, op: WalOp, transactionTimestamp:
           served_id: op.served_id,
           output_digest: null,
           failure_reason: op.failure_reason,
+        }),
+      );
+      break;
+    }
+    case 'screening_call.open': {
+      requireWorld(state, op.call, 'screening call');
+      requireUnique(state.screeningCalls, op.call.call_id, `screening call ${op.call.call_id}`);
+      if (op.call.opened_at !== transactionTimestamp) {
+        fail('binding-mismatch', `screening call ${op.call.call_id} was not opened at transaction time`);
+      }
+      const proposal = requireValue(state.proposals, op.call.proposal_id, `proposal ${op.call.proposal_id}`);
+      const origin = requireValue(state.proposalOrigins, op.call.proposal_id, `proposal origin ${op.call.proposal_id}`);
+      const mandateStatus = state.mandateStatus.get(op.call.mandate_id);
+      if (
+        proposal.proposal_hash !== op.call.proposal_hash ||
+        proposal.mandate_ref.mandate_id !== op.call.mandate_id ||
+        proposal.mandate_ref.version !== op.call.mandate_version ||
+        origin.case_id !== op.call.case_id ||
+        origin.proposal_run_id !== op.call.proposal_run_id ||
+        origin.proposal_hash !== op.call.proposal_hash ||
+        state.policy?.policy_version !== op.call.policy_version ||
+        state.policy.policy_content_digest !== op.call.policy_content_digest ||
+        state.policy.evaluator_build_id !== op.call.evaluator_build_id ||
+        mandateStatus?.version !== op.call.mandate_version ||
+        mandateStatus.state !== 'active'
+      ) {
+        fail('binding-mismatch', `screening call ${op.call.call_id} differs from current proposal authority`);
+      }
+      if (
+        [...state.screeningCalls.values()].some(
+          (call) =>
+            call.proposal_hash === op.call.proposal_hash &&
+            call.gate === op.call.gate &&
+            call.screening_role === op.call.screening_role &&
+            call.policy_version === op.call.policy_version,
+        )
+      ) {
+        fail('duplicate-state', `screening call binding already exists for ${op.call.proposal_hash} ${op.call.gate}`);
+      }
+      state.screeningCalls.set(op.call.call_id, op.call);
+      break;
+    }
+    case 'screening_call.complete': {
+      const current = requireValue(state.screeningCalls, op.call_id, `screening call ${op.call_id}`);
+      if (current.state !== 'open') fail('illegal-transition', `screening call ${op.call_id} is ${current.state}`);
+      if (op.completed_at < current.opened_at) fail('clock-regression', 'screening call completed before it opened');
+      if (op.completed_at > current.expires_at) fail('expired-state', `screening call ${op.call_id} is expired`);
+      if (op.model_resolution === 'exact' && op.served_id !== current.requested_id) {
+        fail('binding-mismatch', `screening call ${op.call_id} exact resolution changed model identity`);
+      }
+      const signalPairs = new Set<string>();
+      for (const signal of op.signals) {
+        const pair = `${signal.signal}\n${signal.suspect_item_id ?? ''}`;
+        if (
+          signalPairs.has(pair) ||
+          signal.model_id !== current.requested_id ||
+          signal.model_version_reported !== op.served_id ||
+          (signal.suspect_item_id !== null && !current.projection_item_ids.includes(signal.suspect_item_id))
+        ) {
+          fail('binding-mismatch', `screening call ${op.call_id} signal is outside its exact evidence binding`);
+        }
+        signalPairs.add(pair);
+      }
+      state.screeningCalls.set(
+        op.call_id,
+        screeningCallRecord.parse({
+          ...current,
+          state: 'terminal',
+          outcome: 'admitted',
+          provider_disclosure: 'confirmed',
+          completed_at: op.completed_at,
+          served_id: op.served_id,
+          model_resolution: op.model_resolution,
+          output_digest: op.output_digest,
+          failure_reason: null,
+          signals: op.signals,
+        }),
+      );
+      break;
+    }
+    case 'screening_call.fail': {
+      const current = requireValue(state.screeningCalls, op.call_id, `screening call ${op.call_id}`);
+      if (current.state !== 'open') fail('illegal-transition', `screening call ${op.call_id} is ${current.state}`);
+      if (op.completed_at < current.opened_at) fail('clock-regression', 'screening call failed before it opened');
+      if (op.model_resolution === 'exact' && op.served_id !== current.requested_id) {
+        fail('binding-mismatch', `screening call ${op.call_id} exact failure evidence changed model identity`);
+      }
+      state.screeningCalls.set(
+        op.call_id,
+        screeningCallRecord.parse({
+          ...current,
+          state: 'terminal',
+          outcome: 'failed',
+          provider_disclosure: op.provider_disclosure,
+          completed_at: op.completed_at,
+          served_id: op.served_id,
+          model_resolution: op.model_resolution,
+          output_digest: op.output_digest,
+          failure_reason: op.failure_reason,
+          signals: [],
+        }),
+      );
+      break;
+    }
+    case 'screening_call.invalidate': {
+      const current = requireValue(state.screeningCalls, op.call_id, `screening call ${op.call_id}`);
+      if (current.state === 'terminal' && current.outcome === 'failed') break;
+      if (op.completed_at < (current.completed_at ?? current.opened_at)) {
+        fail('clock-regression', `screening call ${op.call_id} invalidation predates its current state`);
+      }
+      state.screeningCalls.set(
+        op.call_id,
+        screeningCallRecord.parse({
+          ...current,
+          state: 'terminal',
+          outcome: 'failed',
+          provider_disclosure: current.provider_disclosure,
+          completed_at: op.completed_at,
+          served_id: current.served_id,
+          model_resolution: current.model_resolution,
+          output_digest: current.output_digest,
+          failure_reason: op.failure_reason,
+          signals: [],
         }),
       );
       break;

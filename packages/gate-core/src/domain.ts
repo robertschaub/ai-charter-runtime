@@ -29,6 +29,9 @@ export const DOMAIN_TAGS = [
   'conversation-ingress-profile',
   'conversation-item-content',
   'model-output',
+  'screening-projection',
+  'screening-response-schema',
+  'screening-output',
   'system-use-decision',
   'system-use-configuration',
 ] as const;

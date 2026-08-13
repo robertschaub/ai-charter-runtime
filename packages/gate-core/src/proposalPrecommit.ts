@@ -5,6 +5,7 @@ import { z } from 'zod';
 import { AuthorizationCore } from './authorizationCore.js';
 import { proposalRevisionPreparationInvalidationOps } from './conversationInvalidation.js';
 import { ProposalIntakeError, ProposalIntakeService } from './proposalIntake.js';
+import { ScreeningCallService, screeningCallStart } from './screeningCall.js';
 import {
   classToken,
   gate,
@@ -78,6 +79,25 @@ export const proposalPrecommitProjection = z
   .strict();
 export type ProposalPrecommitProjection = z.infer<typeof proposalPrecommitProjection>;
 
+export const proposalPrecommitScreeningRequiredProjection = z
+  .object({
+    kind: z.literal('proposal_precommit_screening_required'),
+    proposal_id: id,
+    proposal_run_id: id,
+    state: z.literal('screening_required'),
+    current_gate: gate.refine((value) => value === 'submit' || value === 'verify'),
+    gates: z.array(proposalPrecommitGateProjection).max(2),
+    screening_call: screeningCallStart,
+  })
+  .strict();
+export type ProposalPrecommitScreeningRequiredProjection = z.infer<typeof proposalPrecommitScreeningRequiredProjection>;
+
+export const proposalPrecommitProcessProjection = z.union([
+  proposalPrecommitProjection,
+  proposalPrecommitScreeningRequiredProjection,
+]);
+export type ProposalPrecommitProcessProjection = z.infer<typeof proposalPrecommitProcessProjection>;
+
 export class ProposalPrecommitError extends Error {
   constructor(readonly code: 'forbidden' | 'not-found' | 'currentness' | 'progress', message: string) {
     super(message);
@@ -89,6 +109,7 @@ export interface ProposalPrecommitServiceOptions {
   readonly store: WalStore;
   readonly authorization: AuthorizationCore;
   readonly proposalIntakes: ProposalIntakeService;
+  readonly screeningCalls?: ScreeningCallService;
 }
 
 function projectGate(ruling: GateRuling) {
@@ -107,11 +128,13 @@ export class ProposalPrecommitService {
   readonly #store: WalStore;
   readonly #authorization: AuthorizationCore;
   readonly #proposalIntakes: ProposalIntakeService;
+  readonly #screeningCalls: ScreeningCallService | undefined;
 
   constructor(options: ProposalPrecommitServiceOptions) {
     this.#store = options.store;
     this.#authorization = options.authorization;
     this.#proposalIntakes = options.proposalIntakes;
+    this.#screeningCalls = options.screeningCalls;
   }
 
   #requireOrchestrator(actor: TransactionActor): void {
@@ -213,21 +236,45 @@ export class ProposalPrecommitService {
     });
   }
 
-  status(proposalIdInput: string, actor: TransactionActor): ProposalPrecommitProjection {
-    this.#requireOrchestrator(actor);
-    return this.#status(id.parse(proposalIdInput));
+  #processStatus(proposalId: string): ProposalPrecommitProcessProjection {
+    const normal = this.#status(proposalId);
+    if (this.#screeningCalls === undefined || normal.state !== 'frozen') return normal;
+    const state = this.#store.snapshot();
+    const proposal = state.proposals.get(proposalId);
+    const origin = state.proposalOrigins.get(proposalId);
+    if (proposal === undefined || origin === undefined) return normal;
+    for (const gateName of ['submit', 'verify'] as const) {
+      const start = this.#screeningCalls.startFor(proposal, gateName, origin.case_id);
+      if (start !== null) {
+        return proposalPrecommitScreeningRequiredProjection.parse({
+          kind: 'proposal_precommit_screening_required',
+          proposal_id: proposal.proposal_id,
+          proposal_run_id: origin.proposal_run_id,
+          state: 'screening_required',
+          current_gate: gateName,
+          gates: normal.gates,
+          screening_call: start,
+        });
+      }
+    }
+    return normal;
   }
 
-  statusByRun(caseIdInput: string, runIdInput: string, actor: TransactionActor): ProposalPrecommitProjection | null {
+  status(proposalIdInput: string, actor: TransactionActor): ProposalPrecommitProcessProjection {
+    this.#requireOrchestrator(actor);
+    return this.#processStatus(id.parse(proposalIdInput));
+  }
+
+  statusByRun(caseIdInput: string, runIdInput: string, actor: TransactionActor): ProposalPrecommitProcessProjection | null {
     this.#requireOrchestrator(actor);
     const state = this.#store.snapshot();
     const intakeId = state.proposalIntakeByRun.get(id.parse(runIdInput));
     const intake = intakeId === undefined ? undefined : state.proposalIntakes.get(intakeId);
     if (intake === undefined || intake.case_id !== id.parse(caseIdInput) || intake.proposal_id === null) return null;
-    return this.#status(intake.proposal_id);
+    return this.#processStatus(intake.proposal_id);
   }
 
-  async run(proposalIdInput: string, actor: TransactionActor): Promise<ProposalPrecommitProjection> {
+  async run(proposalIdInput: string, actor: TransactionActor): Promise<ProposalPrecommitProcessProjection> {
     this.#requireOrchestrator(actor);
     const proposalId = id.parse(proposalIdInput);
     for (const gateName of PRECOMMIT_GATES) {
@@ -244,6 +291,27 @@ export class ProposalPrecommitService {
       const proposal = state.proposals.get(proposalId);
       const origin = state.proposalOrigins.get(proposalId);
       if (proposal === undefined || origin === undefined) throw new ProposalPrecommitError('not-found', 'native proposal does not exist');
+      if (this.#screeningCalls !== undefined && (gateName === 'submit' || gateName === 'verify')) {
+        const screening = await this.#screeningCalls.ensure({
+          proposal,
+          gate: gateName,
+          caseId: origin.case_id,
+          proposalRunId: origin.proposal_run_id,
+          actor,
+          assertCurrent: (lockedState, at) => this.#proposalIntakes.assertProposalCurrent(lockedState, at, proposalId),
+        });
+        if (screening !== null) {
+          return proposalPrecommitScreeningRequiredProjection.parse({
+            kind: 'proposal_precommit_screening_required',
+            proposal_id: proposal.proposal_id,
+            proposal_run_id: origin.proposal_run_id,
+            state: 'screening_required',
+            current_gate: gateName,
+            gates: before.gates,
+            screening_call: screening,
+          });
+        }
+      }
       try {
         await this.#authorization.ruleProposalWithCurrentness(
           {

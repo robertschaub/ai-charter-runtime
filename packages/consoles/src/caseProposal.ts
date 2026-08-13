@@ -8,13 +8,15 @@ import {
   modelSelectionTarget,
   proposalPrecommitGateProjection,
   proposalPrecommitProjection,
+  proposalPrecommitScreeningRequiredProjection,
+  proposalPrecommitProcessProjection,
   proposalRunProcessProjection,
   proposalRevisionContinuationProjection,
   timestamp,
   type ConversationProcessProjection,
   type CurrentModelSelectionProjection,
   type ModelSelectionTarget,
-  type ProposalPrecommitProjection,
+  type ProposalPrecommitProcessProjection,
   type ProposalRunProcessProjection,
   type ProposalRevisionPreparationProjection,
 } from 'gate-core';
@@ -40,7 +42,7 @@ export type BrowserProposalPreparation = z.infer<typeof browserProposalPreparati
 
 const browserProposal = proposalPrecommitProjection.shape.proposal;
 const browserGate = proposalPrecommitGateProjection;
-export const browserProposalRunStatus = z
+const browserProposalNormalRunStatus = z
   .object({
     proposal_run_id: id,
     state: z.enum(['prepared', 'running', 'frozen', 'denied', 'escalated', 'verified', 'failed']),
@@ -61,6 +63,18 @@ export const browserProposalRunStatus = z
       context.addIssue({ code: z.ZodIssueCode.custom, path: ['escalation_id'], message: 'only an escalated run exposes an escalation id' });
     }
   });
+const browserProposalScreeningRunStatus = z
+  .object({
+    proposal_run_id: id,
+    state: z.literal('screening'),
+    current_gate: z.enum(['submit', 'verify']),
+    gates: z.array(browserGate).max(2),
+  })
+  .strict();
+export const browserProposalRunStatus = z.union([
+  browserProposalNormalRunStatus,
+  browserProposalScreeningRunStatus,
+]);
 export type BrowserProposalRunStatus = z.infer<typeof browserProposalRunStatus>;
 
 interface ProposalRecord {
@@ -117,8 +131,28 @@ function sameSession(record: ProposalRecord, session: CaseSessionRecord): boolea
 }
 
 export function toBrowserProposalRunStatus(
-  input: ProposalRunProcessProjection | ProposalPrecommitProjection,
+  input: ProposalRunProcessProjection | ProposalPrecommitProcessProjection,
 ): BrowserProposalRunStatus {
+  const screening = proposalPrecommitScreeningRequiredProjection.safeParse(input);
+  if (screening.success) {
+    return browserProposalRunStatus.parse({
+      proposal_run_id: screening.data.proposal_run_id,
+      state: 'screening',
+      current_gate: screening.data.current_gate,
+      gates: screening.data.gates.map((gateValue) => ({
+        gate: gateValue.gate,
+        ruling_id: gateValue.ruling_id,
+        verdict: gateValue.verdict,
+        ux_class: gateValue.ux_class,
+        reason: gateValue.reason,
+        status: gateValue.status,
+        validity_window: {
+          not_before: gateValue.validity_window.not_before,
+          not_after: gateValue.validity_window.not_after,
+        },
+      })),
+    });
+  }
   const precommit = proposalPrecommitProjection.safeParse(input);
   if (precommit.success) {
     const value = precommit.data;

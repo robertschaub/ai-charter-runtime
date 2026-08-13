@@ -3,6 +3,8 @@ import {
   conversationProcessProjection,
   currentModelSelectionProjection,
   proposalPrecommitProjection,
+  proposalPrecommitScreeningRequiredProjection,
+  SCREENING_RESPONSE_SCHEMA_DIGEST,
 } from 'gate-core';
 import { describe, expect, it } from 'vitest';
 
@@ -220,6 +222,7 @@ describe('M5.11 browser proposal preparation and projection', () => {
     });
     const browser = toBrowserProposalRunStatus(process);
     expect(browserProposalRunStatus.parse(browser)).toEqual(browser);
+    if (browser.state === 'screening') throw new Error('expected verified browser proposal status');
     expect(Object.keys(browser).sort()).toEqual(['continuation', 'gates', 'proposal', 'proposal_run_id', 'state']);
     expect(browser.continuation).toEqual({ state: 'unavailable', source_proposal_run_id: null });
     expect(Object.keys(browser.proposal!).sort()).toEqual([
@@ -229,5 +232,66 @@ describe('M5.11 browser proposal preparation and projection', () => {
     ]);
     expect(JSON.stringify(browser)).not.toContain('authorization_boot_id');
     expect(JSON.stringify(browser)).not.toContain('projection_digest');
+  });
+
+  it('reduces the process-only screening branch to run, stage, current gate, and prior rulings', () => {
+    const process = proposalPrecommitScreeningRequiredProjection.parse({
+      kind: 'proposal_precommit_screening_required',
+      proposal_id: 'prp_one',
+      proposal_run_id: 'prun_one',
+      state: 'screening_required',
+      current_gate: 'submit',
+      gates: [{
+        gate: 'authorize',
+        ruling_id: 'rul_authorize',
+        verdict: 'allow',
+        ux_class: 'silent',
+        reason: 'Synthetic authorize allow.',
+        status: 'issued',
+        validity_window: { not_before: at, not_after: '2026-08-08T10:02:00.000Z' },
+      }],
+      screening_call: {
+        kind: 'screening_required',
+        call_id: 'scr_one',
+        proposal_id: 'prp_one',
+        proposal_run_id: 'prun_one',
+        gate: 'submit',
+        card_id: 'openai-gpt-5.5',
+        card_version: 1,
+        requested_id: 'gpt-5.5',
+        expires_at: '2026-08-08T10:01:00.000Z',
+        max_output_tokens: 512,
+        tools_allowed: false,
+        response_schema_id: 'screening-signals@1',
+        response_schema_digest: SCREENING_RESPONSE_SCHEMA_DIGEST,
+        projection: {
+          world_id: 'w-demo',
+          case_id: 'case_demo',
+          provider: 'openai-gpt-5.5',
+          role: 'screening',
+          items: [{
+            id: 'said_public',
+            store: 'said',
+            turn: 'turn_one',
+            text: 'Private to the process branch.',
+            provenance: { derived_from: [], hops: [] },
+            tags: ['conf:public'],
+            origin_actor: 'document:synthetic',
+          }],
+          summary: { included: 1, dropped: 0, dropped_item_ids: [], unmet_tags: [] },
+        },
+      },
+    });
+    const browser = toBrowserProposalRunStatus(process);
+    expect(browser).toEqual({
+      proposal_run_id: 'prun_one',
+      state: 'screening',
+      current_gate: 'submit',
+      gates: [process.gates[0]],
+    });
+    expect(Object.keys(browser).sort()).toEqual(['current_gate', 'gates', 'proposal_run_id', 'state']);
+    expect(JSON.stringify(browser)).not.toContain('scr_one');
+    expect(JSON.stringify(browser)).not.toContain('Private to the process branch.');
+    expect(JSON.stringify(browser)).not.toContain('openai-gpt-5.5');
   });
 });

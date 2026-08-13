@@ -116,6 +116,35 @@ async function startHealthyServices(): Promise<number> {
 }
 
 describe('authorization process fail-stop lifecycle', () => {
+  it('fixes live screening at startup without reading or falling back to the fixture source', async () => {
+    const recordsRoot = mkdtempSync(join(tmpdir(), 'authorization-live-screening-mode-'));
+    roots.push(recordsRoot);
+    const servicesPort = await startHealthyServices();
+    const authorizationPort = await freePort();
+    const handle = await startAuthorizationProcess({
+      ...systemEnvironment(),
+      ...CREDENTIALS,
+      GATE_HMAC_KEY_ID: 'hmac-test',
+      GATE_KEYRING_PATH: join(recordsRoot, 'absent-keyring.json'),
+      RUNTIME_HOST: '127.0.0.1',
+      AUTHZ_PORT: String(authorizationPort),
+      ORCHESTRATOR_PORT: String(await freePort()),
+      SERVICES_PORT: String(servicesPort),
+      DEMO_WORLD_ID: 'w-demo',
+      RUNTIME_RECORDS_ROOT: recordsRoot,
+      RUNTIME_CHECKPOINTS_ROOT: join(recordsRoot, 'checkpoints'),
+      CHECKPOINT_VERIFY_LOCAL: '1',
+      RUNTIME_SCREENING_MODE: 'live',
+      RUNTIME_SCREENING_FIXTURE: join(recordsRoot, 'must-not-be-read.json'),
+    });
+    try {
+      expect(handle.address.host).toBe('127.0.0.1');
+      expect(existsSync(join(recordsRoot, 'must-not-be-read.json'))).toBe(false);
+    } finally {
+      await handle.close();
+    }
+  });
+
   it('binds native proposals to the selected lane and fails stale fixture hashes closed', async () => {
     const recordsRoot = mkdtempSync(join(tmpdir(), 'authorization-screening-fixture-'));
     roots.push(recordsRoot);

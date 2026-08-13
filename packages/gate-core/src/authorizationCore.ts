@@ -52,6 +52,7 @@ import {
   type PatternEvent,
   type RecordEntry,
   type ScreeningSignal,
+  type ScreeningCallTerminalProjection,
   type StoreItem,
   type SystemUseDecisionReference,
   type WalOp,
@@ -120,7 +121,9 @@ export interface AuthorizationCoreOptions {
     proposal: FrozenProposal,
     gate: 'submit' | 'verify',
     caseId?: string,
-  ) => boolean;
+    state?: WorldState,
+    at?: string,
+  ) => boolean | ScreeningValidationResult;
   /** Server-to-server evidence lookup; a failure or mismatch is an unresolved citation. */
   readonly resolveRegistryEvidence?: (
     citation: RegistryEvidenceCitation,
@@ -165,6 +168,11 @@ export interface ScreeningResolution {
   readonly performed: boolean;
   readonly signals: readonly ScreeningSignal[];
   readonly evidenceRefs: readonly EvidenceRef[];
+}
+
+export interface ScreeningValidationResult {
+  readonly valid: boolean;
+  readonly ops: readonly WalOp[];
 }
 
 export interface RuleProposalResult {
@@ -297,7 +305,8 @@ export interface RecordAccessInput {
     | ModelSelectionAccessEvidence
     | ConversationTransportAccessEvidence
     | ProposalIntakeAccessEvidence
-    | ProposalRevisionPreparationProjection;
+    | ProposalRevisionPreparationProjection
+    | ScreeningCallTerminalProjection;
   readonly suppressedCount?: number;
   readonly suppressionWindowMs?: number;
   readonly suppressionFinal?: boolean;
@@ -948,9 +957,13 @@ export class AuthorizationCore {
     }
   }
 
-  #validatedScreening(input: PreparedRuleProposalInput): ScreeningResolution {
+  #validatedScreening(
+    input: PreparedRuleProposalInput,
+    state: WorldState,
+    at: string,
+  ): { readonly resolution: ScreeningResolution; readonly ops: readonly WalOp[] } {
     if (input.gate !== 'submit' && input.gate !== 'verify') {
-      return { signals: [], performed: false, evidenceRefs: [] };
+      return { resolution: { signals: [], performed: false, evidenceRefs: [] }, ops: [] };
     }
     const candidate = {
       signals: input.signals,
@@ -958,20 +971,49 @@ export class AuthorizationCore {
       evidenceRefs: input.screeningEvidenceRefs,
     };
     try {
-      if (this.#validateScreeningResolution(candidate, input.proposal, input.gate, input.caseId)) return candidate;
+      const validation = this.#validateScreeningResolution(
+        candidate,
+        input.proposal,
+        input.gate,
+        input.caseId,
+        state,
+        at,
+      );
+      const valid = typeof validation === 'boolean' ? validation : validation.valid;
+      if (valid) return { resolution: candidate, ops: typeof validation === 'boolean' ? [] : validation.ops };
+      const ops = typeof validation === 'boolean' ? [] : validation.ops;
+      return {
+        resolution: {
+          signals: [],
+          performed: false,
+          evidenceRefs: [
+            evidenceRef.parse({
+              kind: 'screening_skipped',
+              provider: null,
+              role: 'screening',
+              reason: 'resolver-error',
+              suspect_item_ids: [],
+            }),
+          ],
+        },
+        ops,
+      };
     } catch {}
     return {
-      signals: [],
-      performed: false,
-      evidenceRefs: [
-        evidenceRef.parse({
-          kind: 'screening_skipped',
-          provider: null,
-          role: 'screening',
-          reason: 'resolver-error',
-          suspect_item_ids: [],
-        }),
-      ],
+      resolution: {
+        signals: [],
+        performed: false,
+        evidenceRefs: [
+          evidenceRef.parse({
+            kind: 'screening_skipped',
+            provider: null,
+            role: 'screening',
+            reason: 'resolver-error',
+            suspect_item_ids: [],
+          }),
+        ],
+      },
+      ops: [],
     };
   }
 
@@ -1253,7 +1295,8 @@ export class AuthorizationCore {
   ): TransactionBuild<RuleProposalResult> {
     const proposal = input.proposal;
     const policy = this.#policy;
-    const screening = this.#validatedScreening(input);
+    const screeningValidation = this.#validatedScreening(input, state, at);
+    const screening = screeningValidation.resolution;
       const existing = state.proposals.get(proposal.proposal_id);
       if (existing !== undefined && existing.proposal_hash !== proposal.proposal_hash) {
         throw new AuthorizationError('proposal-conflict', `proposal id ${proposal.proposal_id} is already frozen`);
@@ -1476,7 +1519,7 @@ export class AuthorizationCore {
       });
       const escalationId = evaluation.verdict === 'escalate' ? this.#ids.next('esc') : null;
       const recordEntryId = this.#ids.next('rec');
-      const ops: WalOp[] = [...revisionInvalidations];
+      const ops: WalOp[] = [...screeningValidation.ops, ...revisionInvalidations];
       if (existing === undefined) ops.push({ op: 'proposal.freeze', proposal });
       ops.push({
         op: 'nonce.issue',

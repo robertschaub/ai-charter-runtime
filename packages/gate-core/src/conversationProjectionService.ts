@@ -90,6 +90,14 @@ export interface ScreeningProjectionInput {
   readonly caseId?: string;
 }
 
+export interface LiveScreeningProjectionResolution {
+  readonly projection: ReturnType<typeof projectConversation>;
+  readonly evidenceRef: EvidenceRef;
+  readonly inspection: CardInspection;
+  readonly approval: Mandate['approved_models'][number];
+  readonly systemUseDecision: ModelCallOpenRecord['system_use_decision'];
+}
+
 export type ModelCallBeginInput = Omit<ModelCallBeginRequest, 'ingress_binding' | 'proposal_binding' | 'revision_binding'> & {
   readonly ingress_binding?: ModelCallBeginRequest['ingress_binding'];
   readonly proposal_binding?: ModelCallBeginRequest['proposal_binding'];
@@ -1028,6 +1036,64 @@ export class ConversationProjectionService {
   ): boolean {
     return canonicalize(this.screening({ proposal, gate, ...(caseId === undefined ? {} : { caseId }) })) ===
       canonicalize(resolution);
+  }
+
+  /**
+   * M6.1 process-private projection builder. The caller supplies the already frozen proposal,
+   * never an item/provider list. Authorization resolves the single screening approval and
+   * exact current four-store entries, then the existing projection core applies role clearances.
+   */
+  liveScreeningProjection(
+    proposal: FrozenProposal,
+    caseIdInput: string,
+    stateInput?: WorldState,
+    nowInput?: string,
+  ): LiveScreeningProjectionResolution {
+    const caseId = id.parse(caseIdInput);
+    if (caseId !== this.#caseId) {
+      throw new ConversationProjectionServiceError('invalid-scope', 'screening case does not match authorization configuration');
+    }
+    const state = stateInput ?? this.#store.snapshot();
+    const mandateValue = this.#currentMandate(
+      proposal.mandate_ref.mandate_id,
+      proposal.mandate_ref.version,
+      state,
+      nowInput,
+    );
+    const approvals = mandateValue.approved_models.filter((candidate) => candidate.roles.includes('screening'));
+    if (approvals.length !== 1) {
+      throw new ConversationProjectionServiceError('model-unavailable', 'live screening requires exactly one current screening model');
+    }
+    const approval = approvals[0]!;
+    const proposalItems = [...proposal.material_inputs, ...proposal.derived_claims];
+    const entries = proposalItems.map((item) => {
+      const entry = state.storeItems.get(item.id);
+      if (entry === undefined || entry.case_id !== caseId || canonicalize(entry.item) !== canonicalize(item)) {
+        throw new ConversationProjectionServiceError('invalid-scope', 'screening proposal item is absent from current provenance stores');
+      }
+      return entry;
+    });
+    const resolved = this.#resolveProjection(
+      {
+        mandateId: mandateValue.mandate_id,
+        mandateVersion: mandateValue.version,
+        cardId: approval.card_id,
+        cardVersion: approval.card_version,
+        requestedId: approval.requested_id,
+        role: 'screening',
+        caseId,
+        entries,
+      },
+      state,
+      nowInput,
+    );
+    return {
+      projection: resolved.projection,
+      evidenceRef: projectionEvidence(resolved.projection),
+      inspection: resolved.inspection,
+      approval: resolved.approval,
+      systemUseDecision: resolved.systemUseDecision,
+    };
   }
 
   #currentMandate(

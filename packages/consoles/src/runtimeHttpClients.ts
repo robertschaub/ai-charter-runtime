@@ -57,13 +57,20 @@ import {
   proposalIntakeStatusProjection,
   proposalRunProcessProjection,
   proposalPrecommitProjection,
+  proposalPrecommitProcessProjection,
+  screeningCallFailureRequest,
+  screeningCallOutputRequest,
+  screeningCallTerminalProjection,
   type ProposalCallBinding,
   type ProposalRevisionCallBinding,
   type ProposalRevisionPreparationProjection,
   type ProposalIntakeConsumeResult,
   type ProposalIntakeStatusProjection,
   type ProposalRunProcessProjection,
-  type ProposalPrecommitProjection,
+  type ProposalPrecommitProcessProjection,
+  type ScreeningCallFailureRequest,
+  type ScreeningCallOutputRequest,
+  type ScreeningCallTerminalProjection,
 } from 'gate-core';
 import type { ServicesHostExecution } from 'services-mock';
 import { z } from 'zod';
@@ -386,12 +393,12 @@ export class OrchestratorAuthorizationHttpClient extends JsonHttpClient {
     caseIdInput: string,
     runIdInput: string,
     onBehalfOf: OnBehalfOfClaim,
-  ): Promise<ProposalRunProcessProjection | ProposalPrecommitProjection> {
+  ): Promise<ProposalRunProcessProjection | ProposalPrecommitProcessProjection> {
     const world = worldId.parse(worldIdInput);
     const caseId = id.parse(caseIdInput);
     const runId = id.parse(runIdInput);
     const result = await this.get(`/w/${world}/cases/${caseId}/proposal-runs/${runId}`, onBehalfOf);
-    const precommit = proposalPrecommitProjection.safeParse(result);
+    const precommit = proposalPrecommitProcessProjection.safeParse(result);
     return precommit.success ? precommit.data : proposalRunProcessProjection.parse(result);
   }
 
@@ -399,10 +406,10 @@ export class OrchestratorAuthorizationHttpClient extends JsonHttpClient {
     worldIdInput: string,
     proposalIdInput: string,
     onBehalfOf: OnBehalfOfClaim,
-  ): Promise<ProposalPrecommitProjection> {
+  ): Promise<ProposalPrecommitProcessProjection> {
     const world = worldId.parse(worldIdInput);
     const proposalId = id.parse(proposalIdInput);
-    return proposalPrecommitProjection.parse(
+    return proposalPrecommitProcessProjection.parse(
       await this.post(`/w/${world}/proposals/${proposalId}/precommit`, {}, onBehalfOf),
     );
   }
@@ -411,11 +418,39 @@ export class OrchestratorAuthorizationHttpClient extends JsonHttpClient {
     worldIdInput: string,
     proposalIdInput: string,
     onBehalfOf: OnBehalfOfClaim,
-  ): Promise<ProposalPrecommitProjection> {
+  ): Promise<ProposalPrecommitProcessProjection> {
     const world = worldId.parse(worldIdInput);
     const proposalId = id.parse(proposalIdInput);
-    return proposalPrecommitProjection.parse(
+    return proposalPrecommitProcessProjection.parse(
       await this.get(`/w/${world}/proposals/${proposalId}/precommit`, onBehalfOf),
+    );
+  }
+
+  async admitScreeningOutput(
+    worldIdInput: string,
+    callIdInput: string,
+    input: ScreeningCallOutputRequest,
+    onBehalfOf?: OnBehalfOfClaim,
+  ): Promise<ScreeningCallTerminalProjection> {
+    const world = worldId.parse(worldIdInput);
+    const callId = id.parse(callIdInput);
+    const request = screeningCallOutputRequest.parse(input);
+    return screeningCallTerminalProjection.parse(
+      await this.post(`/w/${world}/screening-calls/${callId}/outputs`, request, onBehalfOf),
+    );
+  }
+
+  async failScreeningCall(
+    worldIdInput: string,
+    callIdInput: string,
+    input: ScreeningCallFailureRequest,
+    onBehalfOf?: OnBehalfOfClaim,
+  ): Promise<ScreeningCallTerminalProjection> {
+    const world = worldId.parse(worldIdInput);
+    const callId = id.parse(callIdInput);
+    const request = screeningCallFailureRequest.parse(input);
+    return screeningCallTerminalProjection.parse(
+      await this.post(`/w/${world}/screening-calls/${callId}/failures`, request, onBehalfOf),
     );
   }
 

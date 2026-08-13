@@ -31,6 +31,7 @@ import { loadKeyring } from './keyring.js';
 import { loadPolicyFile } from './policyLoader.js';
 import { runRuntimeMaintenance } from './runtimeMaintenance.js';
 import { screeningFixtureSet } from './screeningFixture.js';
+import { ScreeningCallService } from './screeningCall.js';
 import { id, storeItem, systemUseDecisionRecord, worldId } from './schemas/index.js';
 import { ServicesProbeHttpClient } from './servicesProbeHttpClient.js';
 import { SystemUseDecisionService } from './systemUseDecision.js';
@@ -93,6 +94,12 @@ function localCheckpointVerification(env: NodeJS.ProcessEnv): boolean {
   throw new Error('CHECKPOINT_VERIFY_LOCAL must be 0 or 1');
 }
 
+function screeningMode(env: NodeJS.ProcessEnv): 'fixture' | 'live' {
+  const value = env['RUNTIME_SCREENING_MODE'] ?? 'fixture';
+  if (value === 'fixture' || value === 'live') return value;
+  throw new Error('RUNTIME_SCREENING_MODE must be fixture or live');
+}
+
 function runtimeId(prefix: string): string {
   return `${prefix}_${randomUUID().replaceAll('-', '')}`;
 }
@@ -128,6 +135,7 @@ export async function startAuthorizationProcess(
   const maintenanceIntervalMs = intervalFrom(env);
   const world = worldId.parse(env['DEMO_WORLD_ID'] ?? 'w-demo');
   const demoCaseId = id.parse(env['DEMO_CASE_ID'] ?? 'case_demo');
+  const configuredScreeningMode = screeningMode(env);
   const servicesProbeToken = credential(env, 'SERVICES_TOKEN_PROC_AUTHZ');
   const credentials: CredentialBinding[] = [
     { label: 'role:principal', token: credential(env, 'AUTHZ_TOKEN_PRINCIPAL'), worldId: world },
@@ -150,9 +158,9 @@ export async function startAuthorizationProcess(
   const conversationFixture = resolve(
     env['RUNTIME_CONVERSATION_FIXTURE'] ?? 'fixtures/demo/conversation.json',
   );
-  const screeningFixtureFile = resolve(
-    env['RUNTIME_SCREENING_FIXTURE'] ?? 'fixtures/demo/screening.json',
-  );
+  const screeningFixtureFile = configuredScreeningMode === 'fixture'
+    ? resolve(env['RUNTIME_SCREENING_FIXTURE'] ?? 'fixtures/demo/screening.json')
+    : null;
   const systemUseFixtureFile = resolve(
     env['RUNTIME_SYSTEM_USE_FIXTURE'] ?? 'fixtures/demo/system-use-decision.json',
   );
@@ -169,9 +177,9 @@ export async function startAuthorizationProcess(
   const loadedPolicy = loadPolicyFile(policyFile, digestFileSet(sourceRoot, 'evaluator-build'));
   const policy = { ...loadedPolicy, policyContentDigest: digestFileSet(policyRoot, 'policy-set') };
   const cards = CardRegistry.load(cardsRoot);
-  const screeningFixtures = screeningFixtureSet.parse(
-    JSON.parse(readFileSync(screeningFixtureFile, 'utf8')),
-  );
+  const screeningFixtures = screeningFixtureFile === null
+    ? screeningFixtureSet.parse([])
+    : screeningFixtureSet.parse(JSON.parse(readFileSync(screeningFixtureFile, 'utf8')));
   const systemUseFixture = systemUseDecisionRecord.parse(
     JSON.parse(readFileSync(systemUseFixtureFile, 'utf8')),
   );
@@ -264,6 +272,12 @@ export async function startAuthorizationProcess(
       conversationTransport,
       proposalIntakes,
     });
+    const screeningCalls = new ScreeningCallService({
+      store,
+      projections: conversationProjections,
+      policy,
+      authorizationBootId: bootId,
+    });
     const authorization = new AuthorizationCore({
       store,
       keyring,
@@ -271,15 +285,23 @@ export async function startAuthorizationProcess(
       systemUse,
       resolveAuthorizedAgent: (actor) =>
         actor.credential === 'proc:orchestrator' ? (env['RUNTIME_AUTHORIZED_AGENT_ID'] ?? 'agent_demo') : undefined,
-      resolveScreening: (proposal, gate, caseId) =>
-        conversationProjections.screening({ proposal, gate, ...(caseId === undefined ? {} : { caseId }) }),
-      validateScreeningResolution: (resolution, proposal, gate, caseId) =>
-        conversationProjections.validateScreeningResolution(resolution, proposal, gate, caseId),
+      resolveScreening: (proposal, gate, caseId) => configuredScreeningMode === 'live'
+        ? screeningCalls.resolve(proposal, gate, caseId)
+        : conversationProjections.screening({ proposal, gate, ...(caseId === undefined ? {} : { caseId }) }),
+      validateScreeningResolution: (resolution, proposal, gate, caseId, state, at) =>
+        configuredScreeningMode === 'live' && state !== undefined && at !== undefined
+          ? screeningCalls.validate(resolution, proposal, gate, caseId, state, at)
+          : conversationProjections.validateScreeningResolution(resolution, proposal, gate, caseId),
       resolveModelEvidence: (proposal) => cards.resolve(proposal),
       resolveRegistryEvidence: (citation) => servicesProbe.resolveRegistryEvidence(citation),
     });
     await authorization.activatePolicy();
-    const proposalPrecommit = new ProposalPrecommitService({ store, authorization, proposalIntakes });
+    const proposalPrecommit = new ProposalPrecommitService({
+      store,
+      authorization,
+      proposalIntakes,
+      ...(configuredScreeningMode === 'live' ? { screeningCalls } : {}),
+    });
     const initialConversationItems = z.array(storeItem).parse(JSON.parse(readFileSync(conversationFixture, 'utf8')));
     await authorization.putConversationItems({
       caseId: demoCaseId,
@@ -319,6 +341,7 @@ export async function startAuthorizationProcess(
       conversationTransport,
       proposalIntakes,
       proposalPrecommit,
+      screeningCalls,
       reads,
       adapter,
       keyring,

@@ -282,6 +282,15 @@ describe('orchestrator-origin exact-window handoff client', () => {
     });
     expect(parseBrowserProposalRunStatus({ ...status, state: 'prepared', proposal: undefined, gates: [] })).toMatchObject({ state: 'prepared' });
     expect(parseBrowserProposalRunStatus({ ...status, state: 'verified', proposal: undefined })).toBeNull();
+    const screening = {
+      proposal_run_id: 'prun_one',
+      state: 'screening',
+      current_gate: 'submit',
+      gates: [gate],
+    };
+    expect(parseBrowserProposalRunStatus(screening)).toEqual(screening);
+    expect(parseBrowserProposalRunStatus({ ...screening, continuation: status.continuation })).toBeNull();
+    expect(parseBrowserProposalRunStatus({ ...screening, call_id: 'scr_hidden' })).toBeNull();
   });
 
   it('accepts only redacted browser model-selection projections', () => {

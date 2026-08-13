@@ -30,6 +30,12 @@ import {
   PROPOSAL_DRAFT_SCHEMA_DIGEST,
   PROPOSAL_DRAFT_SYSTEM_INSTRUCTION,
   PROPOSAL_REVISION_SYSTEM_INSTRUCTION,
+  SCREENING_RESPONSE_FORMAT,
+  SCREENING_SYSTEM_INSTRUCTION,
+  modelCallReportableFailureReason,
+  screeningCallOutputRequest,
+  screeningCallStart,
+  screeningCallTerminalProjection,
   sortedRestrictionTags,
   verifyDigest,
   worldId,
@@ -57,6 +63,10 @@ import {
   type ProposalRevisionSourceProjection,
   type ProposalIntakeConsumeResult,
   type ProposalIntakeStatusProjection,
+  type ScreeningCallFailureRequest,
+  type ScreeningCallOutputRequest,
+  type ScreeningCallStart,
+  type ScreeningCallTerminalProjection,
 } from 'gate-core';
 import {
   ModelAdapterError,
@@ -245,6 +255,18 @@ export interface ModelTurnAuthorizationClient {
     input: ModelCallFailureRequest,
     onBehalfOf?: ModelTurnCallerClaim,
   ): Promise<ModelCallFailedRecord>;
+  admitScreeningOutput?(
+    worldIdInput: string,
+    callIdInput: string,
+    input: ScreeningCallOutputRequest,
+    onBehalfOf?: ModelTurnCallerClaim,
+  ): Promise<ScreeningCallTerminalProjection>;
+  failScreeningCall?(
+    worldIdInput: string,
+    callIdInput: string,
+    input: ScreeningCallFailureRequest,
+    onBehalfOf?: ModelTurnCallerClaim,
+  ): Promise<ScreeningCallTerminalProjection>;
   ingestConversationMessage?(
     worldIdInput: string,
     caseIdInput: string,
@@ -610,6 +632,8 @@ export class ModelTurnCoordinator {
   readonly #seenTurns = new Set<string>();
   readonly #haltedLanes = new Set<string>();
   readonly #busyLanes = new Set<string>();
+  readonly #seenScreeningCalls = new Set<string>();
+  readonly #busyScreeningCalls = new Set<string>();
 
   constructor(options: ModelTurnCoordinatorOptions) {
     this.#worldId = worldId.parse(options.worldId);
@@ -649,6 +673,128 @@ export class ModelTurnCoordinator {
     return currentModelSelectionProjection.parse(
       await this.#authorization.currentModelSelection(this.#worldId, this.#caseId),
     );
+  }
+
+  /** One provider attempt for one authorization-owned screening call; no retry or lane fallback exists. */
+  async runScreening(
+    inputValue: ScreeningCallStart,
+    context: ModelTurnRunContext = {},
+  ): Promise<ScreeningCallTerminalProjection> {
+    const input = screeningCallStart.parse(inputValue);
+    if (
+      input.projection.world_id !== this.#worldId ||
+      input.projection.case_id !== this.#caseId ||
+      input.projection.provider !== input.card_id ||
+      input.projection.role !== 'screening' ||
+      input.max_output_tokens !== 512 ||
+      input.tools_allowed !== false ||
+      this.#authorization.admitScreeningOutput === undefined ||
+      this.#authorization.failScreeningCall === undefined
+    ) throw new ModelTurnError('authorization-refused');
+    const key = laneKey(input.card_id, input.card_version, input.requested_id);
+    if (this.#seenScreeningCalls.has(input.call_id)) throw new ModelTurnError('turn-replay');
+    if (this.#busyScreeningCalls.has(input.call_id)) throw new ModelTurnError('lane-busy');
+    this.#seenScreeningCalls.add(input.call_id);
+    const lane = this.#lanes.get(key);
+    if (lane === undefined) {
+      return screeningCallTerminalProjection.parse(
+        await this.#authorization.failScreeningCall(
+          this.#worldId,
+          input.call_id,
+          { failure_reason: 'provider-unavailable', provider_disclosure: 'possible', served_id: null },
+          context.onBehalfOf,
+        ),
+      );
+    }
+    this.#busyScreeningCalls.add(input.call_id);
+    try {
+      context.onProviderAttempt?.();
+      let response: ActingResponse;
+      try {
+        response = await lane.adapter.act({
+          messages: [
+            { role: 'system', content: SCREENING_SYSTEM_INSTRUCTION },
+            {
+              role: 'user',
+              content: canonicalize({
+                schema: input.response_schema_id,
+                gate: input.gate,
+                projection: input.projection,
+              }),
+            },
+          ],
+          maxOutputTokens: input.max_output_tokens,
+          responseFormat: SCREENING_RESPONSE_FORMAT,
+        });
+      } catch (error) {
+        const evidence = providerFailureEvidence(error);
+        return screeningCallTerminalProjection.parse(
+          await this.#authorization.failScreeningCall(
+            this.#worldId,
+            input.call_id,
+            {
+              failure_reason: modelCallReportableFailureReason.parse(evidence.failureReason),
+              provider_disclosure: evidence.providerDisclosure,
+              served_id: null,
+            },
+            context.onBehalfOf,
+          ),
+        );
+      }
+      const served = modelId.safeParse(response.servedId);
+      const responseIsBound = response.lane === lane.lane &&
+        response.requestedId === lane.requestedId &&
+        served.success &&
+        typeof response.content === 'string' &&
+        response.content.length > 0 &&
+        Array.isArray(response.toolCalls) &&
+        response.toolCalls.length === 0;
+      if (!responseIsBound) {
+        return screeningCallTerminalProjection.parse(
+          await this.#authorization.failScreeningCall(
+            this.#worldId,
+            input.call_id,
+            {
+              failure_reason:
+                served.success && Array.isArray(response.toolCalls) && response.toolCalls.length > 0
+                  ? 'tool-calls-refused'
+                  : 'malformed-response',
+              provider_disclosure: 'confirmed',
+              served_id: served.success ? served.data : null,
+            },
+            context.onBehalfOf,
+          ),
+        );
+      }
+      const admissionRequest = screeningCallOutputRequest.safeParse({
+        content: response.content,
+        served_id: served.data,
+      });
+      if (!admissionRequest.success) {
+        return screeningCallTerminalProjection.parse(
+          await this.#authorization.failScreeningCall(
+            this.#worldId,
+            input.call_id,
+            {
+              failure_reason: 'malformed-response',
+              provider_disclosure: 'confirmed',
+              served_id: served.data,
+            },
+            context.onBehalfOf,
+          ),
+        );
+      }
+      return screeningCallTerminalProjection.parse(
+        await this.#authorization.admitScreeningOutput(
+          this.#worldId,
+          input.call_id,
+          admissionRequest.data,
+          context.onBehalfOf,
+        ),
+      );
+    } finally {
+      this.#busyScreeningCalls.delete(input.call_id);
+    }
   }
 
   async select(input: {

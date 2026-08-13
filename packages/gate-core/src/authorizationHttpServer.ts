@@ -41,6 +41,7 @@ import type { Keyring } from './keyring.js';
 import { SystemUseDecisionError, type SystemUseDecisionService } from './systemUseDecision.js';
 import { ProposalIntakeError, type ProposalIntakeService } from './proposalIntake.js';
 import { ProposalPrecommitError, type ProposalPrecommitService } from './proposalPrecommit.js';
+import { ScreeningCallError, type ScreeningCallService } from './screeningCall.js';
 import {
   classToken,
   browserOrigin,
@@ -55,6 +56,8 @@ import {
   modelCallAdmissionRequest,
   modelCallBeginRequest,
   modelCallFailureRequest,
+  screeningCallFailureRequest,
+  screeningCallOutputRequest,
   conversationMessageIngressRequest,
   outputReleaseConsumeRequest,
   modelSelectionCheckRequest,
@@ -291,6 +294,7 @@ export interface AuthorizationHttpServerOptions {
   readonly conversationTransport: ConversationTransportService;
   readonly proposalIntakes?: ProposalIntakeService;
   readonly proposalPrecommit?: ProposalPrecommitService;
+  readonly screeningCalls?: ScreeningCallService;
   readonly reads: AuthorizationReadSide;
   readonly adapter: AuthorizationHttpAdapter;
   readonly keyring: Keyring;
@@ -459,6 +463,22 @@ export class AuthorizationHttpServer {
         if (proposalId === undefined) return { status: 404, body: { error: 'not-found' } };
         const result = options.proposalPrecommit.status(proposalId, requireActor(context));
         return { status: 200, body: result, readLengths: { gates: result.gates.length } };
+      },
+      'screening-call.output': async (request, context) => {
+        if (options.screeningCalls === undefined) return { status: 503, body: { error: 'screening-unavailable' } };
+        const callId = context.params['id'];
+        if (callId === undefined) return { status: 404, body: { error: 'not-found' } };
+        const parsed = screeningCallOutputRequest.parse(await body(request));
+        const result = await options.screeningCalls.admit(callId, parsed, requireActor(context));
+        return { status: 200, body: result, accessEvidence: result };
+      },
+      'screening-call.failure': async (request, context) => {
+        if (options.screeningCalls === undefined) return { status: 503, body: { error: 'screening-unavailable' } };
+        const callId = context.params['id'];
+        if (callId === undefined) return { status: 404, body: { error: 'not-found' } };
+        const parsed = screeningCallFailureRequest.parse(await body(request));
+        const result = await options.screeningCalls.fail(callId, parsed, requireActor(context));
+        return { status: 200, body: result, accessEvidence: result };
       },
       'model-selection.read': async (_request, context) => {
         if (context.params['case_id'] !== configuredCaseId) {
@@ -864,6 +884,12 @@ export class AuthorizationHttpServer {
               };
             }
             if (error instanceof ProposalPrecommitError) {
+              return {
+                status: error.code === 'forbidden' ? 403 : error.code === 'not-found' ? 404 : 409,
+                body: { error: error.code },
+              };
+            }
+            if (error instanceof ScreeningCallError) {
               return {
                 status: error.code === 'forbidden' ? 403 : error.code === 'not-found' ? 404 : 409,
                 body: { error: error.code },
