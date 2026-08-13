@@ -3,7 +3,8 @@
 
 **Status:** definition reviewed at `582eaeb`, GO — no findings; implementation, live provider use, capture,
 checkpoint push, and publication have not started and remain separately approval-gated. The separate M6.0a
-anchoring prerequisite was reviewed at `be7f2ef`.
+anchoring prerequisite was reviewed at `be7f2ef`, and the M6.0b unsupported-`reverse` prerequisite was reviewed at
+`36126fa`.
 **Spec:** §§1, 3, 5, 6, 7, 9, and 10 (M6), especially the two-layer comparison rule in §7.
 **Depends on:** ADR-001 through ADR-015 and the reviewed M5 baseline at `5251500`.
 
@@ -25,8 +26,8 @@ second layer exposes variance; it is not a controlled model-quality comparison o
 At definition time, M6 had two unresolved prerequisites: ADR-003's remote check could not distinguish an honest
 unpushed latest checkpoint from confirmed remote rollback, and the general `reverse` disposition was a known
 unreachable-but-empty token. The first prerequisite was separately implemented and reviewed at `be7f2ef`; the
-second has a reviewed definition in [ADR-017](ADR-017-unsupported-reverse-disposition.md) at `2eb14ba`, with
-implementation still unauthorized. This decision does not silently fold either correction into capture work.
+second was separately implemented under [ADR-017](ADR-017-unsupported-reverse-disposition.md) and reviewed at
+`36126fa`. This decision did not silently fold either correction into capture work.
 
 ## Decision
 
@@ -282,8 +283,8 @@ Definition review authorizes no code. Subject to separate maintainer approval af
 is:
 
 1. **M6.0 prerequisites:** separately define, correct, test, and review the ADR-003 failed-push distinction and the
-   unsupported `reverse` disposition. M6.0a is reviewed at `be7f2ef`; M6.0b's definition is reviewed at `2eb14ba`
-   but implementation remains approval- and review-gated. Neither change was included in the ADR-016 definition commit.
+   unsupported `reverse` disposition. M6.0a is reviewed at `be7f2ef`; M6.0b is reviewed at `36126fa`. Neither change
+   was included in the ADR-016 definition commit.
 2. **M6.1 authorization-owned live screening protocol:** implement §3 and its paused fixed-precommit state machine
    with synthetic loopback providers only. Prove projection minimization, exact call/evidence binding, signal
    monotonicity, fail-closed terminal states, no retry/fallback, ACLs, and raw-byte exclusion. Stop for exact-SHA

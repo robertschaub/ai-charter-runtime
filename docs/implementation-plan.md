@@ -1,13 +1,12 @@
 <!-- SPDX-License-Identifier: CC-BY-4.0 -->
 # Runtime implementation plan
 
-**Status date:** 2026-08-12
+**Status date:** 2026-08-13
 
 **Current milestone:** M4 and bounded M5 complete; the ADR-016 M6 definition received GO at `582eaeb`, and the
-separate M6.0a anchoring-flow prerequisite received GO at `be7f2ef`. M6.0b's definition in
-[ADR-017](adr/ADR-017-unsupported-reverse-disposition.md) was reviewed at `2eb14ba` with GO and no findings;
-implementation remains unauthorized pending separate maintainer approval. M6 capability implementation and live
-capture have not started and remain gated.
+separate M6.0a anchoring-flow prerequisite received GO at `be7f2ef`. The M6.0b unsupported-`reverse` implementation
+received GO at `36126fa`; both M6.0 prerequisites are complete. M6.1 capability implementation and live capture
+have not started and remain approval- and review-gated.
 
 This file tracks implementation status and sequencing in `ai-charter-runtime`. It does not replace or
 reinterpret the authoritative specification. On divergence, the specification and its linked Charter
@@ -40,7 +39,14 @@ URLs, commit, paths, and digests above. A later upstream change does not silentl
 ## Reviewed implementation baseline
 
 The latest cross-model adversarially reviewed implementation is
-`be7f2efdb380ef15aa011488f92dae18b4b2a2a5` (`be7f2ef`). Exact-SHA review returned **GO — no findings** for
+`36126fad475cf0269e13662464eae9e41f1db26b` (`36126fa`). Exact-SHA review returned **GO — no findings** for
+M6.0b's removal of the unsupported active `reverse` token, early untyped-core rejection, strict policy/HTTP/
+persistence/projection rejection, and console omission. The implementation preserves the exact remaining general
+and dialogue disposition sets and adds no route, ACL, authority, Commit/effect, provenance, card, record, or M6.1
+surface.
+
+The preceding reviewed implementation is `be7f2efdb380ef15aa011488f92dae18b4b2a2a5` (`be7f2ef`). Exact-SHA review
+returned **GO — no findings** for
 M6.0a's fail-safe remote-acknowledgment classifier, verified-local terminal-attempt binding, injected read-only
 observer, current-observation-only `remotely_acknowledged` predicate, receipt/window basis, and clean result-taxonomy
 migration. It adds no checkpoint writer, retry, recovery, provider call, networked test, push, or capture path.
@@ -64,7 +70,7 @@ ADR-017's documentation-only M6.0b definition at `2eb14ba99d4e2cda8b4980be5aae18
 (`2eb14ba`) received **GO — no findings**. Review confirmed that removing the unsupported active `reverse` token
 narrows no mandatory specification semantics, preserves the broader source vocabulary and not-assessed boundary,
 and requires rejection or omission rather than coercion across policy, HTTP, core, persistence, projection, and
-console seams. This clears the definition only; implementation remains separately approval- and review-gated.
+console seams. The separately approved implementation at `36126fa` also received **GO — no findings**.
 
 The preceding authority-bearing integration baseline is
 `5b27b0e3034fdc05f599f475a0a4c5329ef829ee` (`5b27b0e`). The M5.12 definition at
@@ -76,9 +82,10 @@ aggregate-ceiling escalation behaviour. Its regression proves the legacy Verify 
 opening an escalation or dialogue item. Focused exact-SHA re-review returned **GO — finding closed; no new
 findings** and independently reproduced the red state against the parent.
 
-Latest reviewed validation is `npm run typecheck` clean, 4 Git-safety hook tests, 394 Vitest tests across 43 files,
-`git diff --check`, and verification of both unchanged signed cards. The reviewer confirmed the injected-observer
-matrix remained offline. Neither implementation nor review moved the Charter provenance baseline.
+Latest reviewed validation is `npm run typecheck` clean, 4 Git-safety hook tests, 396 Vitest tests across 43 files,
+`git diff --check`, and verification of both unchanged signed cards. The reviewer confirmed the M6.0b tranche made
+no live call and that no active `reverse` disposition remains in production TypeScript or policy YAML. Neither
+implementation nor review moved the Charter provenance baseline.
 
 The published runtime head is `354d64590cbd64b3509cc3672175582bb3a354c4` (`354d645`). It contains the reviewed
 M5.3–M5.11 integration range, the M5.11 retry-idempotency evidence and review closure, and the separate open-finding
@@ -109,23 +116,13 @@ Reviewed validation at `be7f2ef` is `npm run typecheck` clean, 4/4 Git-safety te
 `git diff --check` clean, and both unchanged signed cards verified. The M6.0a matrix injects local commit evidence
 and remote observations; it performs no network operation and mutates synthetic records only through the harness.
 
-**M6.0b definition reviewed — GO, no findings:** `reverse` appears in
-`GENERAL_DISPOSITIONS` in `packages/gate-core/src/schemas/intervention.ts`,
-annotated there to ADR-001 §7, and again in the governance console's own disposition list. ADR-001 §7's
-disposition map defines no behaviour for it, and no `permitted_dispositions` list in
-`packages/gate-core/policy/v1.yaml` includes it — so today it is unreachable. The risk is what happens if a
-policy ever lists it: a **static read** of the disposition path indicates the value would pass the
-permitted-set check, set no route (only `seek-review` and `route-to-remedy` do), dispose the escalation and
-release the reservation—behaviourally indistinguishable from `deny`, while the console renders a **Reverse**
-button to the operator. That is a silent-wrong-answer shape rather than a fail-closed one.
-
-Not executed; confirm with a test before acting. [ADR-017](adr/ADR-017-unsupported-reverse-disposition.md) selects
-removal rather than implementation: ADR-001 §5 holds that compensation is a new gated action and the machine has no
-un-settle arc, while its Consequences keep compensation of an irreversible effect as a recorded routing obligation
-because the POC has no remedy decider. The pinned sources retain `reverse` in the broader Charter vocabulary but
-also mark post-commit reversal/compensation not assessed in this POC. The definition therefore narrows the active
-runtime subset without changing upstream semantics or the provenance pin. Exact-SHA definition review returned GO
-at `2eb14ba`; implementation remains separately approval-gated.
+**M6.0b implementation reviewed — GO, no findings:** [ADR-017](adr/ADR-017-unsupported-reverse-disposition.md)
+removes the unsupported active `reverse` token rather than implementing a false generic reversal. Exact-SHA review
+at `36126fa` confirmed the exact six-token core and console allow-lists, unchanged dialogue vocabulary, strict
+rejection across contract, policy, HTTP, untyped core, state, record, WAL, and projection boundaries, and console
+omission of foreign input. Rejection never coerces the token to another disposition or mutates authority state;
+the HTTP boundary appends only its existing access record. Post-commit reversal and compensation remain not
+assessed, the Charter vocabulary and provenance pin are unchanged, and no M6.1 surface was added.
 
 ## Milestone status
 
@@ -137,7 +134,7 @@ at `2eb14ba`; implementation remains separately approval-gated.
 | M3 — vertical slice | Implemented | Deterministic authorize → propose → rule → commit-verify → effect → receipt path, adapters, service ledger, and signed cards are present. |
 | M4 — escalation + governance console | **Complete** | Final exact-SHA review of `e326562` returned GO with no findings; the offline acceptance ledger preserves the remaining partial and not-assessed boundaries. |
 | M5 — screening + empathy + switching | **Complete within the bounded POC acceptance** | M5.1–M5.12 culminate in the authority-bearing baseline `5b27b0e`. ADR-015's zero-route M5.13 definition received GO at `a08fa98`; its fixture/test/acceptance implementation at `5251500` received GO with no findings. The acceptance ledger retains four partial and two not-assessed empathy red-line families. This is not assurance, semantic clearance, or deployment readiness. |
-| M6 — full pass + demo capture | **Definition reviewed; M6.0a reviewed; M6.0b definition reviewed** | [ADR-016](adr/ADR-016-m6-evidence-capture.md) received GO at `582eaeb`; M6.0a received GO at `be7f2ef`; ADR-017 received definition GO at `2eb14ba` but authorizes no implementation. No provider call, checkpoint push, or capture artifact is authorized. |
+| M6 — full pass + demo capture | **Definition reviewed; M6.0 prerequisites reviewed** | [ADR-016](adr/ADR-016-m6-evidence-capture.md) received GO at `582eaeb`; M6.0a received GO at `be7f2ef`; M6.0b received GO at `36126fa`. M6.1 has not started. No provider call, checkpoint push, or capture artifact is authorized. |
 | M7 — article | Not started | Publication claims follow a reviewed and explicitly published M6 artifact. |
 
 These labels describe repository implementation status, not assurance, certification, or independent
@@ -676,10 +673,11 @@ acceptance boundaries:
 - Browser/process projections remain exact-key and omit the question, contract, answer/evidence, dialogue item,
   source hash, internal lineage/currentness, credentials, raw provider content, and action authority.
 
-The slice deliberately excludes dynamic Commit/effect initiation, live providers, M6, broader ingestion and
-retention work, and the separate unimplemented general `reverse` disposition. It does not complete M5. Exact-SHA
-review of `4c14e6b` returned GO with one Low deny-precedence finding. The one-line guard and regression at `5b27b0e`
-received focused re-review with **GO — finding closed; no new findings**. The reviewer reproduced typecheck, 4/4
+The slice deliberately excluded dynamic Commit/effect initiation, live providers, M6, broader ingestion and
+retention work, and the then-unimplemented general `reverse` disposition; that separate disposition issue was later
+closed at reviewed M6.0b baseline `36126fa`. It did not complete M5. Exact-SHA review of `4c14e6b` returned GO with
+one Low deny-precedence finding. The one-line guard and regression at `5b27b0e` received focused re-review with
+**GO — finding closed; no new findings**. The reviewer reproduced typecheck, 4/4
 Git-safety tests, 378/378 Vitest tests across 43 files, both unchanged signed-card verifications, and the regression's
 failure against the unguarded parent.
 
@@ -730,20 +728,17 @@ authorization route. The bounded handoff and session implementation was independ
 
 ## Ordered next slices
 
-1. **Implement M6.0b only after separate maintainer approval.** Remove the token from the core and console
-   allow-lists, add the bounded schema/core/HTTP/persistence/projection/console regressions, and stop for exact-SHA
-   implementation review.
-2. **M6.1 — authorization-owned live screening protocol.** After both prerequisite reviews and separate maintainer approval,
+1. **M6.1 — authorization-owned live screening protocol.** After both prerequisite reviews and separate maintainer approval,
    add the paused fixed-precommit screening-call lifecycle with synthetic loopback providers only. Stop for
    exact-SHA review; no live provider call is authorized.
-3. **M6.2 — native commitment continuation.** After M6.1 GO and separate approval, enumerate the complete
+2. **M6.2 — native commitment continuation.** After M6.1 GO and separate approval, enumerate the complete
    services-host route set, then implement only
    the proposal-bound execution-preparation → services-host Commit/verify → local mock-effect path with synthetic
    loopback tests. Stop for exact-SHA review.
-4. **M6.3 — offline full pass and capture contract.** After M6.2 GO and separate approval, implement the strict
+3. **M6.3 — offline full pass and capture contract.** After M6.2 GO and separate approval, implement the strict
    plan/artifact schemas, two-lane twenty-two-beat and adversarial matrix, acceptance ledger, gitignored staging,
    sanitization checks, and dry-run assets. No live provider call or push. Stop for exact-SHA review.
-5. **M6.4 — live capture and publication.** Freeze one plan, require M6.0a's current `remotely_acknowledged`
+4. **M6.4 — live capture and publication.** Freeze one plan, require M6.0a's current `remotely_acknowledged`
    predicate, obtain action-time approval for its bounded acting and
    screening-provider calls and separate approval for checkpoint pushes, capture through `runtime:start`, sanitize and review the
    candidate artifact, then obtain separate commit/push approval. Only a published exact SHA and final cross-model

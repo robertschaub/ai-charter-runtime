@@ -43,12 +43,12 @@ its post-response `authorization-invalidated` reason. Model-call, proposal, and 
 selection id; `commit-verify` compares current selection as the lazy backstop. An `A → B → A` sequence therefore
 cannot revive authority issued under the earlier A selection.
 
-**Proposed amendment (M6.0b unsupported `reverse`, ADR-017):** the POC's active general-disposition set will omit
-`reverse`. The source vocabulary remains broader, but post-commit reversal and compensation are not assessed here,
-and this pre-commit escalation machine has no legitimate reversal transition. Policy, transport, state, record, and
-console inputs carrying the unsupported token must fail closed or omit it; they are never coerced to a terminal
-deny. ADR-017's definition received GO at `2eb14ba`; this proposed amendment remains unimplemented pending separate
-maintainer approval and exact-SHA implementation review.
+**Amendment (M6.0b unsupported `reverse`, reviewed at `36126fa`, 2026-08-13):** the POC's active
+general-disposition set omits `reverse`. The source vocabulary remains broader, but post-commit reversal and
+compensation are not assessed here, and this pre-commit escalation machine has no legitimate reversal transition.
+Policy, transport, state, record, and console inputs carrying the unsupported token must fail closed or omit it;
+they are never coerced to a terminal deny. ADR-017's definition received GO at `2eb14ba`; its bounded implementation
+received GO with no findings at `36126fa`.
 
 ## Context
 

@@ -1,9 +1,9 @@
 <!-- SPDX-License-Identifier: CC-BY-4.0 -->
 # ADR-017 — Unsupported `reverse` disposition
 
-**Status:** M6.0b definition reviewed at `2eb14ba` (2026-08-12), GO — no findings. Implementation remains
-unauthorized pending separate maintainer approval. **Spec:** §4 intervention contract; §5 escalation state machine;
-§7 family 9 coverage; §9 effect-specific terminal enforcement and institutional limits.
+**Status:** M6.0b definition reviewed at `2eb14ba` (2026-08-12), GO — no findings; bounded implementation reviewed
+at `36126fa` (2026-08-13), GO — no findings. **Spec:** §4 intervention contract; §5 escalation state machine; §7
+family 9 coverage; §9 effect-specific terminal enforcement and institutional limits.
 
 ## Context
 
@@ -14,16 +14,16 @@ reversible, compensable, or irreversible, and ask who has authority to order res
 correction, or compensation. The specification therefore marks post-commit reversal and compensation **not
 assessed** in this POC.
 
-The runtime currently carries `reverse` in two active allow-lists:
+At definition time, the runtime carried `reverse` in two active allow-lists:
 
 - `GENERAL_DISPOSITIONS` in the authorization core's intervention schema; and
 - `GENERAL_CONSOLE_DISPOSITIONS` in the governance console.
 
-No policy contract permits it, no tracked fixture or record contains it, and ADR-001's disposition map assigns it
-no next-state semantics. If a future policy were to permit the existing token, the
-authorization core would consume the escalation, invalidate the ruling, release reservations, create no successor
-or routing obligation, and record the result. That is behaviourally indistinguishable from a terminal denial while
-the operator was shown a button labelled `reverse`. This is a silent-wrong-answer state, not a fail-closed one.
+No policy contract permitted it, no tracked fixture or record contained it, and ADR-001's disposition map assigned
+it no next-state semantics. Had a policy permitted the token, the authorization core would have consumed the
+escalation, invalidated the ruling, released reservations, created no successor or routing obligation, and recorded
+the result. That was behaviourally indistinguishable from a terminal denial while the operator was shown a button
+labelled `reverse`. This was a silent-wrong-answer state, not a fail-closed one.
 
 Implementing generic reversal in this pre-commit escalation machine would create a larger error. A committed effect
 cannot be un-settled: ADR-001 makes compensation a new gated action with its own proposal, authority, currentness
@@ -35,7 +35,7 @@ An escalation disposition cannot manufacture any of those missing authorities or
 
 ### 1. Remove `reverse` from the POC's active disposition surface
 
-M6.0b will remove `reverse` from both active runtime allow-lists. The authorization core and governance console will
+M6.0b removes `reverse` from both active runtime allow-lists. The authorization core and governance console
 support exactly these general dispositions:
 
 ```text
@@ -81,7 +81,7 @@ does contain it must halt for investigation rather than be rewritten.
 
 ### 3. The console cannot advertise an unavailable power
 
-The governance console will remove `reverse` from its own exact allow-list. Its projection filter must omit an
+The governance console removes `reverse` from its own exact allow-list. Its projection filter must omit an
 unexpected caller- or server-supplied `reverse` value even if a malformed object reaches the client. No Reverse
 button is rendered, and the client cannot submit that token through its typed disposition path.
 
@@ -99,7 +99,7 @@ point. Irreversible effects remain irreversible and route to review or remedy ra
 
 ## Implementation boundary
 
-The later implementation tranche is bounded to:
+The implementation tranche was bounded to:
 
 1. remove `reverse` from `GENERAL_DISPOSITIONS` and `GENERAL_CONSOLE_DISPOSITIONS`;
 2. update schema, core, console, policy-validation, HTTP-boundary, persistence, and projection tests so the token is

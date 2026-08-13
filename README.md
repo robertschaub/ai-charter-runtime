@@ -12,8 +12,9 @@ effect. M5.11, reviewed at `8364745`, adds governed proposal intake and fixed pr
 at `5b27b0e`, adds an authorization-derived dialogue trigger and response-bound native proposal revision; it still
 cannot reach Commit or effect execution. [ADR-016](docs/adr/ADR-016-m6-evidence-capture.md) now proposes the M6
 full-pass, authorization-owned live-screening, native commitment-continuation, and dual-model capture contract.
-The separate M6.0a anchoring prerequisite was reviewed at `be7f2ef`; no M6 live-screening, commitment-continuation,
-capture-runner, live run, checkpoint push, or capture artifact exists yet.
+The separate M6.0a anchoring prerequisite was reviewed at `be7f2ef`, and the M6.0b unsupported-`reverse` removal
+was reviewed at `36126fa`; no M6.1 live-screening, commitment-continuation, capture-runner, live run, checkpoint
+push, or capture artifact exists yet.
 
 The authoritative build specification lives in the documentation repository:
 [runtime-gates-poc-spec.md](https://github.com/robertschaub/our-ai-charter/blob/main/docs/wip/runtime-gates-poc-spec.md).
@@ -68,9 +69,8 @@ The exact upstream revision, digest, reviewed runtime baseline, and remaining mi
   provider-supplied evidence.
 - **Screening models fail.** Their signals can only Flag or force Escalate — never allow.
 - **Post-commit reversal is not implemented.** The source vocabulary names `reverse`, but this POC currently has no
-  effect-specific reversal or compensation path and no remedy decider. ADR-017's definition, reviewed at `2eb14ba`,
-  removes the empty active token rather than presenting a power the runtime does not have; implementation remains
-  separately approval- and review-gated.
+  effect-specific reversal or compensation path and no remedy decider. ADR-017's implementation, reviewed at
+  `36126fa`, removes and rejects the empty active token rather than presenting a power the runtime does not have.
 - **Minimal cryptography** (hash chains + HMAC; composite-head checkpoints pushed to this public repo bound —
   but do not eliminate — the rollback window). Split custody is future work.
 - **Synthetic scenario, demo-grade authentication, free-tier model endpoints without an SLA.**
