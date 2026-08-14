@@ -1,13 +1,14 @@
 <!-- SPDX-License-Identifier: CC-BY-4.0 -->
 # Runtime implementation plan
 
-**Status date:** 2026-08-13
+**Status date:** 2026-08-14
 
 **Current milestone:** M4 and bounded M5 complete; the ADR-016 M6 definition received GO at `582eaeb`, and the
 separate M6.0a anchoring-flow prerequisite received GO at `be7f2ef`. The M6.0b unsupported-`reverse` implementation
 received GO at `36126fa`; both M6.0 prerequisites are complete. M6.1's authorization-owned live-screening
-implementation received GO at `5f51caa` with synthetic loopback providers only. M6.2 capability implementation and
-live capture have not started and remain approval- and review-gated.
+implementation received GO at `5f51caa` with synthetic loopback providers only. ADR-018 now freezes the M6.2
+definition candidate; exact-SHA review is pending, and M6.2 capability implementation and live capture have not
+started and remain approval- and review-gated.
 
 This file tracks implementation status and sequencing in `ai-charter-runtime`. It does not replace or
 reinterpret the authoritative specification. On divergence, the specification and its linked Charter
@@ -46,6 +47,12 @@ exact evidence binding, signal monotonicity, fail-closed terminal states, and ra
 synthetic loopback providers only and confirmed no Commit, effect, live provider call, retry, or fallback path.
 It recorded one non-blocking API-symmetry observation: the public screening-start helper relies on the actor guards
 of its current status-method callers; no unguarded production caller exists.
+
+[ADR-018](adr/ADR-018-native-commitment-continuation.md) is the documentation-only M6.2 definition candidate. It
+starts with the complete five-route post-M6.2 services-host inventory, then freezes one native proposal-bound
+execution preparation, one atomic services-host Commit/`commit-verify` transaction, local idempotent mock-effect
+enforcement, read-only ambiguity recovery, and native/headless separation. Exact-SHA definition review is pending;
+this candidate authorizes no source implementation, provider call, effect, capture, checkpoint operation, or push.
 
 The preceding reviewed implementation is
 `36126fad475cf0269e13662464eae9e41f1db26b` (`36126fa`). Exact-SHA review returned **GO — no findings** for
@@ -143,7 +150,7 @@ assessed, the Charter vocabulary and provenance pin are unchanged, and no M6.1 s
 | M3 — vertical slice | Implemented | Deterministic authorize → propose → rule → commit-verify → effect → receipt path, adapters, service ledger, and signed cards are present. |
 | M4 — escalation + governance console | **Complete** | Final exact-SHA review of `e326562` returned GO with no findings; the offline acceptance ledger preserves the remaining partial and not-assessed boundaries. |
 | M5 — screening + empathy + switching | **Complete within the bounded POC acceptance** | M5.1–M5.12 culminate in the authority-bearing baseline `5b27b0e`. ADR-015's zero-route M5.13 definition received GO at `a08fa98`; its fixture/test/acceptance implementation at `5251500` received GO with no findings. The acceptance ledger retains four partial and two not-assessed empathy red-line families. This is not assurance, semantic clearance, or deployment readiness. |
-| M6 — full pass + demo capture | **Definition, M6.0 prerequisites, and M6.1 reviewed** | [ADR-016](adr/ADR-016-m6-evidence-capture.md) received GO at `582eaeb`; M6.0a received GO at `be7f2ef`; M6.0b received GO at `36126fa`; M6.1 received GO at `5f51caa` using synthetic loopback providers only. M6.2 has not started. No live provider call, checkpoint push, or capture artifact is authorized. |
+| M6 — full pass + demo capture | **Definition, M6.0 prerequisites, and M6.1 reviewed; M6.2 definition candidate** | [ADR-016](adr/ADR-016-m6-evidence-capture.md) received GO at `582eaeb`; M6.0a received GO at `be7f2ef`; M6.0b received GO at `36126fa`; M6.1 received GO at `5f51caa` using synthetic loopback providers only. ADR-018's M6.2 definition review is pending; implementation has not started. No live provider call, checkpoint push, or capture artifact is authorized. |
 | M7 — article | Not started | Publication claims follow a reviewed and explicitly published M6 artifact. |
 
 These labels describe repository implementation status, not assurance, certification, or independent
@@ -737,10 +744,10 @@ authorization route. The bounded handoff and session implementation was independ
 
 ## Ordered next slices
 
-1. **M6.2 — native commitment continuation.** After M6.1 GO and separate approval, enumerate the complete
-   services-host route set, then implement only
-   the proposal-bound execution-preparation → services-host Commit/verify → local mock-effect path with synthetic
-   loopback tests. Stop for exact-SHA review.
+1. **M6.2 — native commitment continuation.** ADR-018 now enumerates the complete services-host route set and
+   freezes the proposal-bound execution-preparation → services-host Commit/verify → local mock-effect contract.
+   Obtain exact-SHA definition GO and separate implementation approval before changing source. Then implement with
+   synthetic loopback tests only and stop for a separate exact-SHA implementation review.
 2. **M6.3 — offline full pass and capture contract.** After M6.2 GO and separate approval, implement the strict
    plan/artifact schemas, two-lane twenty-two-beat and adversarial matrix, acceptance ledger, gitignored staging,
    sanitization checks, and dry-run assets. No live provider call or push. Stop for exact-SHA review.

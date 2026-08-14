@@ -14,6 +14,10 @@ authorization-owned classification profile used for case-officer message ingress
 binds one exact durable conversation item's case, item id, and text. Message-ingress and model-output-ingress
 metadata use the item digest without copying raw text into access/action records or release metadata.
 
+**Proposed amendment (M6.2 definition candidate, 2026-08-14):** `execution-effect-intent-basis` binds the
+authorization-owned semantic fields prepared before the future Commit ruling id exists. It is distinct from the
+complete `effect-intent` digest and carries no ruling, token, or execution authority.
+
 ## Context
 Frozen proposals, mandate bindings, rulings, record entries, and checkpoints (ADR-003) are hashed over canonical JSON; every ruling carries a policy content digest and an evaluator build id, because a version label alone cannot prove which rules ran. One byte-level convention has to hold across all of them, and the cryptography stays deliberately minimal — hash chain plus HMAC, with a single asymmetric exception for model cards.
 
@@ -35,7 +39,7 @@ Schemas keep the subset true: amounts and ceilings are **integers in minor units
 
 ### Hashes, MACs, encodings — one convention
 - **SHA-256 everywhere** from `node:crypto`; digests are **lowercase hex**, unprefixed, over the UTF-8 bytes of the canonical string. Keys and signatures are **base64**; ids are lowercase ASCII; times are RFC 3339 UTC as above.
-- **Domain separation.** Every digest and MAC is taken over `"ai-charter-runtime/v1/<context>\n"` followed by the canonical bytes, `<context>` ∈ {`proposal`, `effect-intent`, `record-entry`, `access-entry`, `wal-entry`, `mandate-binding`, `commit-token`, `policy-set`, `evaluator-build`, `checkpoint`, `checkpoint-composite`, `model-card`, `card-revocation`, `conversation-projection`, `conversation-ingress-profile`, `conversation-item-content`, `model-output`, `system-use-decision`, `system-use-configuration`}. A digest is therefore never valid in a context other than the one it was computed for. The tag frames the hash input; it is not part of the canonical JSON.
+- **Domain separation.** Every digest and MAC is taken over `"ai-charter-runtime/v1/<context>\n"` followed by the canonical bytes, `<context>` ∈ {`proposal`, `effect-intent`, `execution-effect-intent-basis`, `record-entry`, `access-entry`, `wal-entry`, `mandate-binding`, `commit-token`, `policy-set`, `evaluator-build`, `checkpoint`, `checkpoint-composite`, `model-card`, `card-revocation`, `conversation-projection`, `conversation-ingress-profile`, `conversation-item-content`, `model-output`, `system-use-decision`, `system-use-configuration`}. A digest is therefore never valid in a context other than the one it was computed for. The tag frames the hash input; it is not part of the canonical JSON.
 - **Audience-credential derivation** is the one non-artifact framing family:
   `SHA-256(UTF-8("ai-charter-runtime/v1/credential-audience/<audience>\n" + lowercase_source_hex))`.
   The source is high-entropy credential text, not canonical JSON or decoded raw bytes; the output is a

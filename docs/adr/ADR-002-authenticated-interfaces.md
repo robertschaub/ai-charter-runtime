@@ -146,6 +146,12 @@ Commit boundary. The browser and orchestrator may carry no signal, proposal, int
 nonce, or commit token. Fixed precommit remains the only authority-changing route available to
 `proc:orchestrator`. M6.1 authorizes no live provider call; M6.2 remains unimplemented and separately gated.
 
+**M6.2 definition candidate:** ADR-018 freezes the complete services-host route set, the strict native
+preparation/execute carriers, the authorization-only effect-intent-basis derivation, and one atomic services-host
+Commit/`commit-verify` transaction. Its definition review is pending and authorizes no implementation. A native
+proposal-origin record is barred from the legacy caller-carried Commit seam; the native path cannot accept a
+headless proposal.
+
 The two implemented M6.1 process additions are exactly
 `POST /w/{world_id}/screening-calls/{screening_call_id}/outputs` and
 `POST /w/{world_id}/screening-calls/{screening_call_id}/failures`; both are Origin-guarded, access-recorded, and
@@ -342,6 +348,14 @@ Services host: `POST /w/{w}/services/{service}/execute` `proc:orchestrator`;
 `GET /healthz` open. The orchestrator is explicitly denied on both authorization-facing reads.
 `commit-verify`, effect outcomes, and reconciliation probes carry both the current services-host boot id
 and the persistent services-ledger id; only absence under the same ledger id can release a commitment.
+
+ADR-018's M6.2 candidate adds only
+`POST /w/{w}/execution-preparations/{execution_preparation_id}/execute` for `proc:orchestrator`, with a strict
+`{}` body. The post-M6.2 services-host inventory would therefore be exactly five routes: open health; the existing
+legacy headless execute; the native preparation execute; the authorization-only effect probe; and the
+authorization-only registry read. Authenticated services routes reject a present browser Origin and emit no CORS.
+The native response omits token, intent, proposal, ruling internals, nonce, reservation, credentials, and handler
+detail. This paragraph is a definition candidate, not an implemented route.
 
 **The reviewed M5.11 implementation exposes the orchestrator's process credential on exactly twenty gate/data
 routes plus dedicated case-session-handoff redemption and close routes. The reviewed M5.12 implementation adds one

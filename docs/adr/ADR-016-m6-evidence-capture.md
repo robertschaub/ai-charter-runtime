@@ -2,8 +2,9 @@
 # ADR-016 — M6 full-pass evidence and dual-model capture
 
 **Status:** definition reviewed at `582eaeb`, GO — no findings; M6.1 implementation reviewed at `5f51caa`, GO —
-no blocking findings, using synthetic loopback providers only. M6.2 implementation, live provider use, capture,
-checkpoint push, and publication have not started and remain separately approval-gated. The separate M6.0a
+no blocking findings, using synthetic loopback providers only. ADR-018 now freezes the M6.2 definition candidate;
+its exact-SHA review is pending and implementation remains unauthorized. Live provider use, capture, checkpoint
+push, and publication have not started and remain separately approval-gated. The separate M6.0a
 anchoring prerequisite was reviewed at `be7f2ef`, and the M6.0b unsupported-`reverse` prerequisite was reviewed at
 `36126fa`.
 **Spec:** §§1, 3, 5, 6, 7, 9, and 10 (M6), especially the two-layer comparison rule in §7.
@@ -130,18 +131,19 @@ adds a narrowly scoped execution-preparation protocol. It is not a general actio
 legacy headless route.
 
 An active dynamic case-officer session may request one preparation for one exact proposal run whose current durable
-precommit state ended with Verify `allow`. The browser mutation is a strict empty body on the run resource. The
+precommit state ended with Verify `allow`. The browser mutation accepts strict `{}` on the run resource. The
 orchestrator sends only the server-derived session claim and run id to authorization. Authorization resolves and
 binds, from current state, the case, session, proposal id/hash/action/revision, conversation version, selection,
 requested model and card, mandate, policy, system-use decision, final precommit rulings, service, action class, and
-exact effect intent. None is accepted from the browser or model.
+exact effect-intent basis. The future Commit ruling id remains authorization-generated and is added only while
+constructing the complete intent during consumption. None of those fields is accepted from the browser or model.
 
-The preparation is boot-bound, maximum two minutes, single-use, and durable with
-`issued → consuming → consumed | expired | invalidated`. An exact retry before use returns the same preparation;
-ambiguous use never creates a second one. Session close, proposal succession, conversation or selection change,
-mandate/card/policy/system-use invalidation, expiry, or a non-allow precommit state invalidates or refuses it.
-Creating a preparation issues no ruling, reservation, nonce, commitment token, service call, or effect and is
-classified non-authorizing.
+The preparation is boot-bound, maximum two minutes, single-use, and has durable states
+`issued | consumed | expired | invalidated`; `consuming` is only a transaction-local claim between `issued` and one
+complete terminal transaction. An exact retry before use returns the same preparation; ambiguous use never creates
+a second one. Session close, proposal succession, conversation or selection change, mandate/card/policy/system-use
+invalidation, expiry, or a non-allow precommit state invalidates or refuses it. Creating a preparation issues no
+ruling, reservation, nonce, commitment token, service call, or effect and is classified non-authorizing.
 
 Use is a second, explicit browser gesture carrying only the opaque preparation id over the same dynamic session.
 The orchestrator may pass that id to the services host but receives no proposal, intent, ruling internals, nonce,
@@ -160,10 +162,10 @@ M6.2 freezes these routes:
 
 | Service | Route | Caller and strict input | Authority classification |
 |---|---|---|---|
-| Orchestrator/browser | `POST /w/{world_id}/cases/{case_id}/proposal-runs/{proposal_run_id}/execution-preparations` | exact dynamic case session; empty body | non-authorizing preparation |
-| Authorization/process | same path at the authorization origin | `proc:orchestrator`; empty body plus server-derived on-behalf session headers | `authorityChanging: false`; Origin-guarded and access-recorded |
+| Orchestrator/browser | `POST /w/{world_id}/cases/{case_id}/proposal-runs/{proposal_run_id}/execution-preparations` | exact dynamic case session; strict `{}` | non-authorizing preparation |
+| Authorization/process | same path at the authorization origin | `proc:orchestrator`; strict `{}` plus server-derived on-behalf session headers | `authorityChanging: false`; Origin-guarded and access-recorded |
 | Orchestrator/browser | `POST /w/{world_id}/cases/{case_id}/proposal-runs/{proposal_run_id}/execute` | same exact session; `{execution_preparation_id}` only | non-authorizing request to the services host |
-| Services host | `POST /w/{world_id}/execution-preparations/{execution_preparation_id}/execute` | `proc:orchestrator`; empty body | carries no authority facts; service asks authorization to decide |
+| Services host | `POST /w/{world_id}/execution-preparations/{execution_preparation_id}/execute` | `proc:orchestrator`; strict `{}` | carries no authority facts; service asks authorization to decide |
 | Authorization/Commit | `POST /w/{world_id}/execution-preparations/{execution_preparation_id}/commit-verify` | `proc:services_host`; `{services_host_boot_id, services_ledger_id}` only | authority-changing Commit plus existing verification |
 
 The existing proposal-run GET carries preparation/execution recovery to the process and a stricter redacted branch
@@ -171,6 +173,11 @@ to the browser; no additional status route is added. The one new authorization p
 post-M6.1 orchestrator gate/data inventory from twenty-three to twenty-four. Fixed precommit remains the only
 authority-changing route available to `proc:orchestrator`; the new Commit boundary is denied to it. Existing browser
 sessions remain denied on the headless `/actions/execute` seam, and M6 capture may not use that seam.
+
+ADR-018 refines this outer route contract into the complete services-host inventory, exact preparation binding,
+effect-intent-basis digest, atomic Commit/`commit-verify` transaction, ambiguity recovery, projections, and
+native/headless separation required for implementation. Its candidate definition changes no route until separately
+reviewed and approved.
 
 ### 5. Every capture begins from an immutable plan
 
@@ -290,9 +297,10 @@ is:
    implemented with synthetic loopback providers only and reviewed at `5f51caa`, GO — no blocking findings. Review
    confirmed projection minimization, exact call/evidence binding, signal monotonicity, fail-closed terminal
    states, no retry/fallback, ACLs, and raw-byte exclusion. No live provider call was made or authorized.
-3. **M6.2 native commitment continuation:** implement §4 with synthetic loopback tests only. Prove exact binding,
-   ACLs, denial/escalation, races, invalidation, ambiguous failure, idempotent recovery, and no headless/browser
-   bypass. Stop for exact-SHA review.
+3. **M6.2 native commitment continuation:** ADR-018 freezes the definition candidate for §4; its exact-SHA review
+   is pending. Only after GO and separate maintainer approval may implementation proceed with synthetic loopback
+   tests proving exact binding, ACLs, denial/escalation, races, invalidation, ambiguous failure, idempotent recovery,
+   and no headless/browser bypass. Stop again for exact-SHA implementation review.
 4. **M6.3 offline full pass and capture contract:** add the strict plan/artifact schemas, deterministic two-lane
    twenty-two-beat and adversarial matrix, acceptance ledger, local staging boundary, sanitization checks, and
    dry-run assets. No live provider. Stop for exact-SHA review.

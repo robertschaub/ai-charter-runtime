@@ -7,6 +7,7 @@ attribution to Robert Schaub / Our AI Charter.
 
 - `adr/` — architecture decision records: the protocol detail the
   [spec](https://robertschaub.github.io/our-ai-charter/wip/runtime-gates-poc-spec/) delegates here, including the
-  proposed M6 evidence/capture boundary in [ADR-016](adr/ADR-016-m6-evidence-capture.md).
+  proposed M6 evidence/capture boundary in [ADR-016](adr/ADR-016-m6-evidence-capture.md) and the M6.2 native
+  commitment-continuation candidate in [ADR-018](adr/ADR-018-native-commitment-continuation.md).
 - `cards/` — signed, version-pinned model cards (M3): the v0 evidence registry.
 - `m0-probe-memo.md` — the M0 endpoint decisions, filled from probe results.

@@ -88,9 +88,10 @@ The existing generic "a signal never allows" unit test remains necessary but is 
 
 M5.13 adds no production route, handler, schema, credential, model call, provider projection, ruling type, mandate
 field, dialogue disposition, commitment, token, service call, effect, or persistent-memory/training capability.
-ADR-002's reviewed inventory remains exactly twenty-one orchestrator process gate/data routes plus the dedicated
-handoff redemption and close routes. The only authority-changing M5.11/M5.12 process mutation remains fixed
-precommit; M5.13 adds none.
+At the M5.13 baseline, ADR-002's reviewed inventory remained exactly twenty-one orchestrator process gate/data
+routes plus the dedicated handoff redemption and close routes; M5.13 added none. M6.1 later added two
+non-authorizing screening terminal routes, bringing the current reviewed inventory to twenty-three. Fixed
+precommit remains the only authority-changing orchestrator process mutation in either inventory.
 
 The implementation tranche is limited to synthetic fixtures, conformance tests, the M5 acceptance ledger, and
 truthful status documentation. If those tests expose a production defect, implementation stops and proposes a
@@ -121,8 +122,9 @@ reopening the reviewed source tree.
   permission remain case-scoped evidence, never action authority.
 - Preserve the reviewed selection, provider-disclosure, conversation-ingress, proposal-intake, and substitution
   coverage for beats 19–21.
-- Assert the authorization route inventory remains exactly twenty-one process gate/data routes, the orchestrator is
-  denied on every authority-changing route other than fixed precommit, and no M5.13 route exists.
+- For the M5.13 tranche, assert the authorization route inventory remains exactly twenty-one process gate/data
+  routes, the orchestrator is denied on every authority-changing route other than fixed precommit, and no M5.13
+  route exists. M6.1's later two-route increase is tested separately and does not alter this historical assertion.
 - Create `docs/m5-acceptance.md` mapping beats 4–5 and 19–21, all six empathy red lines, and the relevant test
   families to executable evidence and honest gaps.
 - Run `npm run typecheck`, `npm test`, `npm run cards:verify`, and `git diff --check`. Tests use deterministic clocks,
