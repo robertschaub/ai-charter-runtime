@@ -1,9 +1,10 @@
 <!-- SPDX-License-Identifier: CC-BY-4.0 -->
 # ADR-018 — Native commitment continuation
 
-**Status:** M6.2 definition candidate; exact-SHA review pending. Implementation has not started and remains
-separately approval-gated. **Spec:** §§3–7 and 10 (M6), especially the commitment boundary, criteria 1, 4, 6, and
-7, beats 3 and 6–8, and the bypass/replay/mid-flight adversarial set.
+**Status:** M6.2 definition candidate. Initial review of `46b40eb` returned NO-GO on two contract-accuracy findings;
+this bounded correction remains exact-SHA review-pending. Implementation has not started and remains separately
+approval-gated. **Spec:** §§3–7 and 10 (M6), especially the commitment boundary, criteria 1, 4, 6, and 7, beats 3
+and 6–8, and the bypass/replay/mid-flight adversarial set.
 **Depends on:** ADR-001, ADR-002, ADR-007 through ADR-017, and the reviewed M6.1 implementation at `5f51caa`.
 
 ## Context
@@ -165,8 +166,11 @@ not a recoverable half-state: replay sees either the prior issued preparation or
 Commit deny and escalate are durable terminal results for that preparation. They return no token and start no
 service effect. A Commit escalation may open the policy-owned intervention contract and retain/release its
 reservation only through ADR-001's existing state machine; M6.2 does not auto-dispose it or auto-resume execution.
-An `allow-within-scope` or revision disposition remains evidence for a later explicitly defined continuation and
-does not revive the consumed preparation.
+Disposition does not suppress ADR-001's normal re-evaluation: `allow-within-scope` may append a successor ruling,
+and a revision remains successor evidence. For a native-origin Commit escalation, either successor has no execution
+path in M6.2: it does not revive the consumed preparation, and even an `allow` successor is categorically refused
+at the legacy consumption boundary fixed in §7. Any native continuation after escalation requires a separately
+defined and reviewed protocol.
 
 On allow, the same transaction consumes the new nonce, settles its reservations, consumes the ruling, binds the
 commitment to the services host boot and persistent ledger id, and seals the commitment record before returning.
@@ -235,10 +239,13 @@ test credential; dynamic sessions are still denied. Its downstream services rout
 `/services/{service}/execute` seam and is forbidden in M6 capture.
 
 Defence in depth is added at authorization: a proposal carrying an ADR-013 native proposal-origin record may not
-receive a Commit ruling through legacy `proposal.submit`, `ruleProposal`, or `/actions/execute`. It can reach Commit
-only through an issued execution preparation. Conversely, the native preparation route requires that exact origin
+receive an initial Commit ruling through legacy `proposal.submit`, `ruleProposal`, or `/actions/execute`. A
+disposition successor may still be appended as §4 evidence, but regardless of issuance path, verdict, policy, or
+disposition, the legacy `POST /w/{world_id}/commit-verify` route and public `commitVerify` core seam refuse every
+Commit ruling whose proposal has that native-origin record. Only the native preparation route's atomic locked
+builder may make such a ruling consumable. Conversely, the native preparation route requires that exact origin
 record and never accepts a caller-carried proposal. A headless proposal cannot be upgraded into a native run by
-guessing a case, run, or preparation id.
+guessing a case, run, or preparation id; its existing Beat-17 disposition and legacy commitment path is unchanged.
 
 The browser has no services-host credential, receives no CORS permission, and cannot call either services POST.
 The orchestrator process can transport an opaque preparation id but cannot call the authorization Commit route or
@@ -276,7 +283,7 @@ After a GO review and separate maintainer approval, the implementation tranche m
 2. the one orchestrator browser preparation route, one authorization preparation route, one authorization
    Commit-consume route, one orchestrator browser execute route, and one services-host native execute route fixed
    above;
-3. the native-origin guard on the legacy Commit seam;
+3. the native-origin guards on every legacy Commit issuance seam and the legacy `commit-verify` consumption seam;
 4. services-host client/route/ledger recovery plumbing and local mock-effect integration; and
 5. deterministic unit, real-listener, three-process, race, crash, and exact-key tests using synthetic fixtures and
    loopback adapters only.
@@ -316,7 +323,10 @@ The implementation is acceptable only if all of the following are proved determi
    recover one durable state or fail closed. No case produces a second ruling-authority consumption or mock effect.
 9. Real-listener tests prove dynamic sessions cannot use `/actions/execute`, native proposals cannot use the legacy
    Commit seam, headless proposals cannot enter the native route, browsers cannot reach services, and neither
-   process can smuggle proposal, intent, authority, retry, ruling, or token fields through a strict `{}` route.
+   process can smuggle proposal, intent, authority, retry, ruling, or token fields through a strict `{}` route. A
+   synthetic permissive policy that produces an `allow` disposition successor for a native-origin Commit
+   escalation is still refused by legacy `commit-verify` before nonce/reservation/commitment/token/effect mutation;
+   the equivalent headless Beat-17 path remains unchanged.
 10. Process and browser exact-key tests prove the token and intent remain services-only; credentials, boot/ledger
     continuity, nonce/reservation internals, hidden authority bindings, raw provider bytes, and handler detail are
     absent from browser, orchestrator, access-log, and public response surfaces.
