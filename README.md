@@ -14,9 +14,9 @@ cannot reach Commit or effect execution. [ADR-016](docs/adr/ADR-016-m6-evidence-
 full-pass, authorization-owned live-screening, native commitment-continuation, and dual-model capture contract.
 The separate M6.0a anchoring prerequisite was reviewed at `be7f2ef`, and the M6.0b unsupported-`reverse` removal
 was reviewed at `36126fa`. M6.1's authorization-owned live-screening protocol was reviewed at `5f51caa` with
-synthetic loopback providers only. [ADR-018](docs/adr/ADR-018-native-commitment-continuation.md) now freezes the
-M6.2 definition candidate, beginning with the complete services-host route set; review is pending and no M6.2
-implementation, capture runner, live run, checkpoint push, or capture artifact exists yet.
+synthetic loopback providers only. [ADR-018](docs/adr/ADR-018-native-commitment-continuation.md) freezes the M6.2
+definition, beginning with the complete services-host route set; its corrected definition received GO at `d0b8cc6`
+with no findings. No M6.2 implementation, capture runner, live run, checkpoint push, or capture artifact exists yet.
 
 The authoritative build specification lives in the documentation repository:
 [runtime-gates-poc-spec.md](https://github.com/robertschaub/our-ai-charter/blob/main/docs/wip/runtime-gates-poc-spec.md).
@@ -191,7 +191,8 @@ reviewed M6 definition. Its M6.1 implementation, reviewed at `5f51caa`, adds a p
 lifecycle exercised only with synthetic loopback providers; it makes no live-provider or capture claim and cannot
 reach Commit or effect execution. M6.2 onward still require separate reviewed implementation; live-provider use,
 checkpoint pushes, artifact review, and publication retain their own action-time approval gates.
-ADR-018 is a definition candidate only: it adds no route or effect until exact-SHA review and separate approval.
+ADR-018 is a reviewed definition only: it adds no route or effect, and implementation still requires separate
+approval and exact-SHA review.
 
 Offline and deterministic verification uses synthetic records and skips only the remote-presence step:
 

@@ -2,9 +2,9 @@
 # ADR-016 — M6 full-pass evidence and dual-model capture
 
 **Status:** definition reviewed at `582eaeb`, GO — no findings; M6.1 implementation reviewed at `5f51caa`, GO —
-no blocking findings, using synthetic loopback providers only. ADR-018 now freezes the M6.2 definition candidate;
-its exact-SHA review is pending and implementation remains unauthorized. Live provider use, capture, checkpoint
-push, and publication have not started and remain separately approval-gated. The separate M6.0a
+no blocking findings, using synthetic loopback providers only. ADR-018's corrected M6.2 definition received GO at
+`d0b8cc6` with no findings; implementation remains unauthorized. Live provider use, capture, checkpoint push, and
+publication have not started and remain separately approval-gated. The separate M6.0a
 anchoring prerequisite was reviewed at `be7f2ef`, and the M6.0b unsupported-`reverse` prerequisite was reviewed at
 `36126fa`.
 **Spec:** §§1, 3, 5, 6, 7, 9, and 10 (M6), especially the two-layer comparison rule in §7.
@@ -176,8 +176,8 @@ sessions remain denied on the headless `/actions/execute` seam, and M6 capture m
 
 ADR-018 refines this outer route contract into the complete services-host inventory, exact preparation binding,
 effect-intent-basis digest, atomic Commit/`commit-verify` transaction, ambiguity recovery, projections, and
-native/headless separation required for implementation. Its candidate definition changes no route until separately
-reviewed and approved.
+native/headless separation required for implementation. Its reviewed definition changes no route until separately
+approved and implemented.
 
 ### 5. Every capture begins from an immutable plan
 
@@ -297,10 +297,10 @@ is:
    implemented with synthetic loopback providers only and reviewed at `5f51caa`, GO — no blocking findings. Review
    confirmed projection minimization, exact call/evidence binding, signal monotonicity, fail-closed terminal
    states, no retry/fallback, ACLs, and raw-byte exclusion. No live provider call was made or authorized.
-3. **M6.2 native commitment continuation:** ADR-018 freezes the definition candidate for §4; its exact-SHA review
-   is pending. Only after GO and separate maintainer approval may implementation proceed with synthetic loopback
-   tests proving exact binding, ACLs, denial/escalation, races, invalidation, ambiguous failure, idempotent recovery,
-   and no headless/browser bypass. Stop again for exact-SHA implementation review.
+3. **M6.2 native commitment continuation:** ADR-018's corrected definition received exact-SHA GO at `d0b8cc6` with
+   no findings. Only after separate maintainer approval may implementation proceed with synthetic loopback tests
+   proving exact binding, ACLs, denial/escalation, races, invalidation, ambiguous failure, idempotent recovery, and
+   no headless/browser bypass. Stop again for exact-SHA implementation review.
 4. **M6.3 offline full pass and capture contract:** add the strict plan/artifact schemas, deterministic two-lane
    twenty-two-beat and adversarial matrix, acceptance ledger, local staging boundary, sanitization checks, and
    dry-run assets. No live provider. Stop for exact-SHA review.

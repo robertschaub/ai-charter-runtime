@@ -19,7 +19,7 @@ authorization-owned screening projection, `screening-response-schema` binds the 
 schema, and `screening-output` binds admitted content to one exact screening call. They are evidence bindings,
 never ruling or action authority.
 
-**Proposed amendment (M6.2 definition candidate, 2026-08-14):** `execution-effect-intent-basis` binds the
+**Proposed amendment (M6.2 definition reviewed at `d0b8cc6`, 2026-08-23):** `execution-effect-intent-basis` binds the
 authorization-owned semantic fields prepared before the future Commit ruling id exists. It is distinct from the
 complete `effect-intent` digest and carries no ruling, token, or execution authority.
 

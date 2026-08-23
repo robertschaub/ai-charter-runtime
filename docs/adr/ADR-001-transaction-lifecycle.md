@@ -50,8 +50,8 @@ Policy, transport, state, record, and console inputs carrying the unsupported to
 they are never coerced to a terminal deny. ADR-017's definition received GO at `2eb14ba`; its bounded implementation
 received GO with no findings at `36126fa`.
 
-**Proposed amendment (M6.2 native commitment continuation, definition candidate):** ADR-018 freezes a native
-execution preparation that lets `proc:services_host` compose one Commit ruling and, on allow only, perform this
+**Proposed amendment (M6.2 native commitment continuation, definition reviewed at `d0b8cc6`):** ADR-018 freezes a
+native execution preparation that lets `proc:services_host` compose one Commit ruling and, on allow only, perform this
 ADR's existing `commit-verify` transition in the same world-lock/WAL transaction. The preparation binds the exact
 effect-intent basis; the future Commit ruling id remains authorization-generated. No Commit allow is externally
 observable before nonce consumption, reservation settlement, commitment binding, and the pre-effect record. The

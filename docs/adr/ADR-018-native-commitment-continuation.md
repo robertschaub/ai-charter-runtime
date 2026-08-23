@@ -1,10 +1,10 @@
 <!-- SPDX-License-Identifier: CC-BY-4.0 -->
 # ADR-018 — Native commitment continuation
 
-**Status:** M6.2 definition candidate. Initial review of `46b40eb` returned NO-GO on two contract-accuracy findings;
-this bounded correction remains exact-SHA review-pending. Implementation has not started and remains separately
-approval-gated. **Spec:** §§3–7 and 10 (M6), especially the commitment boundary, criteria 1, 4, 6, and 7, beats 3
-and 6–8, and the bypass/replay/mid-flight adversarial set.
+**Status:** definition reviewed at `d0b8cc6`, GO — both contract-accuracy findings from the initial `46b40eb`
+review closed, no new findings. Implementation has not started and remains separately approval-gated. **Spec:**
+§§3–7 and 10 (M6), especially the commitment boundary, criteria 1, 4, 6, and 7, beats 3 and 6–8, and the
+bypass/replay/mid-flight adversarial set.
 **Depends on:** ADR-001, ADR-002, ADR-007 through ADR-017, and the reviewed M6.1 implementation at `5f51caa`.
 
 ## Context
