@@ -41,6 +41,7 @@ import type { Keyring } from './keyring.js';
 import { SystemUseDecisionError, type SystemUseDecisionService } from './systemUseDecision.js';
 import { ProposalIntakeError, type ProposalIntakeService } from './proposalIntake.js';
 import { ProposalPrecommitError, type ProposalPrecommitService } from './proposalPrecommit.js';
+import { ExecutionPreparationError, type ExecutionPreparationService } from './executionPreparation.js';
 import { ScreeningCallError, type ScreeningCallService } from './screeningCall.js';
 import {
   classToken,
@@ -53,6 +54,7 @@ import {
   hexDigest,
   id,
   integer,
+  nativeCommitVerifyRequest,
   modelCallAdmissionRequest,
   modelCallBeginRequest,
   modelCallFailureRequest,
@@ -148,7 +150,7 @@ const runtimeConsoleConfig = z
     orchestrator_origin: browserOrigin,
   })
   .strict();
-const servicesAccessRoute = z.enum(['services.execute', 'services.effect-probe', 'services.registry-read']);
+const servicesAccessRoute = z.enum(['services.execute', 'services.native-execute', 'services.effect-probe', 'services.registry-read']);
 const servicesAccessReportRequest = z.discriminatedUnion('outcome', [
   z
     .object({
@@ -181,6 +183,7 @@ const servicesAccessReportRequest = z.discriminatedUnion('outcome', [
 
 const ACCESS_ROUTE_LABELS = {
   'services.execute': 'POST /w/{world_id}/services/{service}/execute',
+  'services.native-execute': 'POST /w/{world_id}/execution-preparations/{execution_preparation_id}/execute',
   'services.effect-probe': 'GET /w/{world_id}/effects/{idempotency_key}',
   'services.registry-read': 'GET /w/{world_id}/registry-records/{record_id}',
   'services.unauthenticated-ingress': 'SERVICES unauthenticated ingress',
@@ -294,6 +297,7 @@ export interface AuthorizationHttpServerOptions {
   readonly conversationTransport: ConversationTransportService;
   readonly proposalIntakes?: ProposalIntakeService;
   readonly proposalPrecommit?: ProposalPrecommitService;
+  readonly executionPreparations?: ExecutionPreparationService;
   readonly screeningCalls?: ScreeningCallService;
   readonly reads: AuthorizationReadSide;
   readonly adapter: AuthorizationHttpAdapter;
@@ -434,6 +438,17 @@ export class AuthorizationHttpServer {
           context.sessionId,
           requireActor(context),
         );
+        return { status: 201, body: result, accessEvidence: result };
+      },
+      'execution-preparation.issue': async (request, context) => {
+        if (options.executionPreparations === undefined) return { status: 503, body: { error: 'execution-preparation-unavailable' } };
+        const runId = context.params['id'];
+        const caseId = context.params['case_id'];
+        if (runId === undefined || caseId === undefined || context.sessionId === null) {
+          return { status: 403, body: { error: 'forbidden' } };
+        }
+        strictEmptyRequest.parse(await body(request));
+        const result = await options.executionPreparations.issue(caseId, runId, context.sessionId, requireActor(context));
         return { status: 201, body: result, accessEvidence: result };
       },
       'proposal-run.read': async (_request, context) => {
@@ -652,6 +667,19 @@ export class AuthorizationHttpServer {
           servicesLedgerId: parsed.services_ledger_id,
           actor: requireActor(context),
         });
+        return { status: 200, body: result };
+      },
+      'execution-preparation.commit-verify': async (request, context) => {
+        if (options.executionPreparations === undefined) return { status: 503, body: { error: 'execution-preparation-unavailable' } };
+        const preparationId = context.params['id'];
+        if (preparationId === undefined) return { status: 404, body: { error: 'not-found' } };
+        const parsed = nativeCommitVerifyRequest.parse(await body(request));
+        const result = await options.executionPreparations.commitVerify(
+          preparationId,
+          parsed.services_host_boot_id,
+          parsed.services_ledger_id,
+          requireActor(context),
+        );
         return { status: 200, body: result };
       },
       'effect.outcome': async (request, context) => {
@@ -884,6 +912,12 @@ export class AuthorizationHttpServer {
               };
             }
             if (error instanceof ProposalPrecommitError) {
+              return {
+                status: error.code === 'forbidden' ? 403 : error.code === 'not-found' ? 404 : 409,
+                body: { error: error.code },
+              };
+            }
+            if (error instanceof ExecutionPreparationError) {
               return {
                 status: error.code === 'forbidden' ? 403 : error.code === 'not-found' ? 404 : 409,
                 body: { error: error.code },

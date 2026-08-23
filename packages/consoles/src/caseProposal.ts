@@ -13,6 +13,7 @@ import {
   proposalRunProcessProjection,
   proposalRevisionContinuationProjection,
   timestamp,
+  browserExecutionProjection,
   type ConversationProcessProjection,
   type CurrentModelSelectionProjection,
   type ModelSelectionTarget,
@@ -50,6 +51,11 @@ const browserProposalNormalRunStatus = z
     gates: z.array(browserGate).max(3),
     escalation_id: id.optional(),
     continuation: proposalRevisionContinuationProjection,
+    execution: browserExecutionProjection.default({
+      state: 'unavailable',
+      effect_outcome: null,
+      recorded_at: null,
+    }),
   })
   .strict()
   .superRefine((value, context) => {
@@ -132,6 +138,7 @@ function sameSession(record: ProposalRecord, session: CaseSessionRecord): boolea
 
 export function toBrowserProposalRunStatus(
   input: ProposalRunProcessProjection | ProposalPrecommitProcessProjection,
+  canConsumeExecutionPreparation = false,
 ): BrowserProposalRunStatus {
   const screening = proposalPrecommitScreeningRequiredProjection.safeParse(input);
   if (screening.success) {
@@ -201,6 +208,34 @@ export function toBrowserProposalRunStatus(
       })),
       ...(value.escalation_id === null ? {} : { escalation_id: value.escalation_id }),
       continuation: value.continuation,
+      execution: {
+        state: value.execution.state,
+        ...(canConsumeExecutionPreparation && value.execution.state === 'prepared' && value.execution.execution_preparation_id !== null
+          ? {
+              execution_preparation_id: value.execution.execution_preparation_id,
+              ...(value.execution.expires_at === null ? {} : { expires_at: value.execution.expires_at }),
+            }
+          : {}),
+        ...(value.execution.commit_ruling === null
+          ? {}
+          : {
+              commit_ruling: {
+                gate: value.execution.commit_ruling.gate,
+                ruling_id: value.execution.commit_ruling.ruling_id,
+                verdict: value.execution.commit_ruling.verdict,
+                ux_class: value.execution.commit_ruling.ux_class,
+                reason: value.execution.commit_ruling.reason,
+                status: value.execution.commit_ruling.status,
+                validity_window: {
+                  not_before: value.execution.commit_ruling.validity_window.not_before,
+                  not_after: value.execution.commit_ruling.validity_window.not_after,
+                },
+              },
+            }),
+        ...(value.execution.escalation_id === null ? {} : { escalation_id: value.execution.escalation_id }),
+        effect_outcome: value.execution.effect_outcome,
+        recorded_at: value.execution.recorded_at,
+      },
     });
   }
   const value = proposalRunProcessProjection.parse(input);

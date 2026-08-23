@@ -58,6 +58,8 @@ import {
   proposalRunProcessProjection,
   proposalPrecommitProjection,
   proposalPrecommitProcessProjection,
+  executionPreparationProjection,
+  nativeServicesExecutionResult,
   screeningCallFailureRequest,
   screeningCallOutputRequest,
   screeningCallTerminalProjection,
@@ -68,6 +70,8 @@ import {
   type ProposalIntakeStatusProjection,
   type ProposalRunProcessProjection,
   type ProposalPrecommitProcessProjection,
+  type ExecutionPreparationProjection,
+  type NativeServicesExecutionResult,
   type ScreeningCallFailureRequest,
   type ScreeningCallOutputRequest,
   type ScreeningCallTerminalProjection,
@@ -426,6 +430,20 @@ export class OrchestratorAuthorizationHttpClient extends JsonHttpClient {
     );
   }
 
+  async prepareExecution(
+    worldIdInput: string,
+    caseIdInput: string,
+    runIdInput: string,
+    onBehalfOf: OnBehalfOfClaim,
+  ): Promise<ExecutionPreparationProjection> {
+    const world = worldId.parse(worldIdInput);
+    const caseId = id.parse(caseIdInput);
+    const runId = id.parse(runIdInput);
+    return executionPreparationProjection.parse(
+      await this.post(`/w/${world}/cases/${caseId}/proposal-runs/${runId}/execution-preparations`, {}, onBehalfOf),
+    );
+  }
+
   async admitScreeningOutput(
     worldIdInput: string,
     callIdInput: string,
@@ -525,5 +543,16 @@ export class OrchestratorServicesHttpClient extends JsonHttpClient {
     });
     if (containsTokenField(result)) throw new Error('services response exposed a token field');
     return z.object({ ok: z.boolean() }).passthrough().parse(result) as ServicesHostExecution;
+  }
+
+  async executePrepared(
+    worldIdInput: string,
+    preparationIdInput: string,
+  ): Promise<NativeServicesExecutionResult> {
+    const world = worldId.parse(worldIdInput);
+    const preparationId = id.parse(preparationIdInput);
+    const result = await this.post(`/w/${world}/execution-preparations/${preparationId}/execute`, {});
+    if (containsTokenField(result)) throw new Error('services response exposed a token field');
+    return nativeServicesExecutionResult.parse(result);
   }
 }

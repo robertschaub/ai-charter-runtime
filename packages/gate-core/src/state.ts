@@ -11,6 +11,7 @@ import type {
   ConversationStoreEntry,
   ConversationIngressEvent,
   EffectRecord,
+  ExecutionPreparationRecord,
   EscalationRecord,
   FrozenProposal,
   GateRuling,
@@ -44,6 +45,7 @@ import {
   outputReleaseRecord,
 } from './schemas/conversationTransport.js';
 import { systemUseDecisionRecord } from './schemas/systemUseDecision.js';
+import { executionPreparationRecord } from './schemas/executionPreparation.js';
 import { systemUseDecisionDigest } from './systemUseDecision.js';
 
 type AccessChainValue = z.infer<typeof accessChainEntry>;
@@ -80,6 +82,7 @@ export interface WorldState {
   readonly proposalIntakes: Map<string, ProposalIntakeRecord>;
   readonly proposalIntakeByRun: Map<string, string>;
   readonly proposalRevisionPreparations: Map<string, ProposalRevisionPreparationRecord>;
+  readonly executionPreparations: Map<string, ExecutionPreparationRecord>;
   readonly systemUseDecisions: Map<string, SystemUseDecisionRecord>;
   readonly systemUseDecisionStatus: Map<string, SystemUseDecisionRuntimeStatus>;
   readonly caseSessionHandoffs: Map<string, CaseSessionHandoffRecord>;
@@ -128,6 +131,7 @@ export function createWorldState(worldId: string): WorldState {
     proposalIntakes: new Map(),
     proposalIntakeByRun: new Map(),
     proposalRevisionPreparations: new Map(),
+    executionPreparations: new Map(),
     systemUseDecisions: new Map(),
     systemUseDecisionStatus: new Map(),
     caseSessionHandoffs: new Map(),
@@ -169,6 +173,7 @@ export function cloneWorldState(state: WorldState): WorldState {
     proposalIntakes: new Map(state.proposalIntakes),
     proposalIntakeByRun: new Map(state.proposalIntakeByRun),
     proposalRevisionPreparations: new Map(state.proposalRevisionPreparations),
+    executionPreparations: new Map(state.executionPreparations),
     systemUseDecisions: new Map(state.systemUseDecisions),
     systemUseDecisionStatus: new Map(state.systemUseDecisionStatus),
     caseSessionHandoffs: new Map(state.caseSessionHandoffs),
@@ -287,8 +292,119 @@ function recordAccessId(entry: AccessChainValue): string {
   return `${entry.event}:${entry.checkpoint_id}`;
 }
 
+function updateExecutionPreparationOutcome(
+  state: WorldState,
+  commitmentId: string,
+  outcome: ExecutionPreparationRecord['effect_outcome'],
+  recordedAt: string,
+): void {
+  const preparation = [...state.executionPreparations.values()].find(
+    (candidate) => candidate.commitment_id === commitmentId,
+  );
+  if (preparation === undefined) return;
+  state.executionPreparations.set(
+    preparation.execution_preparation_id,
+    executionPreparationRecord.parse({
+      ...preparation,
+      effect_outcome: outcome,
+      effect_recorded_at: recordedAt,
+    }),
+  );
+}
+
 export function applyWorldOp(state: WorldState, op: WalOp, transactionTimestamp: string): void {
   switch (op.op) {
+    case 'execution_preparation.issue': {
+      const preparation = executionPreparationRecord.parse(op.preparation);
+      requireWorld(state, preparation, 'execution preparation');
+      requireUnique(state.executionPreparations, preparation.execution_preparation_id, `execution preparation ${preparation.execution_preparation_id}`);
+      if (preparation.state !== 'issued' || preparation.issued_at !== transactionTimestamp || preparation.state_changed_at !== transactionTimestamp) {
+        fail('illegal-initial-state', 'a new execution preparation must be issued now');
+      }
+      const proposal = requireValue(state.proposals, preparation.proposal_id, `proposal ${preparation.proposal_id}`);
+      const origin = requireValue(state.proposalOrigins, preparation.proposal_id, `proposal origin ${preparation.proposal_id}`);
+      const receipt = state.caseSessionProvenance.get(preparation.session_id);
+      const selection = state.modelSelections.get(preparation.selection_id);
+      const mandate = state.mandates.get(mandateVersionKey(preparation.mandate_id, preparation.mandate_version));
+      const rulings = [state.rulings.get(preparation.authorize_ruling_id), state.rulings.get(preparation.submit_ruling_id), state.rulings.get(preparation.verify_ruling_id)];
+      const expectedBasis = {
+        world_id: state.worldId,
+        frozen_proposal_hash: proposal.proposal_hash,
+        service: origin.service,
+        action_class: origin.action_class,
+        target: proposal.target,
+        exact_parameters: proposal.exact_parameters,
+        data_to_be_disclosed: proposal.data_to_be_disclosed,
+      };
+      if (
+        origin.proposal_run_id !== preparation.proposal_run_id || origin.case_id !== preparation.case_id ||
+        origin.session_id !== preparation.session_id || origin.authorization_boot_id !== preparation.authorization_boot_id ||
+        origin.proposal_hash !== preparation.frozen_proposal_hash || origin.conversation_version !== preparation.conversation_version ||
+        origin.selection_id !== preparation.selection_id || origin.requested_id !== preparation.requested_id ||
+        origin.served_id !== preparation.served_id || origin.card_id !== preparation.card_id ||
+        origin.card_version !== preparation.card_version || origin.card_digest !== preparation.card_digest ||
+        origin.verifying_key_id !== preparation.verifying_key_id || origin.mandate_id !== preparation.mandate_id ||
+        origin.mandate_version !== preparation.mandate_version || origin.policy_version !== preparation.policy_version ||
+        origin.policy_content_digest !== preparation.policy_content_digest || origin.evaluator_build_id !== preparation.evaluator_build_id ||
+        origin.service !== preparation.service || origin.action_class !== preparation.action_class ||
+        proposal.action_id !== preparation.action_id || proposal.revision !== preparation.revision ||
+        canonicalize(origin.system_use_decision) !== canonicalize(preparation.system_use_decision) ||
+        canonicalize(preparation.effect_intent_basis) !== canonicalize(expectedBasis) ||
+        !verifyDigest(preparation.effect_intent_basis_digest, digestFor('execution-effect-intent-basis', expectedBasis)) ||
+        receipt?.state !== 'active' || receipt.authorization_boot_id !== preparation.authorization_boot_id ||
+        receipt.case_id !== preparation.case_id || receipt.role !== 'case_officer' || transactionTimestamp >= receipt.expires_at ||
+        state.currentModelSelectionByCase.get(preparation.case_id) !== preparation.selection_id ||
+        selection?.mandate_id !== preparation.mandate_id || selection.mandate_version !== preparation.mandate_version ||
+        selection.target.requested_id !== preparation.requested_id || selection.target.card_id !== preparation.card_id ||
+        selection.target.card_version !== preparation.card_version || selection.target.card_digest !== preparation.card_digest ||
+        selection.target.verifying_key_id !== preparation.verifying_key_id ||
+        canonicalize(selection.system_use_decision) !== canonicalize(preparation.system_use_decision) ||
+        mandate?.state !== 'active' || mandate.connected_service !== preparation.service || mandate.action_class !== preparation.action_class ||
+        state.policy?.policy_version !== preparation.policy_version || state.policy.policy_content_digest !== preparation.policy_content_digest ||
+        state.policy.evaluator_build_id !== preparation.evaluator_build_id ||
+        rulings.some((ruling, index) => ruling === undefined || ruling.gate !== ['authorize', 'submit', 'verify'][index] ||
+          ruling.verdict !== 'allow' || ruling.status !== 'issued' ||
+          ruling.binding.frozen_proposal_hash !== proposal.proposal_hash || ruling.binding.service !== preparation.service ||
+          ruling.binding.action_class !== preparation.action_class || transactionTimestamp >= ruling.binding.validity_window.not_after)
+      ) fail('binding-mismatch', `execution preparation ${preparation.execution_preparation_id} has contradictory lineage`);
+      if ([...state.executionPreparations.values()].some((candidate) => candidate.proposal_id === preparation.proposal_id && candidate.state === 'issued')) {
+        fail('duplicate-state', `proposal ${preparation.proposal_id} already has an issued execution preparation`);
+      }
+      state.executionPreparations.set(preparation.execution_preparation_id, preparation);
+      break;
+    }
+    case 'execution_preparation.consume': {
+      const current = requireValue(state.executionPreparations, op.execution_preparation_id, `execution preparation ${op.execution_preparation_id}`);
+      const ruling = requireValue(state.rulings, op.commit_ruling_id, `ruling ${op.commit_ruling_id}`);
+      if (current.state !== 'issued' || op.changed_at !== transactionTimestamp || transactionTimestamp >= current.expires_at ||
+        ruling.gate !== 'commit' || ruling.binding.frozen_proposal_hash !== current.frozen_proposal_hash ||
+        ruling.binding.service !== current.service || ruling.binding.action_class !== current.action_class ||
+        (ruling.verdict === 'allow') !== (op.commitment_id !== null) || (ruling.verdict === 'escalate') !== (op.escalation_id !== null)) {
+        fail('illegal-transition', `execution preparation ${op.execution_preparation_id} cannot be consumed`);
+      }
+      if (op.commitment_id !== null && state.commitments.get(op.commitment_id)?.ruling_id !== ruling.ruling_id) {
+        fail('binding-mismatch', 'preparation commitment differs from Commit ruling');
+      }
+      if (op.escalation_id !== null && state.escalations.get(op.escalation_id)?.ruling_id !== ruling.ruling_id) {
+        fail('binding-mismatch', 'preparation escalation differs from Commit ruling');
+      }
+      state.executionPreparations.set(op.execution_preparation_id, executionPreparationRecord.parse({ ...current, state: 'consumed', state_changed_at: op.changed_at, commit_ruling_id: op.commit_ruling_id, escalation_id: op.escalation_id, commitment_id: op.commitment_id }));
+      break;
+    }
+    case 'execution_preparation.invalidate': {
+      const current = requireValue(state.executionPreparations, op.execution_preparation_id, `execution preparation ${op.execution_preparation_id}`);
+      if (current.state !== 'issued' || op.changed_at !== transactionTimestamp) fail('illegal-transition', `execution preparation ${op.execution_preparation_id} cannot be invalidated`);
+      state.executionPreparations.set(op.execution_preparation_id, executionPreparationRecord.parse({ ...current, state: 'invalidated', state_changed_at: op.changed_at, invalidation_reason: op.reason }));
+      break;
+    }
+    case 'execution_preparation.expire': {
+      const current = requireValue(state.executionPreparations, op.execution_preparation_id, `execution preparation ${op.execution_preparation_id}`);
+      if (current.state !== 'issued' || op.changed_at !== transactionTimestamp || (current.expires_at > op.changed_at && current.authorization_boot_id === op.authorization_boot_id)) {
+        fail('illegal-transition', `execution preparation ${op.execution_preparation_id} cannot expire`);
+      }
+      state.executionPreparations.set(op.execution_preparation_id, executionPreparationRecord.parse({ ...current, state: 'expired', state_changed_at: op.changed_at }));
+      break;
+    }
     case 'system_use_decision.issue': {
       requireWorld(state, op.decision, 'system-use decision');
       const decision = systemUseDecisionRecord.parse(op.decision);
@@ -1071,6 +1187,7 @@ export function applyWorldOp(state: WorldState, op: WalOp, transactionTimestamp:
         outcome: 'unknown-reconciliation-required',
         recovery_owner_role: op.recovery_owner_role,
       });
+      updateExecutionPreparationOutcome(state, op.commitment_id, 'unknown-reconciliation-required', transactionTimestamp);
       break;
     }
     case 'commitment.reconcile': {
@@ -1089,6 +1206,12 @@ export function applyWorldOp(state: WorldState, op: WalOp, transactionTimestamp:
         state: 'reconciled',
         outcome: op.resolution === 'routed' ? 'unknown-reconciliation-required' : op.resolution,
       });
+      updateExecutionPreparationOutcome(
+        state,
+        op.commitment_id,
+        op.resolution === 'routed' ? 'unknown-reconciliation-required' : op.resolution,
+        transactionTimestamp,
+      );
       break;
     }
     case 'escalation.open': {
@@ -1185,6 +1308,7 @@ export function applyWorldOp(state: WorldState, op: WalOp, transactionTimestamp:
       if (existing !== undefined) fail('duplicate-state', `idempotency key already belongs to ${existing}`);
       state.effects.set(op.effect.effect_id, op.effect);
       state.effectByIdempotencyKey.set(op.effect.idempotency_key, op.effect.effect_id);
+      updateExecutionPreparationOutcome(state, op.effect.commitment_id, op.effect.outcome, op.effect.recorded_at);
       break;
     }
     case 'mandate.grant': {
@@ -2176,6 +2300,26 @@ export function validateWorldState(state: WorldState): void {
       state.modelCalls.get(preparation.consumed_call_id ?? '')?.revision_binding?.preparation_id !== preparation.preparation_id
     ) {
       fail('orphan-state', `consumed revision preparation ${preparation.preparation_id} lost its model call`);
+    }
+  }
+  for (const preparation of state.executionPreparations.values()) {
+    const proposal = state.proposals.get(preparation.proposal_id);
+    const origin = state.proposalOrigins.get(preparation.proposal_id);
+    if (
+      proposal?.proposal_hash !== preparation.frozen_proposal_hash ||
+      origin?.proposal_run_id !== preparation.proposal_run_id ||
+      origin.case_id !== preparation.case_id ||
+      origin.session_id !== preparation.session_id
+    ) fail('orphan-state', `execution preparation ${preparation.execution_preparation_id} lost its native proposal lineage`);
+    if (preparation.state === 'consumed') {
+      const ruling = state.rulings.get(preparation.commit_ruling_id ?? '');
+      const commitment = preparation.commitment_id === null ? undefined : state.commitments.get(preparation.commitment_id);
+      if (
+        ruling?.gate !== 'commit' ||
+        ruling.binding.frozen_proposal_hash !== preparation.frozen_proposal_hash ||
+        (ruling.verdict === 'allow') !== (commitment !== undefined) ||
+        (commitment !== undefined && commitment.ruling_id !== ruling.ruling_id)
+      ) fail('orphan-state', `consumed execution preparation ${preparation.execution_preparation_id} lost its Commit result`);
     }
   }
   for (const receipt of state.caseSessionProvenance.values()) {

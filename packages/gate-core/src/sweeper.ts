@@ -94,6 +94,7 @@ export async function runSweeper(
   const completed = await store.transactWithState('sweep', actor, (state, at) => {
     const ops: WalOp[] = [];
     const terminalRulings = new Set<string>();
+    const terminalPreparations = new Set<string>();
     const releasedReservations = new Set<string>();
     const newPatternEvents: PatternEvent[] = [];
     let expiredRulings = 0;
@@ -114,6 +115,25 @@ export async function runSweeper(
     };
     const endIssuedRuling = (ruling: GateRuling, reason: string, expired: boolean): void => {
       if (ruling.status !== 'issued' || terminalRulings.has(ruling.ruling_id)) return;
+      for (const preparation of state.executionPreparations.values()) {
+        if (
+          preparation.state === 'issued' &&
+          !terminalPreparations.has(preparation.execution_preparation_id) &&
+          [
+            preparation.authorize_ruling_id,
+            preparation.submit_ruling_id,
+            preparation.verify_ruling_id,
+          ].includes(ruling.ruling_id)
+        ) {
+          ops.push({
+            op: 'execution_preparation.invalidate',
+            execution_preparation_id: preparation.execution_preparation_id,
+            reason: expired ? 'precommit-ruling-expired' : 'precommit-ruling-invalidated',
+            changed_at: at,
+          });
+          terminalPreparations.add(preparation.execution_preparation_id);
+        }
+      }
       ops.push(
         expired
           ? { op: 'ruling.expire', ruling_id: ruling.ruling_id }

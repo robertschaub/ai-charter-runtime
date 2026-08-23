@@ -24,8 +24,14 @@ describe('services HTTP denial evidence', () => {
     let now = 0;
     const orchestratorToken = '1'.repeat(64);
     const authorizationToken = '2'.repeat(64);
+    const executePrepared = vi.fn(async (_worldId: string, preparationId: string) => ({
+      execution_preparation_id: preparationId,
+      state: 'commit-denied' as const,
+      effect_outcome: null,
+      recorded_at: null,
+    }));
     const server = new ServicesHttpServer({
-      services: { execute: vi.fn() } as unknown as MockServicesHost,
+      services: { execute: vi.fn(), executePrepared } as unknown as MockServicesHost,
       ledger: { probe: vi.fn() } as unknown as EffectLedger,
       worldId: 'w-demo',
       orchestratorToken,
@@ -42,6 +48,7 @@ describe('services HTTP denial evidence', () => {
     const execute = new URL('/w/w-demo/services/filing/execute', address.origin);
     const probe = new URL(`/w/w-demo/effects/${'a'.repeat(64)}`, address.origin);
     const registry = new URL('/w/w-demo/registry-records/reg%3ACH-0042', address.origin);
+    const native = new URL('/w/w-demo/execution-preparations/xpr_native/execute', address.origin);
     const post = (token: string) =>
       fetch(execute, {
         method: 'POST',
@@ -74,6 +81,42 @@ describe('services HTTP denial evidence', () => {
       outcome: 'forbidden',
       http_status: 403,
     });
+    expect((await fetch(native, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${authorizationToken}`, 'content-type': 'application/json' },
+      body: '{}',
+    })).status).toBe(403);
+    expect(denials.at(-1)).toMatchObject({ route: 'services.native-execute', authenticated_actor: 'proc:authz' });
+    expect((await fetch(native, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${orchestratorToken}`, origin: 'http://127.0.0.1:7802', 'content-type': 'application/json' },
+      body: '{}',
+    })).status).toBe(403);
+    expect(executePrepared).not.toHaveBeenCalled();
+    expect((await fetch(native, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${orchestratorToken}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ service: 'filing' }),
+    })).status).toBe(422);
+    const nativeResult = await fetch(native, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${orchestratorToken}`, 'content-type': 'application/json' },
+      body: '{}',
+    });
+    expect(nativeResult.status).toBe(200);
+    await expect(nativeResult.json()).resolves.toEqual({
+      execution_preparation_id: 'xpr_native',
+      state: 'commit-denied',
+      effect_outcome: null,
+      recorded_at: null,
+    });
+    expect(executePrepared).toHaveBeenCalledOnce();
+    expect((await fetch(probe, {
+      headers: { authorization: `Bearer ${authorizationToken}`, origin: 'null' },
+    })).status).toBe(403);
+    expect((await fetch(registry, {
+      headers: { authorization: `Bearer ${authorizationToken}`, origin: 'http://127.0.0.1:7801' },
+    })).status).toBe(403);
     expect(
       (
         await fetch(probe, {

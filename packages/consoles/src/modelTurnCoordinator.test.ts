@@ -17,11 +17,14 @@ import {
   ConversationTransportService,
   ProposalIntakeService,
   ProposalPrecommitService,
+  ExecutionPreparationService,
   ScreeningCallService,
   proposalRevisionPreparationBlocksReplacement,
   digestFor,
   Keyring,
   loadPolicyFile,
+  policySet,
+  runSweeper,
   syntheticSystemUseForTests,
   storeItem,
   WalStore,
@@ -29,8 +32,14 @@ import {
   type ScreeningResolution,
   type StoreItem,
 } from 'gate-core';
+import {
+  EffectLedger,
+  MockServicesHost,
+  ServicesAuthorizationHttpClient,
+  ServicesHttpServer,
+} from 'services-mock';
 import { ModelAdapterError, OpenAiCompatibleAdapter } from 'model-adapters';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
   ModelOutputQuarantine,
@@ -39,7 +48,11 @@ import {
   type ModelTurnAuthorizationClient,
   type ModelTurnLaneConfig,
 } from './modelTurnCoordinator.js';
-import { OrchestratorAuthorizationHttpClient, RuntimeDependencyError } from './runtimeHttpClients.js';
+import {
+  OrchestratorAuthorizationHttpClient,
+  OrchestratorServicesHttpClient,
+  RuntimeDependencyError,
+} from './runtimeHttpClients.js';
 
 const ROOT = fileURLToPath(new URL('../../..', import.meta.url));
 const POLICY_FILE = join(ROOT, 'packages', 'gate-core', 'policy', 'v1.yaml');
@@ -58,6 +71,7 @@ const AUTHZ = { credential: 'proc:authz', claimed_role: null } as const;
 const PRINCIPAL = { credential: 'role:principal', claimed_role: 'principal' } as const;
 const CASE_OFFICER = { credential: 'role:case_officer', claimed_role: 'case_officer' } as const;
 const ORCHESTRATOR = { credential: 'proc:orchestrator', claimed_role: null } as const;
+const SERVICES_HOST = { credential: 'proc:services_host', claimed_role: null } as const;
 const roots: string[] = [];
 const stores: WalStore[] = [];
 const closeables: Array<() => Promise<void>> = [];
@@ -142,12 +156,76 @@ async function loopbackProvider(): Promise<LoopbackProvider> {
   };
 }
 
-async function authorizationHarness(options: { readonly liveScreening?: boolean } = {}) {
+async function authorizationHarness(options: {
+  readonly liveScreening?: boolean;
+  readonly commitVerdict?: 'deny' | 'escalate';
+  readonly preparationTtlMs?: number;
+} = {}) {
   const root = mkdtempSync(join(tmpdir(), 'model-turn-coordinator-'));
   roots.push(root);
   let at = '2026-08-01T09:00:00.000Z';
   const buildDigest = digestFor('evaluator-build', { package: 'runtime-consoles', test: 'model-turn-coordinator' });
-  const policy = loadPolicyFile(POLICY_FILE, buildDigest);
+  const loadedPolicy = loadPolicyFile(POLICY_FILE, buildDigest);
+  const changedPolicy = options.commitVerdict === undefined
+    ? loadedPolicy.policy
+    : policySet.parse({
+        ...loadedPolicy.policy,
+        rules: [
+          ...loadedPolicy.policy.rules.map((rule) => rule.id !== 'allow-grant-filing'
+            ? rule
+            : options.commitVerdict === 'deny'
+              ? {
+                  ...rule,
+                  verdict: 'deny',
+                  ux_class: 'flag',
+                  reason_template: 'Synthetic M6.2 policy denies Commit.',
+                }
+              : {
+                  ...rule,
+                  matcher: {
+                    kind: 'all' as const,
+                    matchers: [
+                      rule.matcher,
+                      {
+                        kind: 'field' as const,
+                        source: 'context' as const,
+                        path: ['intervention_disposition'],
+                        operator: 'exists' as const,
+                        value: false,
+                      },
+                    ],
+                  },
+                  verdict: 'escalate',
+                  ux_class: 'stop',
+                  reason_template: 'Synthetic M6.2 policy escalates Commit.',
+                  intervention_contract: loadedPolicy.policy.default_escalation_contract,
+                }),
+          ...(options.commitVerdict === 'escalate'
+            ? [{
+                id: 'allow-native-commit-disposition-evidence',
+                priority: 200,
+                gate: 'commit' as const,
+                matcher: {
+                  kind: 'field' as const,
+                  source: 'context' as const,
+                  path: ['intervention_disposition'],
+                  operator: 'eq' as const,
+                  value: 'allow-within-scope',
+                },
+                verdict: 'allow' as const,
+                ux_class: 'silent' as const,
+                reason_template: 'Synthetic disposition successor is evidence only.',
+              }]
+            : []),
+        ],
+      });
+  const policy = changedPolicy === loadedPolicy.policy
+    ? loadedPolicy
+    : {
+        ...loadedPolicy,
+        policy: changedPolicy,
+        policyContentDigest: digestFor('policy-set', changedPolicy),
+      };
   const keyring = new Keyring(new Map([[KEY_ID, KEY]]), KEY_ID);
   const store = WalStore.open({
     recordsRoot: root,
@@ -258,6 +336,20 @@ async function authorizationHarness(options: { readonly liveScreening?: boolean 
     authorization: core,
     proposalIntakes,
     ...(options.liveScreening === true ? { screeningCalls } : {}),
+    now: () => at,
+  });
+  let executionPreparationSequence = 0;
+  const executionPreparations = new ExecutionPreparationService({
+    store,
+    authorization: core,
+    proposalIntakes,
+    authorizationBootId: 'authz_boot_model_turn_1',
+    authorizedAgentId: 'agent_demo',
+    ...(options.preparationTtlMs === undefined ? {} : { ttlMs: options.preparationTtlMs }),
+    now: () => at,
+    nextId: () => ++executionPreparationSequence === 1
+      ? 'xpr_test_native'
+      : `xpr_test_native_${executionPreparationSequence}`,
   });
   const adapter = new AuthorizationHttpAdapter({
     authorization: core,
@@ -277,6 +369,7 @@ async function authorizationHarness(options: { readonly liveScreening?: boolean 
     conversationTransport,
     proposalIntakes,
     proposalPrecommit,
+    executionPreparations,
     screeningCalls,
     reads: {} as AuthorizationReadSide,
     adapter,
@@ -326,6 +419,7 @@ async function authorizationHarness(options: { readonly liveScreening?: boolean 
     conversationTransport,
     proposalIntakes,
     proposalPrecommit,
+    executionPreparations,
     handoffs,
     root,
     policy,
@@ -1259,6 +1353,456 @@ describe('M5.4 containment with M5.5 durable model-call evidence', () => {
     expect([...reopened.snapshot().rulings.values()].filter(
       (ruling) => ruling.binding.frozen_proposal_hash === final.proposals.get('prp_test_native')?.proposal_hash,
     ).map((ruling) => ruling.status)).toEqual(['invalidated', 'invalidated', 'invalidated']);
+  });
+
+  it('continues one verified native proposal through an atomic Commit and exactly one local mock effect', async () => {
+    const h = await authorizationHarness();
+    const provider = await loopbackProvider();
+    provider.enqueue({ model: h.mandateBody.default_acting_model.requested_id, content: nativeProposalContent() });
+    const coordinator = new ModelTurnCoordinator({
+      worldId: 'w-demo',
+      caseId: 'case_demo',
+      authorization: h.authorization,
+      lanes: [lane(provider)],
+    });
+    const claim = { role: 'case_officer' as const, session_id: h.sessionId };
+    const frozen = await coordinator.runProposal({
+      proposalRunId: 'prun_native_execution',
+      conversationVersion: h.store.snapshot().conversationVersionByCase.get('case_demo') ?? 0,
+      turnId: 'turn_native_execution',
+      selectionId: h.selectionId,
+      cardId: h.mandateBody.default_acting_model.card_id,
+      cardVersion: h.mandateBody.default_acting_model.card_version,
+      requestedId: h.mandateBody.default_acting_model.requested_id,
+    }, { onBehalfOf: claim });
+    const precommit = await h.authorization.runProposalPrecommit('w-demo', frozen.proposal.proposal_id, claim);
+    expect(precommit).toMatchObject({ state: 'verified', execution: { state: 'available' } });
+
+    const preparation = await h.authorization.prepareExecution('w-demo', 'case_demo', 'prun_native_execution', claim);
+    await expect(
+      h.authorization.prepareExecution('w-demo', 'case_demo', 'prun_native_execution', claim),
+    ).resolves.toEqual(preparation);
+    const durable = h.store.snapshot().executionPreparations.get(preparation.execution_preparation_id);
+    const proposal = h.store.snapshot().proposals.get(frozen.proposal.proposal_id);
+    const origin = h.store.snapshot().proposalOrigins.get(frozen.proposal.proposal_id);
+    if (proposal === undefined || origin === undefined) throw new Error('expected native proposal lineage');
+    expect(Object.keys(durable ?? {}).sort()).toContain('effect_intent_basis_digest');
+    expect(durable?.effect_intent_basis_digest).toBe(digestFor('execution-effect-intent-basis', durable?.effect_intent_basis));
+    expect(durable?.effect_intent_basis).toEqual({
+      world_id: 'w-demo',
+      frozen_proposal_hash: proposal.proposal_hash,
+      service: h.mandateBody.connected_service,
+      action_class: h.mandateBody.action_class,
+      target: proposal.target,
+      exact_parameters: proposal.exact_parameters,
+      data_to_be_disclosed: proposal.data_to_be_disclosed,
+    });
+    await expect(h.core.ruleProposal({
+      gate: 'commit',
+      proposal,
+      service: origin.service,
+      actionClass: origin.action_class,
+      caseId: origin.case_id,
+      actor: ORCHESTRATOR,
+    })).rejects.toMatchObject({ code: 'native-commit-requires-preparation' });
+    expect([...h.store.snapshot().rulings.values()].filter((ruling) => ruling.gate === 'commit')).toHaveLength(0);
+
+    const handler = vi.fn(() => ({ outcome: 'success' as const, detail: 'Synthetic native filing accepted.' }));
+    const ledger = new EffectLedger({
+      recordsRoot: join(h.root, 'services-ledger'),
+      worldId: 'w-demo',
+      bootId: 'services_boot_native',
+      keyring: h.keyring,
+      now: () => '2026-08-01T09:00:01.000Z',
+    });
+    const smuggledCommit = await fetch(
+      new URL(
+        `/w/w-demo/execution-preparations/${preparation.execution_preparation_id}/commit-verify`,
+        h.authorizationOrigin,
+      ),
+      {
+        method: 'POST',
+        headers: {
+          authorization: `Bearer ${ROLE_TOKENS.services}`,
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          services_host_boot_id: ledger.bootId,
+          services_ledger_id: ledger.ledgerId,
+          proposal: { caller_asserted: true },
+        }),
+      },
+    );
+    expect(smuggledCommit.status).toBe(422);
+    expect([...h.store.snapshot().rulings.values()].filter((ruling) => ruling.gate === 'commit')).toHaveLength(0);
+    const servicesAuthorization = new ServicesAuthorizationHttpClient({
+      origin: h.authorizationOrigin,
+      token: ROLE_TOKENS.services,
+    });
+    const services = new MockServicesHost(
+      ledger,
+      servicesAuthorization,
+      { [`${h.mandateBody.connected_service}:${h.mandateBody.action_class}`]: handler },
+    );
+    const servicesServer = new ServicesHttpServer({
+      services,
+      ledger,
+      worldId: 'w-demo',
+      orchestratorToken: '6'.repeat(64),
+      authorizationToken: '7'.repeat(64),
+      accessRecorder: servicesAuthorization,
+      host: '127.0.0.1',
+      port: 0,
+    });
+    const servicesAddress = await servicesServer.listen();
+    closeables.push(() => servicesServer.close());
+    const servicesClient = new OrchestratorServicesHttpClient({
+      origin: servicesAddress.origin,
+      token: '6'.repeat(64),
+    });
+    const [executed, concurrent] = await Promise.all([
+      servicesClient.executePrepared('w-demo', preparation.execution_preparation_id),
+      servicesClient.executePrepared('w-demo', preparation.execution_preparation_id),
+    ]);
+    expect(executed).toEqual({
+      execution_preparation_id: preparation.execution_preparation_id,
+      state: 'effect-recorded',
+      effect_outcome: 'success',
+      recorded_at: '2026-08-01T09:00:01.000Z',
+    });
+    expect(concurrent).toEqual(executed);
+    const repeated = await servicesClient.executePrepared('w-demo', preparation.execution_preparation_id);
+    expect(repeated).toEqual(executed);
+    expect(handler).toHaveBeenCalledOnce();
+
+    const final = h.store.snapshot();
+    const commitRulings = [...final.rulings.values()].filter((ruling) =>
+      ruling.gate === 'commit' && ruling.binding.frozen_proposal_hash === proposal.proposal_hash);
+    expect(commitRulings).toHaveLength(1);
+    expect(commitRulings[0]).toMatchObject({ verdict: 'allow', status: 'consumed' });
+    expect(final.executionPreparations.get(preparation.execution_preparation_id)).toMatchObject({
+      state: 'consumed',
+      commit_ruling_id: commitRulings[0]!.ruling_id,
+      effect_outcome: 'success',
+      effect_recorded_at: '2026-08-01T09:00:01.000Z',
+    });
+    expect(final.commitments.size).toBe(1);
+    expect(final.effects.size).toBe(1);
+    await expect(h.core.commitVerify({
+      rulingId: commitRulings[0]!.ruling_id,
+      intent: {
+        ...final.executionPreparations.get(preparation.execution_preparation_id)!.effect_intent_basis,
+        ruling_id: commitRulings[0]!.ruling_id,
+      },
+      servicesHostBootId: ledger.bootId,
+      servicesLedgerId: ledger.ledgerId,
+      actor: SERVICES_HOST,
+    })).resolves.toEqual({ ok: false, defect: 'native-proposal-requires-preparation' });
+
+    const restartedHandler = vi.fn(() => ({ outcome: 'success' as const }));
+    const restartedLedger = new EffectLedger({
+      recordsRoot: join(h.root, 'services-ledger'),
+      worldId: 'w-demo',
+      bootId: 'services_boot_native_restart',
+      keyring: h.keyring,
+      now: () => '2026-08-01T09:00:02.000Z',
+    });
+    expect(restartedLedger.ledgerId).toBe(ledger.ledgerId);
+    const restartedServices = new MockServicesHost(
+      restartedLedger,
+      servicesAuthorization,
+      { [`${h.mandateBody.connected_service}:${h.mandateBody.action_class}`]: restartedHandler },
+    );
+    await expect(restartedServices.executePrepared('w-demo', preparation.execution_preparation_id)).resolves.toEqual(executed);
+    expect(restartedHandler).not.toHaveBeenCalled();
+
+    const wal = readFileSync(join(h.root, 'w-demo', 'wal.jsonl'), 'utf8');
+    expect(wal).not.toContain('commit_token');
+    expect(wal).not.toContain('raw_mac');
+    expect(JSON.stringify(final.accessRecords)).not.toContain('commit_token');
+    await h.closeAuthorization();
+    h.store.close();
+    const replayedStore = WalStore.open({
+      recordsRoot: h.root,
+      worldId: 'w-demo',
+      runId: 'run_native_execution_replay',
+      bootId: 'authz_boot_native_execution_replay',
+      policyVersion: h.policy.policy.policy_version,
+      policyContentDigest: h.policy.policyContentDigest,
+      evaluatorBuildDigest: h.buildDigest,
+      now: () => '2026-08-01T09:00:02.000Z',
+    });
+    stores.push(replayedStore);
+    const replayed = replayedStore.snapshot();
+    expect(replayed.executionPreparations.get(preparation.execution_preparation_id)).toEqual(
+      final.executionPreparations.get(preparation.execution_preparation_id),
+    );
+    expect(replayed.rulings.get(commitRulings[0]!.ruling_id)).toEqual(commitRulings[0]);
+    expect(replayed.commitments.size).toBe(1);
+    expect(replayed.effects.size).toBe(1);
+  });
+
+  it.each(['deny', 'escalate'] as const)(
+    'consumes a preparation on Commit %s without returning a token or invoking a service handler',
+    async (commitVerdict) => {
+      const h = await authorizationHarness({ commitVerdict });
+      const provider = await loopbackProvider();
+      provider.enqueue({ model: h.mandateBody.default_acting_model.requested_id, content: nativeProposalContent() });
+      const coordinator = new ModelTurnCoordinator({
+        worldId: 'w-demo',
+        caseId: 'case_demo',
+        authorization: h.authorization,
+        lanes: [lane(provider)],
+      });
+      const claim = { role: 'case_officer' as const, session_id: h.sessionId };
+      const frozen = await coordinator.runProposal({
+        proposalRunId: `prun_native_${commitVerdict}`,
+        conversationVersion: h.store.snapshot().conversationVersionByCase.get('case_demo') ?? 0,
+        turnId: `turn_native_${commitVerdict}`,
+        selectionId: h.selectionId,
+        cardId: h.mandateBody.default_acting_model.card_id,
+        cardVersion: h.mandateBody.default_acting_model.card_version,
+        requestedId: h.mandateBody.default_acting_model.requested_id,
+      }, { onBehalfOf: claim });
+      await h.authorization.runProposalPrecommit('w-demo', frozen.proposal.proposal_id, claim);
+      const preparation = await h.authorization.prepareExecution(
+        'w-demo',
+        'case_demo',
+        `prun_native_${commitVerdict}`,
+        claim,
+      );
+      const handler = vi.fn(() => ({ outcome: 'success' as const }));
+      const ledger = new EffectLedger({
+        recordsRoot: join(h.root, `services-ledger-${commitVerdict}`),
+        worldId: 'w-demo',
+        bootId: `services_boot_${commitVerdict}`,
+        keyring: h.keyring,
+        now: () => '2026-08-01T09:00:01.000Z',
+      });
+      const services = new MockServicesHost(ledger, {
+        commitVerify: (input) => h.core.commitVerify(input),
+        commitVerifyPreparation: (_worldId, preparationId, bootId, ledgerId) =>
+          h.executionPreparations.commitVerify(preparationId, bootId, ledgerId, SERVICES_HOST),
+        reportEffectOutcome: (input) => h.core.reportEffectOutcome(input),
+      }, { [`${h.mandateBody.connected_service}:${h.mandateBody.action_class}`]: handler });
+      const result = await services.executePrepared('w-demo', preparation.execution_preparation_id);
+      expect(result).toEqual({
+        execution_preparation_id: preparation.execution_preparation_id,
+        state: commitVerdict === 'deny' ? 'commit-denied' : 'commit-escalated',
+        effect_outcome: null,
+        recorded_at: null,
+      });
+      expect(JSON.stringify(result)).not.toContain('token');
+      expect(handler).not.toHaveBeenCalled();
+      const state = h.store.snapshot();
+      const commitRulings = [...state.rulings.values()].filter((ruling) => ruling.gate === 'commit');
+      expect(commitRulings).toHaveLength(1);
+      expect(commitRulings[0]?.verdict).toBe(commitVerdict);
+      expect(state.executionPreparations.get(preparation.execution_preparation_id)).toMatchObject({
+        state: 'consumed',
+        commit_ruling_id: commitRulings[0]?.ruling_id,
+        commitment_id: null,
+      });
+      expect(state.escalations.size).toBe(commitVerdict === 'escalate' ? 1 : 0);
+      expect(state.commitments.size).toBe(0);
+      expect(state.effects.size).toBe(0);
+      if (commitVerdict === 'escalate') {
+        const escalation = [...state.escalations.values()][0];
+        if (escalation === undefined) throw new Error('expected native Commit escalation');
+        const disposed = await h.core.disposeEscalation({
+          escalationId: escalation.escalation_id,
+          disposition: 'allow-within-scope',
+          actor: PRINCIPAL,
+        });
+        expect(disposed).toMatchObject({
+          accepted: true,
+          successor: { ruling: { gate: 'commit', verdict: 'allow' } },
+        });
+        if (!disposed.accepted || disposed.successor === null) throw new Error('expected native Commit successor evidence');
+        await expect(h.core.commitVerify({
+          rulingId: disposed.successor.ruling.ruling_id,
+          intent: {
+            ...state.executionPreparations.get(preparation.execution_preparation_id)!.effect_intent_basis,
+            ruling_id: disposed.successor.ruling.ruling_id,
+          },
+          servicesHostBootId: ledger.bootId,
+          servicesLedgerId: ledger.ledgerId,
+          actor: SERVICES_HOST,
+        })).resolves.toEqual({ ok: false, defect: 'native-proposal-requires-preparation' });
+        expect(h.store.snapshot().commitments.size).toBe(0);
+        expect(h.store.snapshot().effects.size).toBe(0);
+      }
+    },
+  );
+
+  it('recovers a lost outcome-report request from the one durable services ledger effect without rerunning it', async () => {
+    const h = await authorizationHarness();
+    const provider = await loopbackProvider();
+    provider.enqueue({ model: h.mandateBody.default_acting_model.requested_id, content: nativeProposalContent() });
+    const coordinator = new ModelTurnCoordinator({
+      worldId: 'w-demo',
+      caseId: 'case_demo',
+      authorization: h.authorization,
+      lanes: [lane(provider)],
+    });
+    const claim = { role: 'case_officer' as const, session_id: h.sessionId };
+    const frozen = await coordinator.runProposal({
+      proposalRunId: 'prun_native_report_recovery',
+      conversationVersion: h.store.snapshot().conversationVersionByCase.get('case_demo') ?? 0,
+      turnId: 'turn_native_report_recovery',
+      selectionId: h.selectionId,
+      cardId: h.mandateBody.default_acting_model.card_id,
+      cardVersion: h.mandateBody.default_acting_model.card_version,
+      requestedId: h.mandateBody.default_acting_model.requested_id,
+    }, { onBehalfOf: claim });
+    await h.authorization.runProposalPrecommit('w-demo', frozen.proposal.proposal_id, claim);
+    const preparation = await h.authorization.prepareExecution(
+      'w-demo',
+      'case_demo',
+      'prun_native_report_recovery',
+      claim,
+    );
+    const handler = vi.fn(() => ({ outcome: 'success' as const, detail: 'One durable synthetic effect.' }));
+    const ledger = new EffectLedger({
+      recordsRoot: join(h.root, 'services-ledger-report-recovery'),
+      worldId: 'w-demo',
+      bootId: 'services_boot_report_recovery',
+      keyring: h.keyring,
+      now: () => '2026-08-01T09:00:01.000Z',
+    });
+    let reportAttempts = 0;
+    const services = new MockServicesHost(ledger, {
+      commitVerify: (input) => h.core.commitVerify(input),
+      commitVerifyPreparation: (_worldId, preparationId, bootId, ledgerId) =>
+        h.executionPreparations.commitVerify(preparationId, bootId, ledgerId, SERVICES_HOST),
+      reportEffectOutcome: async (input) => {
+        reportAttempts += 1;
+        if (reportAttempts === 1) throw new Error('synthetic lost outcome-report request');
+        return h.core.reportEffectOutcome(input);
+      },
+    }, { [`${h.mandateBody.connected_service}:${h.mandateBody.action_class}`]: handler });
+
+    await expect(services.executePrepared('w-demo', preparation.execution_preparation_id)).rejects.toThrow(
+      'synthetic lost outcome-report request',
+    );
+    expect(handler).toHaveBeenCalledOnce();
+    const afterLoss = h.store.snapshot();
+    const commitment = [...afterLoss.commitments.values()][0];
+    expect(commitment).toBeDefined();
+    expect(afterLoss.executionPreparations.get(preparation.execution_preparation_id)).toMatchObject({
+      state: 'consumed',
+      effect_outcome: null,
+    });
+    expect(afterLoss.effects.size).toBe(0);
+    expect(ledger.probe(commitment!.idempotency_key).state).toBe('recorded');
+
+    await expect(services.executePrepared('w-demo', preparation.execution_preparation_id)).resolves.toEqual({
+      execution_preparation_id: preparation.execution_preparation_id,
+      state: 'effect-recorded',
+      effect_outcome: 'success',
+      recorded_at: '2026-08-01T09:00:01.000Z',
+    });
+    expect(handler).toHaveBeenCalledOnce();
+    expect(reportAttempts).toBe(2);
+    expect(h.store.snapshot().effects.size).toBe(1);
+  });
+
+  it('expires and replaces a stale preparation, then fail-stops a live replacement on authorization restart', async () => {
+    const h = await authorizationHarness({ preparationTtlMs: 1_000 });
+    const provider = await loopbackProvider();
+    provider.enqueue({ model: h.mandateBody.default_acting_model.requested_id, content: nativeProposalContent() });
+    const coordinator = new ModelTurnCoordinator({
+      worldId: 'w-demo',
+      caseId: 'case_demo',
+      authorization: h.authorization,
+      lanes: [lane(provider)],
+    });
+    const claim = { role: 'case_officer' as const, session_id: h.sessionId };
+    const frozen = await coordinator.runProposal({
+      proposalRunId: 'prun_native_expiry',
+      conversationVersion: h.store.snapshot().conversationVersionByCase.get('case_demo') ?? 0,
+      turnId: 'turn_native_expiry',
+      selectionId: h.selectionId,
+      cardId: h.mandateBody.default_acting_model.card_id,
+      cardVersion: h.mandateBody.default_acting_model.card_version,
+      requestedId: h.mandateBody.default_acting_model.requested_id,
+    }, { onBehalfOf: claim });
+    await h.authorization.runProposalPrecommit('w-demo', frozen.proposal.proposal_id, claim);
+    const first = await h.authorization.prepareExecution('w-demo', 'case_demo', 'prun_native_expiry', claim);
+    h.setAt('2026-08-01T09:00:01.001Z');
+    await expect(h.executionPreparations.commitVerify(
+      first.execution_preparation_id,
+      'services_boot_expiry',
+      'services_ledger_expiry',
+      SERVICES_HOST,
+    )).rejects.toMatchObject({ code: 'unavailable' });
+    expect(h.executionPreparations.statusByRun('case_demo', 'prun_native_expiry', ORCHESTRATOR)).toMatchObject({
+      state: 'unavailable',
+      execution_preparation_id: first.execution_preparation_id,
+    });
+    expect([...h.store.snapshot().rulings.values()].filter((ruling) => ruling.gate === 'commit')).toHaveLength(0);
+
+    const replacement = await h.authorization.prepareExecution('w-demo', 'case_demo', 'prun_native_expiry', claim);
+    expect(replacement.execution_preparation_id).not.toBe(first.execution_preparation_id);
+    expect(h.store.snapshot().executionPreparations.get(first.execution_preparation_id)?.state).toBe('expired');
+    expect(h.store.snapshot().executionPreparations.get(replacement.execution_preparation_id)?.state).toBe('issued');
+
+    const restarted = new ExecutionPreparationService({
+      store: h.store,
+      authorization: h.core,
+      proposalIntakes: h.proposalIntakes,
+      authorizationBootId: 'authz_boot_model_turn_restart',
+      authorizedAgentId: 'agent_demo',
+    });
+    await expect(restarted.expire()).resolves.toBe(1);
+    expect(h.store.snapshot().executionPreparations.get(replacement.execution_preparation_id)).toMatchObject({
+      state: 'expired',
+    });
+    expect(h.store.snapshot().commitments.size).toBe(0);
+    expect(h.store.snapshot().effects.size).toBe(0);
+  });
+
+  it('durably invalidates an issued preparation when maintenance expires any bound precommit ruling', async () => {
+    const h = await authorizationHarness();
+    const provider = await loopbackProvider();
+    provider.enqueue({ model: h.mandateBody.default_acting_model.requested_id, content: nativeProposalContent() });
+    const coordinator = new ModelTurnCoordinator({
+      worldId: 'w-demo',
+      caseId: 'case_demo',
+      authorization: h.authorization,
+      lanes: [lane(provider)],
+    });
+    const claim = { role: 'case_officer' as const, session_id: h.sessionId };
+    const frozen = await coordinator.runProposal({
+      proposalRunId: 'prun_native_ruling_expiry',
+      conversationVersion: h.store.snapshot().conversationVersionByCase.get('case_demo') ?? 0,
+      turnId: 'turn_native_ruling_expiry',
+      selectionId: h.selectionId,
+      cardId: h.mandateBody.default_acting_model.card_id,
+      cardVersion: h.mandateBody.default_acting_model.card_version,
+      requestedId: h.mandateBody.default_acting_model.requested_id,
+    }, { onBehalfOf: claim });
+    await h.authorization.runProposalPrecommit('w-demo', frozen.proposal.proposal_id, claim);
+    const preparation = await h.authorization.prepareExecution(
+      'w-demo',
+      'case_demo',
+      'prun_native_ruling_expiry',
+      claim,
+    );
+    const state = h.store.snapshot();
+    const bound = state.executionPreparations.get(preparation.execution_preparation_id);
+    if (bound === undefined) throw new Error('expected issued execution preparation');
+    const expiry = state.rulings.get(bound.authorize_ruling_id)?.binding.validity_window.not_after;
+    if (expiry === undefined) throw new Error('expected bound Authorize ruling');
+    h.setAt(expiry);
+    await runSweeper(h.store, h.keyring, h.policy, h.systemUse);
+    expect(h.store.snapshot().executionPreparations.get(preparation.execution_preparation_id)).toMatchObject({
+      state: 'invalidated',
+      invalidation_reason: 'precommit-ruling-expired',
+    });
+    expect([...h.store.snapshot().rulings.values()].filter((ruling) => ruling.gate === 'commit')).toHaveLength(0);
+    expect(h.store.snapshot().commitments.size).toBe(0);
+    expect(h.store.snapshot().effects.size).toBe(0);
   });
 
   it('pauses fixed precommit for two authorization-owned live screening calls and resumes without caller gate control', async () => {

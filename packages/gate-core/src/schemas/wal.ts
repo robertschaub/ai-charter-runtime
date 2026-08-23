@@ -43,10 +43,38 @@ import {
   outputReleaseRecord,
 } from './conversationTransport.js';
 import { systemUseDecisionRecord, systemUseDecisionStatus } from './systemUseDecision.js';
+import { executionPreparationRecord } from './executionPreparation.js';
 
 const transitionReason = z.string().min(1);
 
 export const walOp = z.discriminatedUnion('op', [
+  z.object({ op: z.literal('execution_preparation.issue'), preparation: executionPreparationRecord }).strict(),
+  z
+    .object({
+      op: z.literal('execution_preparation.consume'),
+      execution_preparation_id: id,
+      commit_ruling_id: id,
+      escalation_id: id.nullable(),
+      commitment_id: id.nullable(),
+      changed_at: timestamp,
+    })
+    .strict(),
+  z
+    .object({
+      op: z.literal('execution_preparation.invalidate'),
+      execution_preparation_id: id,
+      reason: transitionReason,
+      changed_at: timestamp,
+    })
+    .strict(),
+  z
+    .object({
+      op: z.literal('execution_preparation.expire'),
+      execution_preparation_id: id,
+      authorization_boot_id: id,
+      changed_at: timestamp,
+    })
+    .strict(),
   z.object({ op: z.literal('proposal_revision_preparation.issue'), preparation: proposalRevisionPreparationRecord }).strict(),
   z
     .object({

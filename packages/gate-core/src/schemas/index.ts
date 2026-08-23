@@ -19,6 +19,7 @@ export * from './mandate.js';
 export * from './proposal.js';
 export * from './proposalIntake.js';
 export * from './proposalRevision.js';
+export * from './executionPreparation.js';
 export * from './intervention.js';
 export * from './ruling.js';
 export * from './record.js';

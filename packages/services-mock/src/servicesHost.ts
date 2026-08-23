@@ -6,9 +6,13 @@ import type {
   CommitVerifyResult,
   EffectIntent,
   EffectOutcomeReportResult,
+  NativeCommitVerifyResult,
+  NativeServicesExecutionResult,
 } from 'gate-core';
+import { nativeServicesExecutionResult } from 'gate-core';
 
 import { EffectLedger, type ProposedEffectOutcome, type ServiceEffectRecord } from './effectLedger.js';
+import { ServicesAuthorizationHttpError } from './authorizationHttpClient.js';
 
 const SERVICES_HOST = { credential: 'proc:services_host', claimed_role: null } as const;
 
@@ -30,6 +34,15 @@ export type ServicesHostExecution =
 
 export type MockServiceHandler = (intent: EffectIntent) => ProposedEffectOutcome;
 
+type ServicesAuthorization = Pick<AuthorizationCore, 'commitVerify' | 'reportEffectOutcome'> & {
+  commitVerifyPreparation?(
+    worldId: string,
+    preparationId: string,
+    servicesHostBootId: string,
+    servicesLedgerId: string,
+  ): Promise<NativeCommitVerifyResult>;
+};
+
 const DEFAULT_HANDLERS: Readonly<Record<string, MockServiceHandler>> = {
   'filing:grant-filing': () => ({
     outcome: 'success',
@@ -49,10 +62,11 @@ export class MockServicesHost {
   readonly #handlers: Readonly<Record<string, MockServiceHandler>>;
   readonly #commitments = new Map<string, Extract<CommitVerifyResult, { ok: true }>>();
   readonly #commitInFlight = new Map<string, Promise<CommitVerifyResult>>();
+  readonly #nativeInFlight = new Map<string, Promise<NativeServicesExecutionResult>>();
 
   constructor(
     readonly ledger: EffectLedger,
-    readonly authorization: Pick<AuthorizationCore, 'commitVerify' | 'reportEffectOutcome'>,
+    readonly authorization: ServicesAuthorization,
     handlers: Readonly<Record<string, MockServiceHandler>> = DEFAULT_HANDLERS,
   ) {
     this.#handlers = handlers;
@@ -91,6 +105,109 @@ export class MockServicesHost {
       effect: executed.record,
       report,
     };
+  }
+
+  async executePrepared(worldId: string, preparationId: string): Promise<NativeServicesExecutionResult> {
+    const pending = this.#nativeInFlight.get(preparationId);
+    if (pending !== undefined) return pending;
+    const operation = this.#executePrepared(worldId, preparationId);
+    this.#nativeInFlight.set(preparationId, operation);
+    try {
+      return await operation;
+    } finally {
+      this.#nativeInFlight.delete(preparationId);
+    }
+  }
+
+  async #executePrepared(worldId: string, preparationId: string): Promise<NativeServicesExecutionResult> {
+    const consume = this.authorization.commitVerifyPreparation;
+    if (consume === undefined) {
+      return nativeServicesExecutionResult.parse({ execution_preparation_id: preparationId, state: 'preparation-unavailable', effect_outcome: null, recorded_at: null });
+    }
+    let committed: NativeCommitVerifyResult;
+    try {
+      committed = await consume.call(
+        this.authorization,
+        worldId,
+        preparationId,
+        this.ledger.bootId,
+        this.ledger.ledgerId,
+      );
+    } catch (error) {
+      if (error instanceof ServicesAuthorizationHttpError &&
+        ['not-found', 'conflict', 'currentness', 'unavailable'].includes(error.code ?? '')) {
+        return nativeServicesExecutionResult.parse({ execution_preparation_id: preparationId, state: 'preparation-unavailable', effect_outcome: null, recorded_at: null });
+      }
+      return nativeServicesExecutionResult.parse({ execution_preparation_id: preparationId, state: 'indeterminate', effect_outcome: 'unknown-reconciliation-required', recorded_at: null });
+    }
+    if (committed.execution_preparation_id !== preparationId) {
+      return nativeServicesExecutionResult.parse({ execution_preparation_id: preparationId, state: 'indeterminate', effect_outcome: 'unknown-reconciliation-required', recorded_at: null });
+    }
+    if (committed.state === 'commit-denied') {
+      return nativeServicesExecutionResult.parse({ execution_preparation_id: preparationId, state: 'commit-denied', effect_outcome: null, recorded_at: null });
+    }
+    if (committed.state === 'commit-escalated') {
+      return nativeServicesExecutionResult.parse({ execution_preparation_id: preparationId, state: 'commit-escalated', effect_outcome: null, recorded_at: null });
+    }
+    if (committed.state === 'already-consumed') {
+      if (committed.effect_outcome !== null) {
+        const state = committed.effect_outcome === 'success' || committed.effect_outcome === 'failed'
+          ? 'effect-recorded'
+          : committed.effect_outcome === 'no-effect'
+            ? 'no-effect'
+            : 'indeterminate';
+        return nativeServicesExecutionResult.parse({ execution_preparation_id: preparationId, state, effect_outcome: committed.effect_outcome, recorded_at: committed.recorded_at });
+      }
+      const existing = this.ledger.probe(committed.idempotency_key);
+      if (existing.state === 'absent') {
+        return nativeServicesExecutionResult.parse({ execution_preparation_id: preparationId, state: 'indeterminate', effect_outcome: 'unknown-reconciliation-required', recorded_at: null });
+      }
+      const record = existing.record;
+      const report = await this.authorization.reportEffectOutcome({
+        worldId: record.world_id,
+        commitmentId: committed.commitment_id,
+        effectId: record.effect_id,
+        idempotencyKey: record.idempotency_key,
+        effectRequestDigest: record.effect_request_digest,
+        servicesHostBootId: record.services_host_boot_id,
+        servicesLedgerId: record.services_ledger_id,
+        outcome: record.outcome,
+        recordedAt: record.recorded_at,
+        ...(record.detail === undefined ? {} : { detail: record.detail }),
+        delivery: 'retry',
+        actor: SERVICES_HOST,
+      });
+      if (!report.accepted) {
+        return nativeServicesExecutionResult.parse({ execution_preparation_id: preparationId, state: 'indeterminate', effect_outcome: 'unknown-reconciliation-required', recorded_at: record.recorded_at });
+      }
+      return nativeServicesExecutionResult.parse({ execution_preparation_id: preparationId, state: 'effect-recorded', effect_outcome: record.outcome, recorded_at: record.recorded_at });
+    }
+    const handler = this.#handlers[`${committed.intent.service}:${committed.intent.action_class}`] ?? (() => ({
+      outcome: 'failed' as const,
+      detail: 'The mock services host has no implementation for this service action.',
+    }));
+    const executed = this.ledger.execute(committed.token, committed.intent, handler);
+    if (!executed.accepted) {
+      return nativeServicesExecutionResult.parse({ execution_preparation_id: preparationId, state: 'indeterminate', effect_outcome: 'unknown-reconciliation-required', recorded_at: null });
+    }
+    const report = await this.authorization.reportEffectOutcome({
+      worldId: executed.record.world_id,
+      commitmentId: committed.commitment_id,
+      effectId: executed.record.effect_id,
+      idempotencyKey: executed.record.idempotency_key,
+      effectRequestDigest: executed.record.effect_request_digest,
+      servicesHostBootId: executed.record.services_host_boot_id,
+      servicesLedgerId: executed.record.services_ledger_id,
+      outcome: executed.record.outcome,
+      recordedAt: executed.record.recorded_at,
+      ...(executed.record.detail === undefined ? {} : { detail: executed.record.detail }),
+      delivery: executed.delivery,
+      actor: SERVICES_HOST,
+    });
+    if (!report.accepted) {
+      return nativeServicesExecutionResult.parse({ execution_preparation_id: preparationId, state: 'indeterminate', effect_outcome: 'unknown-reconciliation-required', recorded_at: executed.record.recorded_at });
+    }
+    return nativeServicesExecutionResult.parse({ execution_preparation_id: preparationId, state: 'effect-recorded', effect_outcome: executed.record.outcome, recorded_at: executed.record.recorded_at });
   }
 
   async #obtainCommitment(rulingId: string, intent: EffectIntent): Promise<CommitVerifyResult> {

@@ -8,12 +8,14 @@ import { digestFor, sha256Hex, verifyDigest } from './hash.js';
 import { createEmbeddedMac, type Keyring, verifyEmbeddedMac } from './keyring.js';
 import {
   conversationMutationInvalidationOps,
+  executionPreparationInvalidationOps,
   outputReleaseInvalidationOps,
   proposalIntakeInvalidationOps,
   proposalRevisionPreparationInvalidationOps,
 } from './conversationInvalidation.js';
 import {
   frozenProposal,
+  classToken,
   gateRuling,
   accessEntry,
   commitToken,
@@ -53,6 +55,7 @@ import {
   type RecordEntry,
   type ScreeningSignal,
   type ScreeningCallTerminalProjection,
+  type ExecutionPreparationProjection,
   type StoreItem,
   type SystemUseDecisionReference,
   type WalOp,
@@ -79,6 +82,7 @@ export class AuthorizationError extends Error {
       | 'invalid-counter-delta'
       | 'dialogue-case-scope'
       | 'unauthorized-actor'
+      | 'native-commit-requires-preparation'
       | 'unsupported-ordering-rule',
     message: string,
   ) {
@@ -306,7 +310,8 @@ export interface RecordAccessInput {
     | ConversationTransportAccessEvidence
     | ProposalIntakeAccessEvidence
     | ProposalRevisionPreparationProjection
-    | ScreeningCallTerminalProjection;
+    | ScreeningCallTerminalProjection
+    | ExecutionPreparationProjection;
   readonly suppressedCount?: number;
   readonly suppressionWindowMs?: number;
   readonly suppressionFinal?: boolean;
@@ -318,6 +323,7 @@ export type CommitDefect =
   | 'counter-invalid'
   | 'expired-ruling'
   | 'system-use-unavailable'
+  | 'native-proposal-requires-preparation'
   | 'unauthorized-caller';
 
 export type CommitVerifyResult =
@@ -336,6 +342,22 @@ export interface CommitVerifyInput {
   readonly servicesLedgerId: string;
   readonly actor: TransactionActor;
 }
+
+export interface NativeCommitVerifyInput {
+  readonly proposal: FrozenProposal;
+  readonly service: string;
+  readonly actionClass: string;
+  readonly caseId: string;
+  readonly authorizedAgentId: string;
+  readonly servicesHostBootId: string;
+  readonly servicesLedgerId: string;
+  readonly actor: TransactionActor;
+}
+
+export type NativeCommitVerifyBuildResult = {
+  readonly ruling: RuleProposalResult;
+  readonly commitment: Extract<CommitVerifyResult, { ok: true }> | null;
+};
 
 export interface EffectOutcomeReportInput {
   readonly worldId: string;
@@ -1049,6 +1071,7 @@ export class AuthorizationCore {
               ...outputReleaseInvalidationOps(state, () => true, 'policy-reload', at),
               ...proposalIntakeInvalidationOps(state, () => true, 'binding-invalidated', at),
               ...proposalRevisionPreparationInvalidationOps(state, () => true, 'authority-changed', at),
+              ...executionPreparationInvalidationOps(state, () => true, 'policy-reload', at),
               {
                 op: 'policy.reload' as const,
                 policy: {
@@ -1079,6 +1102,7 @@ export class AuthorizationCore {
               ...outputReleaseInvalidationOps(state, () => true, 'policy-reload', at),
               ...proposalIntakeInvalidationOps(state, () => true, 'binding-invalidated', at),
               ...proposalRevisionPreparationInvalidationOps(state, () => true, 'authority-changed', at),
+              ...executionPreparationInvalidationOps(state, () => true, 'policy-reload', at),
               {
                 op: 'policy.reload' as const,
                 policy: {
@@ -1187,6 +1211,12 @@ export class AuthorizationCore {
           'authority-changed',
           at,
         ),
+        ...executionPreparationInvalidationOps(
+          state,
+          (preparation) => preparation.mandate_id === parsed.mandate_id,
+          'mandate-amendment',
+          at,
+        ),
         { op: 'mandate.amend', mandate: parsed },
       ],
       result: undefined };
@@ -1219,6 +1249,12 @@ export class AuthorizationCore {
           (preparation) =>
             preparation.mandate_id === mandateId && preparation.mandate_version === version,
           'authority-changed',
+          at,
+        ),
+        ...executionPreparationInvalidationOps(
+          state,
+          (preparation) => preparation.mandate_id === mandateId && preparation.mandate_version === version,
+          'mandate-revocation',
           at,
         ),
         { op: 'mandate.revoke', mandate_id: mandateId, version, revoked_at: at },
@@ -1291,9 +1327,20 @@ export class AuthorizationCore {
       readonly recordActor?: TransactionActor;
       readonly extraBasis?: readonly string[];
       readonly authorizedAgentId?: string;
+      readonly allowNativeCommitRuling?: boolean;
     } = {},
   ): TransactionBuild<RuleProposalResult> {
     const proposal = input.proposal;
+    if (
+      input.gate === 'commit' &&
+      state.proposalOrigins.has(proposal.proposal_id) &&
+      options.allowNativeCommitRuling !== true
+    ) {
+      throw new AuthorizationError(
+        'native-commit-requires-preparation',
+        'a native proposal may receive Commit authority only through its execution preparation',
+      );
+    }
     const policy = this.#policy;
     const screeningValidation = this.#validatedScreening(input, state, at);
     const screening = screeningValidation.resolution;
@@ -2025,6 +2072,9 @@ export class AuthorizationCore {
             recordActor: { credential: 'proc:authz', claimed_role: null },
             extraBasis: [recordEntryId],
             authorizedAgentId: this.#resolveAuthorizedAgent(originalActor),
+            // A disposed native Commit escalation may retain its successor as evidence,
+            // but the legacy consumption seam below categorically refuses it.
+            allowNativeCommitRuling: ruling.gate === 'commit',
           },
         );
         const successorId = successorBuild.result.ruling.ruling_id;
@@ -2641,9 +2691,28 @@ export class AuthorizationCore {
     const intent = effectIntent.parse(input.intent);
     const servicesHostBootId = id.parse(input.servicesHostBootId);
     const servicesLedgerId = id.parse(input.servicesLedgerId);
-    const completed = await this.#store.transactWithState<CommitVerifyResult>('commit_verify', input.actor, (state, at) => {
+    const completed = await this.#store.transactWithState<CommitVerifyResult>('commit_verify', input.actor, (state, at) =>
+      this.#buildCommitVerify(input, intent, servicesHostBootId, servicesLedgerId, state, at, false),
+    );
+    return completed.result;
+  }
+
+  #buildCommitVerify(
+    input: CommitVerifyInput,
+    intent: EffectIntent,
+    servicesHostBootId: string,
+    servicesLedgerId: string,
+    state: WorldState,
+    at: string,
+    allowNativeOrigin: boolean,
+  ): TransactionBuild<CommitVerifyResult> {
       const ruling = state.rulings.get(input.rulingId);
       if (ruling === undefined) return { ops: [], result: { ok: false, defect: 'replayed-ruling' } as const };
+      const proposalId = state.proposalByHash.get(ruling.binding.frozen_proposal_hash);
+      const proposal = proposalId === undefined ? undefined : state.proposals.get(proposalId);
+      if (proposal !== undefined && state.proposalOrigins.has(proposal.proposal_id) && !allowNativeOrigin) {
+        return { ops: [], result: { ok: false, defect: 'native-proposal-requires-preparation' } as const };
+      }
       if (ruling.status !== 'issued') {
         return { ops: [], result: { ok: false, defect: 'replayed-ruling' } as const };
       }
@@ -2664,8 +2733,6 @@ export class AuthorizationCore {
         return { ops: expiryOps, result: { ok: false, defect: 'expired-ruling' } as const };
       }
 
-      const proposalId = state.proposalByHash.get(ruling.binding.frozen_proposal_hash);
-      const proposal = proposalId === undefined ? undefined : state.proposals.get(proposalId);
       const expectedIntent = expectedEffectIntent(state, ruling);
       if (
         proposal === undefined ||
@@ -2891,7 +2958,79 @@ export class AuthorizationCore {
         },
       );
       return { ops, result: { ok: true, token, commitmentId, recordEntryId } as const };
-    });
+  }
+
+  async nativeCommitVerify(
+    input: NativeCommitVerifyInput,
+    assertCurrent: (state: WorldState, at: string) => void,
+    terminalOps: (
+      state: WorldState,
+      at: string,
+      result: NativeCommitVerifyBuildResult,
+    ) => readonly WalOp[],
+  ): Promise<NativeCommitVerifyBuildResult> {
+    if (input.actor.credential !== 'proc:services_host') {
+      throw new AuthorizationError('unauthorized-actor', 'only the services host may consume an execution preparation');
+    }
+    const proposal = frozenProposal.parse(input.proposal);
+    verifyProposalHash(proposal);
+    const service = id.parse(input.service);
+    const actionClass = classToken.parse(input.actionClass);
+    const servicesHostBootId = id.parse(input.servicesHostBootId);
+    const servicesLedgerId = id.parse(input.servicesLedgerId);
+    const completed = await this.#store.transactWithState<NativeCommitVerifyBuildResult>(
+      'execution_preparation_commit_verify',
+      input.actor,
+      (state, at) => {
+        assertCurrent(state, at);
+        const ruled = this.#buildRuling(
+          {
+            gate: 'commit',
+            proposal,
+            service,
+            actionClass,
+            caseId: input.caseId,
+            actor: input.actor,
+            signals: [],
+            screeningPerformed: false,
+            screeningEvidenceRefs: [],
+          },
+          state,
+          at,
+          { authorizedAgentId: input.authorizedAgentId, allowNativeCommitRuling: true },
+        );
+        applyWorldTransaction(state, ruled.ops, at);
+        let commitment: Extract<CommitVerifyResult, { ok: true }> | null = null;
+        let commitOps: readonly WalOp[] = [];
+        if (ruled.result.ruling.verdict === 'allow') {
+          const intent = expectedEffectIntent(state, ruled.result.ruling);
+          if (intent === undefined) throw new AuthorizationError('proposal-conflict', 'native Commit lost its exact intent');
+          const verified = this.#buildCommitVerify(
+            {
+              rulingId: ruled.result.ruling.ruling_id,
+              intent,
+              servicesHostBootId,
+              servicesLedgerId,
+              actor: input.actor,
+            },
+            intent,
+            servicesHostBootId,
+            servicesLedgerId,
+            state,
+            at,
+            true,
+          );
+          if (!verified.result.ok) {
+            throw new AuthorizationError('proposal-conflict', `atomic native Commit verification failed: ${verified.result.defect}`);
+          }
+          commitment = verified.result;
+          commitOps = verified.ops;
+          applyWorldTransaction(state, commitOps, at);
+        }
+        const result = { ruling: ruled.result, commitment };
+        return { ops: [...ruled.ops, ...commitOps, ...terminalOps(state, at, result)], result };
+      },
+    );
     return completed.result;
   }
 

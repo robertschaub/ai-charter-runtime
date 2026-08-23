@@ -13,6 +13,7 @@ import {
   type ProposalIntakeAccessEvidence,
   type ProposalRevisionPreparationProjection,
   type ScreeningCallTerminalProjection,
+  type ExecutionPreparationProjection,
 } from './schemas/index.js';
 import { type AuthorizationCore } from './authorizationCore.js';
 import type { TransactionActor } from './walStore.js';
@@ -111,6 +112,15 @@ export const AUTHORIZATION_ROUTES = [
     id: 'proposal-revision.prepare',
     method: 'POST',
     template: '/w/{world_id}/cases/{case_id}/proposal-runs/{id}/revision-preparations',
+    allowed: ['proc:orchestrator'],
+    authorityChanging: false,
+    originGuarded: true,
+    accessLoggedOnServe: true,
+  },
+  {
+    id: 'execution-preparation.issue',
+    method: 'POST',
+    template: '/w/{world_id}/cases/{case_id}/proposal-runs/{id}/execution-preparations',
     allowed: ['proc:orchestrator'],
     authorityChanging: false,
     originGuarded: true,
@@ -273,6 +283,13 @@ export const AUTHORIZATION_ROUTES = [
     authorityChanging: true,
   },
   {
+    id: 'execution-preparation.commit-verify',
+    method: 'POST',
+    template: '/w/{world_id}/execution-preparations/{id}/commit-verify',
+    allowed: ['proc:services_host'],
+    authorityChanging: true,
+  },
+  {
     id: 'effect.outcome',
     method: 'POST',
     template: '/w/{world_id}/effects/{id}/outcome',
@@ -420,7 +437,8 @@ export interface AuthorizationOperationResult<T> {
     | ConversationTransportAccessEvidence
     | ProposalIntakeAccessEvidence
     | ProposalRevisionPreparationProjection
-    | ScreeningCallTerminalProjection;
+    | ScreeningCallTerminalProjection
+    | ExecutionPreparationProjection;
 }
 
 export interface AuthorizationAdapterResponse<T> {

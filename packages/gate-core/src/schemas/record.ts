@@ -28,6 +28,7 @@ import { conversationTransportAccessEvidence } from './conversationTransport.js'
 import { proposalIntakeAccessEvidence } from './proposalIntake.js';
 import { proposalRevisionPreparationProjection } from './proposalRevision.js';
 import { screeningCallTerminalProjection } from './screeningCall.js';
+import { executionPreparationProjection } from './executionPreparation.js';
 import { systemUseDecisionReference } from './systemUseDecision.js';
 
 export const EFFECT_OUTCOMES = ['success', 'failed', 'no-effect', 'unknown-reconciliation-required'] as const;
@@ -318,6 +319,7 @@ export const accessEntry = z
         proposalIntakeAccessEvidence,
         proposalRevisionPreparationProjection,
         screeningCallTerminalProjection,
+        executionPreparationProjection,
       ])
       .optional(),
   })
@@ -349,7 +351,9 @@ export const accessEntry = z
     if (entry.operation_evidence !== undefined) {
       const evidence = entry.operation_evidence;
       const expectedRoute =
-        evidence.kind === 'screening_call_terminal'
+        evidence.kind === 'execution_preparation'
+          ? 'POST /w/{world_id}/cases/{case_id}/proposal-runs/{id}/execution-preparations'
+          : evidence.kind === 'screening_call_terminal'
           ? evidence.output_digest === null
             ? 'POST /w/{world_id}/screening-calls/{id}/failures'
             : 'POST /w/{world_id}/screening-calls/{id}/outputs'
@@ -384,7 +388,7 @@ export const accessEntry = z
         entry.route !== expectedRoute ||
         entry.authenticated_actor !== 'proc:orchestrator' ||
         entry.outcome !== 'served' ||
-        entry.http_status !== (evidence.kind === 'proposal_revision_preparation' ? 201 : 200)
+        entry.http_status !== (evidence.kind === 'proposal_revision_preparation' || evidence.kind === 'execution_preparation' ? 201 : 200)
       ) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,

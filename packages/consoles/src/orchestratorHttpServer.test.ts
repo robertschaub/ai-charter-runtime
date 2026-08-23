@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { CaseConsoleStateStore } from './caseConsoleState.js';
 import { CaseConversationStore } from './caseConversation.js';
+import { CaseExecutionStore } from './caseExecution.js';
 import { CaseModelSelectionPreparationStore } from './caseModelSelection.js';
 import { CaseModelTurnStore } from './caseModelTurn.js';
 import { CaseProposalStore } from './caseProposal.js';
@@ -134,13 +135,28 @@ describe('orchestrator case-console routes', () => {
       issued_at: '2026-08-08T10:00:00.000Z',
       expires_at: '2026-08-08T10:02:00.000Z',
     }));
+    const prepareExecution = vi.fn(async () => ({
+      kind: 'execution_preparation' as const,
+      execution_preparation_id: 'xpr_browser',
+      proposal_run_id: 'prun_proposal',
+      state: 'issued' as const,
+      issued_at: '2026-08-08T10:00:01.000Z',
+      expires_at: '2026-08-08T10:02:00.000Z',
+    }));
     const authorization = {
       currentModelSelection: vi.fn(async () => current),
       conversation: vi.fn(async () => conversation),
       runProposalPrecommit,
       proposalRunStatus,
       prepareProposalRevision,
+      prepareExecution,
     } as unknown as OrchestratorAuthorizationHttpClient;
+    const executePrepared = vi.fn(async () => ({
+      execution_preparation_id: 'xpr_browser',
+      state: 'effect-recorded' as const,
+      effect_outcome: 'success' as const,
+      recorded_at: '2026-08-08T10:00:02.000Z',
+    }));
     const quarantine = new ModelOutputQuarantine();
     const runProposal = vi.fn(async () => ({
       disposition: 'proposal-frozen' as const,
@@ -165,7 +181,7 @@ describe('orchestrator case-console routes', () => {
     });
     const server = new OrchestratorHttpServer({
       authorization,
-      services: {} as OrchestratorServicesHttpClient,
+      services: { executePrepared } as unknown as OrchestratorServicesHttpClient,
       modelTurnCoordinator: coordinator,
       worldId: 'w-demo',
       demoCaseId: 'case_demo',
@@ -175,6 +191,7 @@ describe('orchestrator case-console routes', () => {
       caseConsoleAssets: { shell: '', script: '', stylesheet: '' },
       caseSessions: sessions,
       caseProposals,
+      caseExecutions: new CaseExecutionStore(() => '2026-08-08T10:00:00.000Z'),
       host: '127.0.0.1',
       port: 0,
     });
@@ -224,7 +241,8 @@ describe('orchestrator case-console routes', () => {
       const used = await post(usePath, { preparation_id: 'pprep_proposal' }, first.session_token, address.origin);
       expect(used.status).toBe(200);
       const usedBody = await used.json();
-      expect(Object.keys(usedBody).sort()).toEqual(['continuation', 'gates', 'proposal', 'proposal_run_id', 'state']);
+      expect(Object.keys(usedBody).sort()).toEqual(['continuation', 'execution', 'gates', 'proposal', 'proposal_run_id', 'state']);
+      expect(usedBody.execution).toEqual({ state: 'unavailable', effect_outcome: null, recorded_at: null });
       expect(usedBody).toMatchObject({ proposal_run_id: 'prun_proposal', state: 'verified' });
       for (const hidden of ['proposal_intake_id', 'call_id', 'output_digest', 'selection_id', 'commit_token']) {
         expect(JSON.stringify(usedBody)).not.toContain(hidden);
@@ -240,6 +258,41 @@ describe('orchestrator case-console routes', () => {
       expect(recovered.status).toBe(200);
       await expect(recovered.json()).resolves.toEqual(usedBody);
       expect(proposalRunStatus).toHaveBeenCalledOnce();
+
+      const executionPreparationPath = `${statusPath}/execution-preparations`;
+      expect((await post(executionPreparationPath, {}, first.session_token)).status).toBe(403);
+      expect((await post(executionPreparationPath, {}, first.session_token, 'null')).status).toBe(403);
+      expect((await post(executionPreparationPath, { service: 'filing' }, first.session_token, address.origin)).status).toBe(422);
+      const executionPrepared = await post(executionPreparationPath, {}, first.session_token, address.origin);
+      expect(executionPrepared.status).toBe(201);
+      await expect(executionPrepared.json()).resolves.toEqual({
+        execution_preparation_id: 'xpr_browser',
+        proposal_run_id: 'prun_proposal',
+        state: 'prepared',
+        expires_at: '2026-08-08T10:02:00.000Z',
+      });
+      expect(prepareExecution).toHaveBeenCalledWith(
+        'w-demo',
+        'case_demo',
+        'prun_proposal',
+        { role: 'case_officer', session_id: first.session_id },
+      );
+      expect((await post(executionPreparationPath, {}, second.session_token, address.origin)).status).toBe(409);
+
+      const executionPath = `${statusPath}/execute`;
+      expect((await post(executionPath, { execution_preparation_id: 'xpr_browser' }, first.session_token)).status).toBe(403);
+      expect((await post(executionPath, { execution_preparation_id: 'xpr_browser', retry: true }, first.session_token, address.origin)).status).toBe(422);
+      expect((await post(executionPath, { execution_preparation_id: 'xpr_browser' }, second.session_token, address.origin)).status).toBe(409);
+      const execution = await post(executionPath, { execution_preparation_id: 'xpr_browser' }, first.session_token, address.origin);
+      expect(execution.status).toBe(200);
+      await expect(execution.json()).resolves.toEqual({
+        execution_preparation_id: 'xpr_browser',
+        state: 'effect-recorded',
+        effect_outcome: 'success',
+        recorded_at: '2026-08-08T10:00:02.000Z',
+      });
+      expect(executePrepared).toHaveBeenCalledExactlyOnceWith('w-demo', 'xpr_browser');
+      expect((await post(executionPath, { execution_preparation_id: 'xpr_browser' }, first.session_token, address.origin)).status).toBe(409);
 
       const revisionPath = `${statusPath}/revision-preparations`;
       expect((await post(revisionPath, {}, first.session_token)).status).toBe(403);
@@ -270,6 +323,7 @@ describe('orchestrator case-console routes', () => {
         state: 'prepared',
         gates: [],
         continuation: { state: 'prepared', source_proposal_run_id: 'prun_proposal' },
+        execution: { state: 'unavailable', effect_outcome: null, recorded_at: null },
       });
     } finally {
       await server.close();

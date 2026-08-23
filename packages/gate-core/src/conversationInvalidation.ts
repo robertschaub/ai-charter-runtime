@@ -51,7 +51,31 @@ export function conversationMutationInvalidationOps(
     'conversation-changed',
     at,
   ));
+  ops.push(...executionPreparationInvalidationOps(
+    state,
+    (preparation) => preparation.case_id === caseId,
+    reason,
+    at,
+  ));
   return ops;
+}
+
+export function executionPreparationInvalidationOps(
+  state: WorldState,
+  predicate: (
+    preparation: WorldState['executionPreparations'] extends Map<string, infer T> ? T : never,
+  ) => boolean,
+  reason: string,
+  at: string,
+): WalOp[] {
+  return [...state.executionPreparations.values()]
+    .filter((preparation) => preparation.state === 'issued' && predicate(preparation))
+    .map((preparation) => ({
+      op: 'execution_preparation.invalidate' as const,
+      execution_preparation_id: preparation.execution_preparation_id,
+      reason,
+      changed_at: at,
+    }));
 }
 
 export function outputReleaseInvalidationOps(

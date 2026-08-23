@@ -10,6 +10,8 @@ import { deriveAudienceToken, verifyChain } from 'gate-core';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { parseBrowserSelectionPreparation } from './caseHandoffConsole.js';
+import { ModelTurnCoordinator } from './modelTurnCoordinator.js';
+import { OrchestratorAuthorizationHttpClient } from './runtimeHttpClients.js';
 
 const ROOT = fileURLToPath(new URL('../../..', import.meta.url));
 const children: ChildProcess[] = [];
@@ -171,6 +173,7 @@ describe('ADR-002 and ADR-010 real-listener browser boundary', () => {
       };
       const authzEnv = {
         ...common,
+        RUNTIME_SCREENING_MODE: 'live',
         AUTHZ_TOKEN_PRINCIPAL: tokens.principal,
         AUTHZ_TOKEN_CASE_OFFICER: tokens.caseOfficer,
         AUTHZ_TOKEN_APPLICANT: tokens.applicant,
@@ -337,7 +340,6 @@ describe('ADR-002 and ADR-010 real-listener browser boundary', () => {
       );
       expect(secondRedeem.status).toBe(201);
       const secondSession = (await secondRedeem.json()) as { session_token: string; session_id: string };
-      const walBeforeBrowserSelection = readFileSync(join(recordsRoot, 'w-demo', 'wal.jsonl'), 'utf8');
 
       const modelTarget = mandate['default_acting_model'] as {
         card_id: string;
@@ -595,6 +597,132 @@ describe('ADR-002 and ADR-010 real-listener browser boundary', () => {
         switchedBody.selection.selection_id,
         returnedBody.selection.selection_id,
       ]).size).toBe(3);
+
+      const processAuthorization = new OrchestratorAuthorizationHttpClient({
+        origin: authorizationOrigin,
+        token: tokens.orchestratorAtAuthz,
+      });
+      const processConversation = await processAuthorization.conversation(
+        'w-demo',
+        'case_demo',
+        { role: 'case_officer', session_id: created.session_id },
+      );
+      const nativeProposal = JSON.stringify({
+        declared_objective: 'File the synthetic three-process grant application.',
+        proposed_action: 'Submit the synthetic three-process grant filing.',
+        target: { recipient: 'grant-office', resource: 'application-42' },
+        exact_parameters: { amount_minor_units: 5000, reference: 'three-process-m6-2' },
+        material_input_ids: ['said_public'],
+        derived_claim_ids: [],
+        data_to_be_disclosed: ['applicant_name'],
+        cost_obligation: { amount_minor_units: 5000, description: 'Synthetic grant amount.' },
+        material_consequences: ['Creates one local synthetic filing effect.'],
+        reversibility_class: 'partially-reversible',
+        commercial_influence: { applicable: false, note: 'Not applicable.' },
+      });
+      const proposalCoordinator = new ModelTurnCoordinator({
+        worldId: 'w-demo',
+        caseId: 'case_demo',
+        authorization: processAuthorization,
+        lanes: [
+          {
+            lane: 'publicai',
+            cardId: modelTarget.card_id,
+            cardVersion: modelTarget.card_version,
+            requestedId: modelTarget.requested_id,
+            adapter: {
+              lane: 'publicai',
+              requestedId: modelTarget.requested_id,
+              act: async () => ({
+                lane: 'publicai' as const,
+                requestedId: modelTarget.requested_id,
+                servedId: modelTarget.requested_id,
+                content: nativeProposal,
+                toolCalls: [],
+              }),
+            },
+          },
+          {
+            lane: 'openai',
+            cardId: alternateTarget.card_id,
+            cardVersion: alternateTarget.card_version,
+            requestedId: alternateTarget.requested_id,
+            adapter: {
+              lane: 'openai',
+              requestedId: alternateTarget.requested_id,
+              act: async () => ({
+                lane: 'openai' as const,
+                requestedId: alternateTarget.requested_id,
+                servedId: 'gpt-5.5-2026-04-23',
+                content: '[]',
+                toolCalls: [],
+              }),
+            },
+          },
+        ],
+      });
+      const proposalClaim = { role: 'case_officer' as const, session_id: created.session_id };
+      const frozen = await proposalCoordinator.runProposal({
+        proposalRunId: 'prun_three_process_m6_2',
+        conversationVersion: processConversation.conversation_version,
+        turnId: 'turn_three_process_m6_2',
+        selectionId: returnedBody.selection.selection_id,
+        cardId: modelTarget.card_id,
+        cardVersion: modelTarget.card_version,
+        requestedId: modelTarget.requested_id,
+      }, { onBehalfOf: proposalClaim });
+      expect(frozen).toMatchObject({ disposition: 'proposal-frozen' });
+      const submitScreening = await processAuthorization.runProposalPrecommit(
+        'w-demo',
+        frozen.proposal.proposal_id,
+        proposalClaim,
+      );
+      expect(submitScreening).toMatchObject({ state: 'screening_required', current_gate: 'submit' });
+      if (submitScreening.kind !== 'proposal_precommit_screening_required') {
+        throw new Error('expected native Submit screening pause');
+      }
+      await proposalCoordinator.runScreening(submitScreening.screening_call, { onBehalfOf: proposalClaim });
+      const verifyScreening = await processAuthorization.runProposalPrecommit(
+        'w-demo',
+        frozen.proposal.proposal_id,
+        proposalClaim,
+      );
+      expect(verifyScreening).toMatchObject({ state: 'screening_required', current_gate: 'verify' });
+      if (verifyScreening.kind !== 'proposal_precommit_screening_required') {
+        throw new Error('expected native Verify screening pause');
+      }
+      await proposalCoordinator.runScreening(verifyScreening.screening_call, { onBehalfOf: proposalClaim });
+      const precommit = await processAuthorization.runProposalPrecommit(
+        'w-demo',
+        frozen.proposal.proposal_id,
+        proposalClaim,
+      );
+      expect(precommit).toMatchObject({ state: 'verified', execution: { state: 'available' } });
+
+      const nativeRunPath = '/w/w-demo/cases/case_demo/proposal-runs/prun_three_process_m6_2';
+      const nativePreparationResponse = await postJson(
+        orchestratorOrigin,
+        `${nativeRunPath}/execution-preparations`,
+        {},
+        { token: created.session_token, requestOrigin: orchestratorOrigin },
+      );
+      expect(nativePreparationResponse.status).toBe(201);
+      const nativePreparation = (await nativePreparationResponse.json()) as {
+        execution_preparation_id: string;
+      };
+      const nativeExecutionResponse = await postJson(
+        orchestratorOrigin,
+        `${nativeRunPath}/execute`,
+        { execution_preparation_id: nativePreparation.execution_preparation_id },
+        { token: created.session_token, requestOrigin: orchestratorOrigin },
+      );
+      expect(nativeExecutionResponse.status).toBe(200);
+      await expect(nativeExecutionResponse.json()).resolves.toMatchObject({
+        execution_preparation_id: nativePreparation.execution_preparation_id,
+        state: 'effect-recorded',
+        effect_outcome: 'success',
+      });
+      const walAfterNativeExecution = readFileSync(join(recordsRoot, 'w-demo', 'wal.jsonl'), 'utf8');
       const messages = await postJson(
         orchestratorOrigin,
         '/w/w-demo/cases/case_demo/messages',
@@ -843,7 +971,7 @@ describe('ADR-002 and ADR-010 real-listener browser boundary', () => {
       expect(wal).toContain('case_session_handoff.expire');
       expect(wal).toContain(bootHandoff.handoff_id);
       for (const operation of ['model_call.begin', 'conversation_items_put', 'output_release']) {
-        expect(occurrences(wal, operation)).toBe(occurrences(walBeforeBrowserSelection, operation));
+        expect(occurrences(wal, operation)).toBe(occurrences(walAfterNativeExecution, operation));
       }
 
       for (const processHandle of processHandles) {

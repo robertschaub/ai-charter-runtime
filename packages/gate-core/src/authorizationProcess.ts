@@ -21,6 +21,7 @@ import { ConversationProjectionService } from './conversationProjectionService.j
 import { ConversationTransportService } from './conversationTransport.js';
 import { ProposalIntakeService } from './proposalIntake.js';
 import { ProposalPrecommitService } from './proposalPrecommit.js';
+import { ExecutionPreparationService } from './executionPreparation.js';
 import {
   recordVerificationAccess,
   verifyRecords,
@@ -278,13 +279,13 @@ export async function startAuthorizationProcess(
       policy,
       authorizationBootId: bootId,
     });
+    const authorizedAgentId = id.parse(env['RUNTIME_AUTHORIZED_AGENT_ID'] ?? 'agent_demo');
     const authorization = new AuthorizationCore({
       store,
       keyring,
       policy,
       systemUse,
-      resolveAuthorizedAgent: (actor) =>
-        actor.credential === 'proc:orchestrator' ? (env['RUNTIME_AUTHORIZED_AGENT_ID'] ?? 'agent_demo') : undefined,
+      resolveAuthorizedAgent: (actor) => actor.credential === 'proc:orchestrator' ? authorizedAgentId : undefined,
       resolveScreening: (proposal, gate, caseId) => configuredScreeningMode === 'live'
         ? screeningCalls.resolve(proposal, gate, caseId)
         : conversationProjections.screening({ proposal, gate, ...(caseId === undefined ? {} : { caseId }) }),
@@ -302,6 +303,14 @@ export async function startAuthorizationProcess(
       proposalIntakes,
       ...(configuredScreeningMode === 'live' ? { screeningCalls } : {}),
     });
+    const executionPreparations = new ExecutionPreparationService({
+      store,
+      authorization,
+      proposalIntakes,
+      authorizationBootId: bootId,
+      authorizedAgentId,
+    });
+    await executionPreparations.expire();
     const initialConversationItems = z.array(storeItem).parse(JSON.parse(readFileSync(conversationFixture, 'utf8')));
     await authorization.putConversationItems({
       caseId: demoCaseId,
@@ -320,6 +329,7 @@ export async function startAuthorizationProcess(
       await caseHandoffs.expireIssued();
       await conversationTransport.expireReleases({ credential: 'proc:authz', claimed_role: null });
       await proposalIntakes.expire();
+      await executionPreparations.expire();
     };
     await maintain();
     const adapter = new AuthorizationHttpAdapter({
@@ -341,6 +351,7 @@ export async function startAuthorizationProcess(
       conversationTransport,
       proposalIntakes,
       proposalPrecommit,
+      executionPreparations,
       screeningCalls,
       reads,
       adapter,

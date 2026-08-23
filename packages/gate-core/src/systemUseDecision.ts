@@ -3,6 +3,7 @@
 import { canonicalize } from './canonicalize.js';
 import { digestFor, verifyDigest } from './hash.js';
 import {
+  executionPreparationInvalidationOps,
   outputReleaseInvalidationOps,
   proposalIntakeInvalidationOps,
   proposalRevisionPreparationInvalidationOps,
@@ -403,6 +404,12 @@ export class SystemUseDecisionService {
             'authority-changed',
             at,
           ),
+          ...executionPreparationInvalidationOps(
+            state,
+            (preparation) => verifyDigest(preparation.system_use_decision.record_digest, record.trace.record_digest),
+            `system-use-${status}`,
+            at,
+          ),
           { op: 'system_use_decision.transition', decision_id: decisionId, version, status, changed_at: at },
         ],
         result: undefined,
@@ -438,6 +445,12 @@ export class SystemUseDecisionService {
             state,
             (preparation) => verifyDigest(preparation.system_use_decision.record_digest, prior.trace.record_digest),
             'authority-changed',
+            at,
+          ),
+          ...executionPreparationInvalidationOps(
+            state,
+            (preparation) => verifyDigest(preparation.system_use_decision.record_digest, prior.trace.record_digest),
+            'system-use-superseded',
             at,
           ),
           {

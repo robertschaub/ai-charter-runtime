@@ -15,6 +15,7 @@ import type { MockServicesHost } from './servicesHost.js';
 import { resolveSyntheticRegistryEvidence } from './registryEvidence.js';
 
 const executeRequest = z.object({ ruling_id: id, intent: effectIntent }).strict();
+const nativeExecuteRequest = z.object({}).strict();
 
 async function readJson(request: IncomingMessage, maxBytes: number): Promise<unknown> {
   if (!request.headers['content-type']?.toLowerCase().startsWith('application/json')) {
@@ -115,6 +116,7 @@ export class ServicesHttpServer {
             return;
           }
           const execute = /^\/w\/([^/]+)\/services\/([^/]+)\/execute$/.exec(url.pathname);
+          const nativeExecute = /^\/w\/([^/]+)\/execution-preparations\/([^/]+)\/execute$/.exec(url.pathname);
           const probe = /^\/w\/([^/]+)\/effects\/([0-9a-f]{64})$/.exec(url.pathname);
           const registryRead = /^\/w\/([^/]+)\/registry-records\/([^/]+)$/.exec(url.pathname);
           const presented = bearer(request.headers.authorization);
@@ -130,6 +132,11 @@ export class ServicesHttpServer {
               sendJson(response, denial.http_status, {
                 error: denial.outcome === 'rate-limited' ? 'rate-limited' : denial.outcome,
               });
+              return;
+            }
+            if (request.headers.origin !== undefined) {
+              const denial = await this.#recordForbidden('services.execute', 'proc:orchestrator');
+              sendJson(response, denial.http_status, { error: denial.outcome });
               return;
             }
             const requestedWorld = worldId.safeParse(execute[1]);
@@ -150,6 +157,29 @@ export class ServicesHttpServer {
             sendJson(response, 200, await options.services.execute(parsed.ruling_id, parsed.intent));
             return;
           }
+          if (nativeExecute !== null && request.method === 'POST') {
+            if (!knownOrchestrator) {
+              const denial = knownAuthorization
+                ? await this.#recordForbidden('services.native-execute', 'proc:authz')
+                : await this.#recordUnauthenticated('services.native-execute');
+              sendJson(response, denial.http_status, { error: denial.outcome === 'rate-limited' ? 'rate-limited' : denial.outcome });
+              return;
+            }
+            if (request.headers.origin !== undefined) {
+              const denial = await this.#recordForbidden('services.native-execute', 'proc:orchestrator');
+              sendJson(response, denial.http_status, { error: denial.outcome });
+              return;
+            }
+            const requestedWorld = worldId.safeParse(nativeExecute[1]);
+            const preparation = id.safeParse(nativeExecute[2]);
+            if (!requestedWorld.success || requestedWorld.data !== configuredWorld || !preparation.success) {
+              sendJson(response, 404, { error: 'not-found' });
+              return;
+            }
+            nativeExecuteRequest.parse(await readJson(request, maxBodyBytes));
+            sendJson(response, 200, await options.services.executePrepared(configuredWorld, preparation.data));
+            return;
+          }
           if (probe !== null && request.method === 'GET') {
             if (!knownAuthorization) {
               const denial = knownOrchestrator
@@ -158,6 +188,11 @@ export class ServicesHttpServer {
               sendJson(response, denial.http_status, {
                 error: denial.outcome === 'rate-limited' ? 'rate-limited' : denial.outcome,
               });
+              return;
+            }
+            if (request.headers.origin !== undefined) {
+              const denial = await this.#recordForbidden('services.effect-probe', 'proc:authz');
+              sendJson(response, denial.http_status, { error: denial.outcome });
               return;
             }
             const requestedWorld = worldId.safeParse(probe[1]);
@@ -177,6 +212,11 @@ export class ServicesHttpServer {
               sendJson(response, denial.http_status, {
                 error: denial.outcome === 'rate-limited' ? 'rate-limited' : denial.outcome,
               });
+              return;
+            }
+            if (request.headers.origin !== undefined) {
+              const denial = await this.#recordForbidden('services.registry-read', 'proc:authz');
+              sendJson(response, denial.http_status, { error: denial.outcome });
               return;
             }
             const requestedWorld = worldId.safeParse(registryRead[1]);

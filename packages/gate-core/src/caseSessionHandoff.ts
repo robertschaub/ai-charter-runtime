@@ -13,7 +13,10 @@ import {
   type WalOp,
 } from './schemas/index.js';
 import type { TransactionActor, WalStore } from './walStore.js';
-import { proposalRevisionPreparationInvalidationOps } from './conversationInvalidation.js';
+import {
+  executionPreparationInvalidationOps,
+  proposalRevisionPreparationInvalidationOps,
+} from './conversationInvalidation.js';
 
 const MINT_ACTOR: TransactionActor['credential'] = 'role:case_officer';
 const REDEEM_ACTOR: TransactionActor['credential'] = 'proc:orchestrator';
@@ -307,6 +310,12 @@ export class CaseSessionHandoffService {
         return {
           ops: [
             ...proposalRevisionPreparationInvalidationOps(
+              state,
+              (preparation) => preparation.session_id === sessionId,
+              'session-ended',
+              at,
+            ),
+            ...executionPreparationInvalidationOps(
               state,
               (preparation) => preparation.session_id === sessionId,
               'session-ended',

@@ -14,6 +14,7 @@ export const DOMAIN_PREFIX = 'ai-charter-runtime/v1/' as const;
 export const DOMAIN_TAGS = [
   'proposal',
   'effect-intent',
+  'execution-effect-intent-basis',
   'record-entry',
   'access-entry',
   'wal-entry',

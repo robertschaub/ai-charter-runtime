@@ -336,7 +336,7 @@ describe('ADR-002 authorization HTTP adapter', () => {
     const processRoutes = AUTHORIZATION_ROUTES.filter(
       (route) => route.allowed !== 'open' && Array.from(route.allowed).some((allowed) => allowed === 'proc:orchestrator'),
     );
-    expect(processRoutes.filter((route) => !['case-handoff.redeem', 'case-session.close'].includes(route.id))).toHaveLength(23);
+    expect(processRoutes.filter((route) => !['case-handoff.redeem', 'case-session.close'].includes(route.id))).toHaveLength(24);
     expect(AUTHORIZATION_ROUTES.find((route) => route.id === 'case-session.close')).toMatchObject({
       allowed: ['proc:orchestrator'],
       authorityChanging: false,
@@ -347,6 +347,7 @@ describe('ADR-002 authorization HTTP adapter', () => {
       'proposal-intake.consume': false,
       'proposal-intake.read': false,
       'proposal-revision.prepare': false,
+      'execution-preparation.issue': false,
       'proposal-run.read': false,
       'proposal-precommit.run': true,
       'proposal-precommit.read': false,
@@ -357,6 +358,7 @@ describe('ADR-002 authorization HTTP adapter', () => {
       'proposal-intake.consume': '/w/w-demo/proposal-intakes/pint_one/consume',
       'proposal-intake.read': '/w/w-demo/proposal-intakes/pint_one',
       'proposal-revision.prepare': '/w/w-demo/cases/case_demo/proposal-runs/prun_one/revision-preparations',
+      'execution-preparation.issue': '/w/w-demo/cases/case_demo/proposal-runs/prun_one/execution-preparations',
       'proposal-run.read': '/w/w-demo/cases/case_demo/proposal-runs/prun_one',
       'proposal-precommit.run': '/w/w-demo/proposals/prp_one/precommit',
       'proposal-precommit.read': '/w/w-demo/proposals/prp_one/precommit',
@@ -393,8 +395,42 @@ describe('ADR-002 authorization HTTP adapter', () => {
         origin: 'http://127.0.0.1:7801',
       }, operation)).resolves.toMatchObject({ status: 200, body: { ok: true } });
     }
-    expect(operation).toHaveBeenCalledTimes(8);
-    expect(store.snapshot().accessRecords.filter((record) => 'outcome' in record && record.outcome === 'served')).toHaveLength(8);
+    expect(operation).toHaveBeenCalledTimes(9);
+    expect(store.snapshot().accessRecords.filter((record) => 'outcome' in record && record.outcome === 'served')).toHaveLength(9);
+  });
+
+  it('confines native Commit consumption to the services host and records every denied process', async () => {
+    const { adapter, store } = setup();
+    const route = AUTHORIZATION_ROUTES.find((candidate) => candidate.id === 'execution-preparation.commit-verify')!;
+    expect(route).toMatchObject({
+      method: 'POST',
+      allowed: ['proc:services_host'],
+      authorityChanging: true,
+    });
+    const operation = vi.fn(async () => ({ status: 200, body: { ok: true } }));
+    for (const token of ['1', '2', '3', '4']) {
+      await expect(adapter.dispatch({
+        method: 'POST',
+        pathname: '/w/w-demo/execution-preparations/xpr_one/commit-verify',
+        authorization: `Bearer ${token.repeat(64)}`,
+      }, operation)).resolves.toMatchObject({ status: 403, body: { error: 'forbidden' } });
+    }
+    await expect(adapter.dispatch({
+      method: 'POST',
+      pathname: '/w/w-demo/execution-preparations/xpr_one/commit-verify',
+      authorization: `Bearer ${'5'.repeat(64)}`,
+      origin: 'https://foreign.example',
+    }, operation)).resolves.toMatchObject({ status: 403, body: { error: 'forbidden' } });
+    await expect(adapter.dispatch({
+      method: 'POST',
+      pathname: '/w/w-demo/execution-preparations/xpr_one/commit-verify',
+      authorization: `Bearer ${'5'.repeat(64)}`,
+    }, operation)).resolves.toMatchObject({ status: 200, body: { ok: true } });
+    expect(operation).toHaveBeenCalledOnce();
+    expect(store.snapshot().accessRecords).toEqual(expect.arrayContaining([
+      expect.objectContaining({ authenticated_actor: 'proc:orchestrator', outcome: 'forbidden' }),
+      expect.objectContaining({ authenticated_actor: 'proc:services_host', outcome: 'forbidden' }),
+    ]));
   });
 
   it('begins a model call only for the orchestrator and records every attempt', async () => {

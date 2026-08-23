@@ -63,6 +63,7 @@ import { compareServedId } from './servedModel.js';
 import { ConversationTransportService } from './conversationTransport.js';
 import { ProposalIntakeService } from './proposalIntake.js';
 import {
+  executionPreparationInvalidationOps,
   outputReleaseInvalidationOps,
   proposalIntakeInvalidationOps,
   proposalRevisionPreparationInvalidationOps,
@@ -490,6 +491,12 @@ export class ConversationProjectionService {
               state,
               (preparation) => preparation.case_id === this.#caseId,
               'selection-changed',
+              at,
+            ),
+            ...executionPreparationInvalidationOps(
+              state,
+              (preparation) => preparation.case_id === this.#caseId,
+              'model-selection-changed',
               at,
             ),
             { op: 'model_selection.append', selection },

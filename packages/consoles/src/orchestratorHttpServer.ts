@@ -9,6 +9,7 @@ import {
   effectIntent,
   frozenProposal,
   id,
+  browserExecutionRequest,
   timingSafeEqualUtf8,
   worldId,
   type CurrentModelSelectionProjection,
@@ -53,6 +54,7 @@ import {
   CaseProposalStore,
   toBrowserProposalRunStatus,
 } from './caseProposal.js';
+import { CaseExecutionStore } from './caseExecution.js';
 
 const executeRequest = z
   .object({ proposal: frozenProposal, service: id, action_class: classToken })
@@ -230,6 +232,7 @@ export interface OrchestratorHttpServerOptions {
   readonly modelTurns?: CaseModelTurnStore;
   readonly caseConversations?: CaseConversationStore;
   readonly caseProposals?: CaseProposalStore;
+  readonly caseExecutions?: CaseExecutionStore;
   readonly caseState?: CaseConsoleStateStore;
   readonly host: string;
   readonly port: number;
@@ -260,6 +263,7 @@ export class OrchestratorHttpServer {
     const modelTurns = options.modelTurns ?? new CaseModelTurnStore();
     const conversations = options.caseConversations ?? new CaseConversationStore();
     const proposals = options.caseProposals ?? new CaseProposalStore();
+    const executions = options.caseExecutions ?? new CaseExecutionStore();
     const caseState = options.caseState ?? new CaseConsoleStateStore();
     const caseOperations = new CaseOperationMutex();
     const coordinator = options.modelTurnCoordinator;
@@ -274,6 +278,7 @@ export class OrchestratorHttpServer {
           modelTurns.expire(coordinator.quarantine);
           conversations.expire();
           proposals.expire();
+          executions.expire();
         }, 1_000);
     this.#cleanupTimer?.unref();
     this.#cleanupRuntimeState = () => {
@@ -283,6 +288,7 @@ export class OrchestratorHttpServer {
       }
       coordinator.quarantine.clear();
       conversations.clear();
+      executions.clear();
       proposals.clear();
     };
     this.#server = createServer((request, response) => {
@@ -390,6 +396,7 @@ export class OrchestratorHttpServer {
               preparations.burnForSession(session.session_id);
               conversations.burnForSession(session.session_id);
               proposals.burnForSession(session.session_id);
+              executions.burnForSession(session.session_id);
               if (coordinator !== undefined) {
                 modelTurns.discardSession(session.session_id, coordinator.quarantine);
               }
@@ -1296,6 +1303,81 @@ export class OrchestratorHttpServer {
             });
             return;
           }
+          const executionPreparationMatch = /^\/w\/([^/]+)\/cases\/([^/]+)\/proposal-runs\/([^/]+)\/execution-preparations$/.exec(url.pathname);
+          if (request.method === 'POST' && executionPreparationMatch !== null) {
+            const requestedWorld = worldId.safeParse(executionPreparationMatch[1]);
+            const requestedCase = id.safeParse(executionPreparationMatch[2]);
+            const requestedRun = id.safeParse(executionPreparationMatch[3]);
+            if (!requestedWorld.success || requestedWorld.data !== configuredWorld || !requestedCase.success || requestedCase.data !== configuredCase || !requestedRun.success) {
+              sendJson(response, 404, { error: 'not-found' });
+              return;
+            }
+            if (requestOrigin(request) !== ownOrigin) {
+              sendJson(response, 403, { error: 'forbidden' });
+              return;
+            }
+            const presented = bearer(request.headers.authorization);
+            const session = presented === null ? null : sessions.authenticate(presented, configuredWorld, configuredCase);
+            if (presented === null || session === null) {
+              sendJson(response, 401, { error: 'unauthenticated' });
+              return;
+            }
+            browserProposalPreparationRequest.parse(await readJson(request, maxBodyBytes));
+            await caseOperations.run(async () => {
+              try {
+                const prepared = await options.authorization.prepareExecution(
+                  configuredWorld,
+                  configuredCase,
+                  requestedRun.data,
+                  { role: session.role, session_id: session.session_id },
+                );
+                sendJson(response, 201, executions.register(session, prepared));
+              } catch (error) {
+                if (error instanceof RuntimeDependencyError && error.httpStatus === 401) {
+                  sessions.close(presented, configuredWorld);
+                  executions.burnForSession(session.session_id);
+                  sendJson(response, 401, { error: 'session-restart-required' });
+                  return;
+                }
+                sendJson(response, 409, { error: 'execution-preparation-unavailable' });
+              }
+            });
+            return;
+          }
+          const executionUseMatch = /^\/w\/([^/]+)\/cases\/([^/]+)\/proposal-runs\/([^/]+)\/execute$/.exec(url.pathname);
+          if (request.method === 'POST' && executionUseMatch !== null) {
+            const requestedWorld = worldId.safeParse(executionUseMatch[1]);
+            const requestedCase = id.safeParse(executionUseMatch[2]);
+            const requestedRun = id.safeParse(executionUseMatch[3]);
+            if (!requestedWorld.success || requestedWorld.data !== configuredWorld || !requestedCase.success || requestedCase.data !== configuredCase || !requestedRun.success) {
+              sendJson(response, 404, { error: 'not-found' });
+              return;
+            }
+            if (requestOrigin(request) !== ownOrigin) {
+              sendJson(response, 403, { error: 'forbidden' });
+              return;
+            }
+            const presented = bearer(request.headers.authorization);
+            const session = presented === null ? null : sessions.authenticate(presented, configuredWorld, configuredCase);
+            if (presented === null || session === null) {
+              sendJson(response, 401, { error: 'unauthenticated' });
+              return;
+            }
+            const parsed = browserExecutionRequest.parse(await readJson(request, maxBodyBytes));
+            await caseOperations.run(async () => {
+              const begun = executions.begin(parsed.execution_preparation_id, requestedRun.data, session);
+              if (begun === null) {
+                sendJson(response, 409, { error: 'execution-preparation-unavailable' });
+                return;
+              }
+              try {
+                sendJson(response, 200, await options.services.executePrepared(configuredWorld, begun.executionPreparationId));
+              } catch {
+                sendJson(response, 502, { error: 'dependency-failure' });
+              }
+            });
+            return;
+          }
           const proposalStatusMatch = /^\/w\/([^/]+)\/cases\/([^/]+)\/proposal-runs\/([^/]+)$/.exec(url.pathname);
           if (request.method === 'GET' && proposalStatusMatch !== null) {
             const requestedWorld = worldId.safeParse(proposalStatusMatch[1]);
@@ -1330,6 +1412,7 @@ export class OrchestratorHttpServer {
                 preparations.burnForSession(session.session_id);
                 conversations.burnForSession(session.session_id);
                 proposals.burnForSession(session.session_id);
+                executions.burnForSession(session.session_id);
                 if (coordinator !== undefined) modelTurns.discardSession(session.session_id, coordinator.quarantine);
                 sendJson(response, 401, { error: 'session-restart-required' });
                 return;
@@ -1348,7 +1431,11 @@ export class OrchestratorHttpServer {
                   { role: session.role, session_id: session.session_id },
                 );
                 proposals.discardResolved(requestedRun.data);
-                sendJson(response, 200, toBrowserProposalRunStatus(processStatus));
+                const execution = processStatus.kind === 'proposal_precommit_status' ? processStatus.execution : null;
+                const canConsume = execution?.execution_preparation_id !== null && execution?.execution_preparation_id !== undefined
+                  ? executions.canConsume(execution.execution_preparation_id, requestedRun.data, session)
+                  : false;
+                sendJson(response, 200, toBrowserProposalRunStatus(processStatus, canConsume));
               } catch (error) {
                 if (local?.state === 'running' || local?.state === 'failed') {
                   sendJson(response, 200, local);

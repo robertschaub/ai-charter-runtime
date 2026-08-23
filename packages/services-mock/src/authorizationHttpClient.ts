@@ -3,6 +3,7 @@
 import {
   AUTHORITY_DEFECTS,
   commitToken,
+  nativeCommitVerifyResult,
   id,
   worldId as worldIdSchema,
   type AuthorizationCore,
@@ -10,6 +11,7 @@ import {
   type CommitVerifyResult,
   type EffectOutcomeReportInput,
   type EffectOutcomeReportResult,
+  type NativeCommitVerifyResult,
 } from 'gate-core';
 import { z } from 'zod';
 
@@ -18,6 +20,8 @@ const commitDefect = z.enum([
   'not-allowed',
   'counter-invalid',
   'expired-ruling',
+  'system-use-unavailable',
+  'native-proposal-requires-preparation',
   'unauthorized-caller',
 ]);
 const commitResult = z.discriminatedUnion('ok', [
@@ -47,7 +51,11 @@ const outcomeResult = z.discriminatedUnion('accepted', [
 ]);
 const accessReportResult = z.object({ entry_id: id }).strict();
 
-export type ServicesDataAccessRoute = 'services.execute' | 'services.effect-probe' | 'services.registry-read';
+export type ServicesDataAccessRoute =
+  | 'services.execute'
+  | 'services.native-execute'
+  | 'services.effect-probe'
+  | 'services.registry-read';
 export type ServicesAccessRoute = ServicesDataAccessRoute | 'services.unauthenticated-ingress';
 
 export type ServicesAccessDenial =
@@ -93,6 +101,16 @@ export interface ServicesAuthorizationHttpClientOptions {
   readonly fetchImplementation?: typeof fetch;
 }
 
+export class ServicesAuthorizationHttpError extends Error {
+  constructor(
+    readonly status: number,
+    readonly code: string | null,
+  ) {
+    super(`authorization service rejected transport request with HTTP ${status}`);
+    this.name = 'ServicesAuthorizationHttpError';
+  }
+}
+
 export class ServicesAuthorizationHttpClient
   implements Pick<AuthorizationCore, 'commitVerify' | 'reportEffectOutcome'>
 {
@@ -127,7 +145,11 @@ export class ServicesAuthorizationHttpClient
       throw new Error('authorization service unavailable');
     }
     const parsed = await responseJson(response, this.#maxResponseBytes);
-    if (!response.ok) throw new Error(`authorization service rejected transport request with HTTP ${response.status}`);
+    if (!response.ok) {
+      const code = typeof parsed === 'object' && parsed !== null &&
+        'error' in parsed && typeof parsed.error === 'string' ? parsed.error : null;
+      throw new ServicesAuthorizationHttpError(response.status, code);
+    }
     return parsed;
   }
 
@@ -140,6 +162,22 @@ export class ServicesAuthorizationHttpClient
         services_ledger_id: input.servicesLedgerId,
       }),
     ) as CommitVerifyResult;
+  }
+
+  async commitVerifyPreparation(
+    worldId: string,
+    preparationId: string,
+    servicesHostBootId: string,
+    servicesLedgerId: string,
+  ): Promise<NativeCommitVerifyResult> {
+    const world = worldIdSchema.parse(worldId);
+    const preparation = id.parse(preparationId);
+    return nativeCommitVerifyResult.parse(
+      await this.#post(`/w/${world}/execution-preparations/${preparation}/commit-verify`, {
+        services_host_boot_id: id.parse(servicesHostBootId),
+        services_ledger_id: id.parse(servicesLedgerId),
+      }),
+    );
   }
 
   async reportEffectOutcome(input: EffectOutcomeReportInput): Promise<EffectOutcomeReportResult> {

@@ -223,7 +223,8 @@ describe('M5.11 browser proposal preparation and projection', () => {
     const browser = toBrowserProposalRunStatus(process);
     expect(browserProposalRunStatus.parse(browser)).toEqual(browser);
     if (browser.state === 'screening') throw new Error('expected verified browser proposal status');
-    expect(Object.keys(browser).sort()).toEqual(['continuation', 'gates', 'proposal', 'proposal_run_id', 'state']);
+    expect(Object.keys(browser).sort()).toEqual(['continuation', 'execution', 'gates', 'proposal', 'proposal_run_id', 'state']);
+    expect(browser.execution).toEqual({ state: 'unavailable', effect_outcome: null, recorded_at: null });
     expect(browser.continuation).toEqual({ state: 'unavailable', source_proposal_run_id: null });
     expect(Object.keys(browser.proposal!).sort()).toEqual([
       'action_id', 'basis', 'commercial_influence', 'cost_obligation', 'data_to_be_disclosed',

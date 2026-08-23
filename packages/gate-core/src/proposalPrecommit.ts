@@ -5,6 +5,7 @@ import { z } from 'zod';
 import { AuthorizationCore } from './authorizationCore.js';
 import { proposalRevisionPreparationInvalidationOps } from './conversationInvalidation.js';
 import { ProposalIntakeError, ProposalIntakeService } from './proposalIntake.js';
+import { executionProjectionForProposal } from './executionPreparation.js';
 import { ScreeningCallService, screeningCallStart } from './screeningCall.js';
 import {
   classToken,
@@ -19,6 +20,7 @@ import {
   validityWindow,
   verdict,
   proposalRevisionContinuationProjection,
+  executionProcessProjection,
   type GateRuling,
 } from './schemas/index.js';
 import { WalStore, type TransactionActor } from './walStore.js';
@@ -74,6 +76,18 @@ export const proposalPrecommitProjection = z
       state: 'unavailable',
       source_proposal_run_id: null,
     }),
+    execution: executionProcessProjection.default({
+      state: 'unavailable',
+      execution_preparation_id: null,
+      expires_at: null,
+      commit_ruling: null,
+      escalation_id: null,
+      commitment_id: null,
+      effect_id: null,
+      idempotency_key: null,
+      effect_outcome: null,
+      recorded_at: null,
+    }),
     updated_at: timestamp,
   })
   .strict();
@@ -110,6 +124,7 @@ export interface ProposalPrecommitServiceOptions {
   readonly authorization: AuthorizationCore;
   readonly proposalIntakes: ProposalIntakeService;
   readonly screeningCalls?: ScreeningCallService;
+  readonly now?: () => string;
 }
 
 function projectGate(ruling: GateRuling) {
@@ -129,12 +144,14 @@ export class ProposalPrecommitService {
   readonly #authorization: AuthorizationCore;
   readonly #proposalIntakes: ProposalIntakeService;
   readonly #screeningCalls: ScreeningCallService | undefined;
+  readonly #now: () => string;
 
   constructor(options: ProposalPrecommitServiceOptions) {
     this.#store = options.store;
     this.#authorization = options.authorization;
     this.#proposalIntakes = options.proposalIntakes;
     this.#screeningCalls = options.screeningCalls;
+    this.#now = options.now ?? (() => new Date().toISOString());
   }
 
   #requireOrchestrator(actor: TransactionActor): void {
@@ -202,6 +219,14 @@ export class ProposalPrecommitService {
                     source_proposal_run_id: null,
                   }
                 : { state: 'unavailable' as const, source_proposal_run_id: null };
+    const observedAt = timestamp.parse(this.#now());
+    let proposalCurrent = true;
+    try {
+      this.#proposalIntakes.assertProposalCurrent(state, observedAt, proposalId);
+    } catch (error) {
+      if (!(error instanceof ProposalIntakeError)) throw error;
+      proposalCurrent = false;
+    }
     return proposalPrecommitProjection.parse({
       kind: 'proposal_precommit_status',
       proposal_id: proposalId,
@@ -232,7 +257,8 @@ export class ProposalPrecommitService {
       gates: latest.map(projectGate),
       escalation_id: escalation?.escalation_id ?? null,
       continuation,
-      updated_at: latest.at(-1)?.issued_at ?? origin.frozen_at,
+      execution: executionProjectionForProposal(state, proposalId, observedAt, proposalCurrent),
+      updated_at: state.lastTimestamp ?? latest.at(-1)?.issued_at ?? origin.frozen_at,
     });
   }
 
