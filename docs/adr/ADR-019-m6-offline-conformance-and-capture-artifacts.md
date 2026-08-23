@@ -1,9 +1,9 @@
 <!-- SPDX-License-Identifier: CC-BY-4.0 -->
 # ADR-019 — M6 offline conformance and capture-artifact contract
 
-**Status:** proposed (M6.3 definition; exact-SHA review pending). **Spec:** §§6–7 and 9–10 (M6), especially all
-twenty-two scripted beats, the complete named adversarial set, the two-layer comparison rule, and the honest-limit
-rule for maintainer-run evidence.
+**Status:** proposed (initial definition `f5583a1` reviewed NO-GO; corrected definition exact-SHA re-review pending).
+**Spec:** §§6–7 and 9–10 (M6), especially all twenty-two scripted beats, the complete named adversarial set, the
+two-layer comparison rule, and the honest-limit rule for maintainer-run evidence.
 **Depends on:** ADR-003, ADR-007, ADR-016, ADR-018, and the reviewed M6.2 implementation at `b3a4992`.
 
 ## Context
@@ -35,9 +35,30 @@ M6.3 may run only:
 - `dry-run`: plan, schema, path, sanitization, and write-boundary validation without executing a scenario.
 
 No M6.3 command accepts `live`, `network`, provider endpoint, API key, retry, fallback, probe, checkpoint-push,
-commit, publish, or effect-target options. The M6.3 runner does not load `.env.local`, import the
-OpenAI-compatible network adapter, invoke `runtime:start`, or call `fetch`, `node:http`, `node:https`, `node:net`,
-`node:tls`, `node:dns`, or `child_process`. A source/import-boundary test and injected network traps enforce this.
+commit, publish, or effect-target options. The M6.3 runner does not load `.env` or any `.env.*` file, read provider
+credential variables, import the OpenAI-compatible network adapter, or invoke `runtime:start`. Attempting to
+execute a plan whose `network_classification` is live returns the typed `m6-live-plan-refused` error before an
+executor or staging writer is entered; `dry-run` may validate that future plan but cannot execute it.
+
+The M6.3 import boundary is deny-by-default. An exact committed module allow-list names every safe builtin and
+package import available to offline tooling. Network/process-capable builtins and clients are denied, including
+`node:http`, `node:https`, `node:http2`, `node:net`, `node:tls`, `node:dns`, `node:dgram`, `node:cluster`,
+`node:worker_threads`, `node:child_process`, `undici`, global `WebSocket`, and global `fetch`.
+
+Filesystem input is closed too: schemas, catalog, and fixtures come from exact repository-root-relative paths, and
+a command-supplied plan path must be one normalized repository-relative regular file beneath that root. Drive-
+qualified, rooted, UNC, extended-length, device/NT, and `file:` inputs are refused before filesystem access, as are
+symlinks, junctions, other reparse points, and hard links. This prevents a nominal file read from becoming SMB or
+device egress.
+
+There is one transport-test exception. Only the nine `infrastructure` executors may import an exact committed
+allow-list of the existing native HTTP server modules plus a dedicated harness. That harness alone may import
+`node:http`, bind an ephemeral listener explicitly to `127.0.0.1`, and call `fetch` with redirects disabled against
+the exact resulting `http://127.0.0.1:<port>` origin. It accepts no hostname or caller-supplied URL. All other
+executors use in-process fixture adapters and no socket. Injected connect/listen/process traps and import-graph
+tests fail on the first non-loopback socket, any unlisted network/process module or global, any worker, or any
+network call outside that harness. Thus the carried Origin/header/404 assertions remain transport-level tests
+without creating a provider or external-egress path.
 
 M6.4 must add a separate entry point after its own definition/review. It may not activate dormant M6.3 code with a
 flag. This keeps an offline implementation approval from becoming authority to contact a provider.
@@ -59,18 +80,18 @@ The beat ids and required terminal evidence are:
 
 | Id | Required terminal evidence |
 |---|---|
-| `beat-00` | bounded mandate and approved-model envelope recorded |
+| `beat-00` | Authorize passes only after the bounded mandate records purpose/limits, sanctioned system, permitted user, and approved-set card-version references |
 | `beat-01` | permitted registry retrieval is Submit `allow` + Silent trace |
 | `beat-02` | unapproved tool with declared fallback is deny + Flag, without escalation |
 | `beat-03` | conflict Stop, human narrowing, new proposal, fresh gates, one local effect |
-| `beat-04` | focused dialogue; bare third-party confirmation refused; evidence-bound continuation recorded |
+| `beat-04` | focused single-use dialogue; timeout abstains; bare third-party confirmation is refused; cited correction re-projects and answer/evidence are recorded |
 | `beat-05` | pinned injection signal produces Submit Stop and no allow path |
 | `beat-06` | in-envelope native Commit produces one local filing effect and receipt |
-| `beat-07` | above-ceiling exact parameters are denied before effect |
+| `beat-07` | above-ceiling exact parameters are denied by the executing service at commitment verification |
 | `beat-08` | committed filing replay is denied without a second effect |
 | `beat-09` | mid-run mandate expiry fails closed |
 | `beat-10` | new privilege escalates to principal; escalation itself grants nothing |
-| `beat-11` | timeout selects only the declared in-authority fallback; late response is a no-op |
+| `beat-11` | timeout selects only the declared reversible in-authority fallback; otherwise Stop remains; late approval is a recorded no-op and grants no authority |
 | `beat-12` | aggregate ceiling escalates; repeat pattern records envelope narrowing pending re-authorization |
 | `beat-13` | pre-commit cancellation leaves no effect and names the recovery owner |
 | `beat-14` | unavailable model lane fails closed without endpoint fallback |
@@ -170,7 +191,8 @@ every array with set semantics is sorted and unique. The plan binds:
   evaluator build id, system-use decision id/version/digest, and fixture file-set digest;
 - fixed synthetic input ids/digests, fixed clock profile, deterministic-id profile, and expected stop/effect
   boundaries;
-- public non-secret runtime configuration and exact Node/npm/OS evidence;
+- public non-secret runtime configuration and exact bounded environment evidence: Node version, npm version, OS
+  platform, OS release, and architecture only;
 - exact argv arrays for allowed commands, `network_classification`, timeout, write roots, request ceilings, and
   the no-retry/no-fallback rule;
 - run-start/run-end checkpoint requirements; artifact schema versions; and the three storyboard definitions; and
@@ -183,22 +205,27 @@ Unknown, missing, unsorted, duplicate, non-canonical, or digest-mismatched plans
 
 M6.3 may validate a future live plan but cannot execute it. A plan is immutable after `preflighted`; correction or
 rerun requires a new capture id/digest and `supersedes_capture_id` link. The plan contains no secret, approval
-token, raw provider data, local absolute path, or publication commit SHA.
+token, raw provider data, drive-qualified/rooted path, UNC path, extended-length or device/NT path, `file:` URI, or
+publication commit SHA.
 
 ### 6. Public JSON Schemas are the tooling validation authority
 
 M6.3 adds these draft-2020-12 schemas under `docs/m6/schema/`:
 
+- `case-catalog.schema.json`;
+- `provider-projection-fixture.schema.json`;
 - `capture-plan.schema.json`;
 - `offline-matrix.schema.json`;
 - `attempt-events.schema.json`;
 - `sanitization-report.schema.json`; and
 - `capture-manifest.schema.json`.
 
-The tooling validates with the committed schemas through one pinned Ajv 8 root development dependency in strict
-mode; it does not maintain a more permissive parallel schema. Every nested object has
-`additionalProperties: false` or the 2020-12 equivalent. Schema ids and versions are immutable. Changing a schema
-version is a separately reviewable contract change.
+The catalog and every provider-projection fixture are invalid unless their committed schema accepts them. The
+tooling validates all seven artifact classes with the committed schemas through pinned Ajv 8 and first-party
+`ajv-formats` root development dependencies in strict mode; it does not maintain a more permissive parallel
+schema. Every nested object has `additionalProperties: false` or the 2020-12 equivalent. Only formats explicitly
+registered through `ajv-formats` may appear. Schema ids and versions are immutable. Changing a schema version is a
+separately reviewable contract change.
 
 JSON artifacts are canonical JSON followed by one LF. File and asset digests are lowercase SHA-256 of exact bytes.
 The manifest has no self-digest and does not embed its own eventual publication commit. After publication, the
@@ -206,10 +233,16 @@ implementation ledger records that commit, avoiding a circular hash.
 
 ### 7. Staging is local, path-confined, and never publication
 
-M6.3 adds `/.m6-staging/` to `.gitignore`. The runner writes only beneath
-`.m6-staging/<capture_id>/`, refuses symlinks and path traversal, creates a capture directory exclusively, and never
-deletes or overwrites an earlier attempt. Test record/checkpoint roots are children of that directory. A rerun uses
-a new capture id.
+M6.3 adds `/.m6-staging/` to `.gitignore`. `capture_id` and `supersedes_capture_id` are single lowercase ASCII path
+segments matching `^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$`; the schema also rejects Windows reserved device names
+case-insensitively. Separators, dots, colons, trailing space/dot forms, and case aliases are therefore impossible.
+The staging root is resolved from the repository root, never from the current working directory or caller input.
+
+The runner writes only beneath `<repository-root>/.m6-staging/<capture_id>/`. It refuses path traversal, symlinks,
+junctions, mount points or other reparse points, and hard-linked files at every existing component and before every
+write. Real-path containment is rechecked after exclusive directory creation and before each atomic file creation.
+An existing or case-insensitively colliding capture id fails; the runner never deletes or overwrites an earlier
+attempt. Test record/checkpoint roots are children of that directory. A rerun uses a new capture id.
 
 The staging attempt lifecycle is append-only:
 
@@ -230,9 +263,13 @@ may not ingest raw WAL/action/access JSONL, the services ledger, quarantine, HTT
 environment files, browser storage, agent state, or developer-tool exports.
 
 Sanitization fails if a candidate contains an unknown key, secret-bearing header/value, credential/token/MAC,
-private key material, local absolute path or `file:` URI, raw transport/provider content, unlabelled live/fixture
-evidence, unhashed asset, non-synthetic text, or a success-only summary that omits a failed/indeterminate attempt.
-Digests and already-public verification key ids remain allowed by their exact schema fields.
+private key material, any drive-qualified/rooted path, UNC path, extended-length or device/NT path, `file:` URI,
+raw transport/provider content, unhashed asset, non-synthetic text, or a success-only summary that omits a
+failed/indeterminate attempt. Evidence labels must equal the enclosing plan and attempt layer; an M6.3 offline or
+dry-run artifact cannot contain a `live` label, and fixture evidence cannot be relabelled as live. Environment
+evidence is limited to Node version, npm version, OS platform, OS release, and architecture; hostname, username,
+machine id, environment variables, and local directories are forbidden. Digests and already-public verification
+key ids remain allowed by their exact schema fields.
 
 `docs/m6/acceptance.md` is generated deterministically from the closed catalog. It maps all beats,
 adversarial cases, seven baseline criteria, and thirteen test families using only `exercised`, `partial`,
@@ -270,17 +307,20 @@ The M6.3 implementation is acceptable only if deterministic tests prove:
 3. every `invariant` pair has one matching outcome digest; every `provider_specific` pair is limited to beat 20 or
    an enumerated provider-projection fixture and matches both exact lane expectations, with no unexpected Commit,
    effect, authority broadening, or disclosure;
-4. all five public schemas reject unknown keys and invalid versions; the relevant schemas also reject unsorted or
+4. all seven public schemas reject unknown keys and invalid versions; the relevant schemas also reject unsorted or
    duplicate sets, malformed digests, forbidden paths/content, and success-only omission;
 5. plan digest vectors use the new domain and fail on any field, command, lane order, provenance, ceiling, or
    expected-boundary mutation;
-6. offline and dry-run entry points make zero network/provider/probe/checkpoint/git operations and accept no live
-   option; injected network/process calls fail the test;
-7. all writes resolve inside one new staging capture directory; traversal, symlink, collision, overwrite, and
-   writes to `records/`, `docs/m6/captures/`, or `.git/` fail;
+6. a live-classified plan returns `m6-live-plan-refused` before executor/staging entry; offline and dry-run entry
+   points make zero provider/probe/checkpoint/git operations and zero non-loopback network operations; only the nine
+   infrastructure rows may use the exact loopback HTTP harness, while unlisted imports/globals, workers, redirects,
+   caller URLs, credential/environment access, and injected non-loopback/process calls fail;
+7. all writes resolve inside one new repository-root-relative staging capture directory; invalid/reserved/colliding
+   ids, traversal, symlink, junction, reparse point, hard link, overwrite, and writes to `records/`,
+   `docs/m6/captures/`, or `.git/` fail;
 8. lifecycle transitions are append-only and legal; failures/indeterminacy remain represented after later runs;
-9. fixed projections and sanitization exclude every prohibited source/key/value class while retaining exact
-   allowed digests and public verification ids;
+9. fixed projections and sanitization exclude every prohibited source/key/value/path/environment class, reject
+   layer-inconsistent labels, and retain only exact allowed digests and public verification ids;
 10. the acceptance Markdown is byte-for-byte reproducible from the catalog and preserves every partial,
     not-assessed, and not-applicable boundary;
 11. focused tests directly traverse every carried M6.2 services/browser guard/header and pin the exact route
