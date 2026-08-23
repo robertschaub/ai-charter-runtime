@@ -17,7 +17,9 @@ was reviewed at `36126fa`. M6.1's authorization-owned live-screening protocol wa
 synthetic loopback providers only. [ADR-018](docs/adr/ADR-018-native-commitment-continuation.md) freezes the M6.2
 contract, beginning with the complete services-host route set. Its native commitment continuation was implemented
 and reviewed at `b3a4992`, GO — no blocking findings, using synthetic adapters and one local mock effect only. No
-M6.3 capture runner, live run, checkpoint push, or capture artifact exists yet.
+M6.3 capture runner, live run, checkpoint push, or capture artifact exists yet. [ADR-019](docs/adr/ADR-019-m6-offline-conformance-and-capture-artifacts.md)
+proposes the M6.3 offline two-lane matrix, strict artifact schemas, staging, and sanitization boundary; its
+definition is review-pending and authorizes no implementation.
 
 The authoritative build specification lives in the documentation repository:
 [runtime-gates-poc-spec.md](https://github.com/robertschaub/our-ai-charter/blob/main/docs/wip/runtime-gates-poc-spec.md).
@@ -193,7 +195,7 @@ lifecycle exercised only with synthetic loopback providers. M6.2, reviewed at `b
 verified native proposal through an authorization-owned Commit decision and services-host verification to one
 local synthetic effect. It adds no live-provider or capture claim. M6.3 onward remain separately approval- and
 review-gated; live-provider use, checkpoint pushes, artifact review, and publication retain their own action-time
-approval gates.
+approval gates. ADR-019 is the review-pending M6.3 definition only; it deliberately exposes no live runner.
 
 Offline and deterministic verification uses synthetic records and skips only the remote-presence step:
 

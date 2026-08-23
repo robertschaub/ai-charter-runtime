@@ -8,7 +8,8 @@ separate M6.0a anchoring-flow prerequisite received GO at `be7f2ef`. The M6.0b u
 received GO at `36126fa`; both M6.0 prerequisites are complete. M6.1's authorization-owned live-screening
 implementation received GO at `5f51caa` with synthetic loopback providers only. ADR-018's corrected M6.2
 definition received GO at `d0b8cc6`; its implementation received GO at `b3a4992` with no blocking findings.
-M6.3 capability implementation and live capture have not started and remain approval- and review-gated.
+ADR-019 is the M6.3 definition candidate; exact-SHA review is pending. M6.3 implementation and live capture have
+not started and remain approval- and review-gated.
 
 This file tracks implementation status and sequencing in `ai-charter-runtime`. It does not replace or
 reinterpret the authoritative specification. On divergence, the specification and its linked Charter
@@ -53,6 +54,15 @@ The review recorded one non-blocking Low test-matrix gap: tests do not yet pin l
 browser routes also rely on sibling-route coverage for stale-session and foreign-Origin negatives. Direct review
 verified the production guards in every case. M6.3's full matrix must add those assertions without changing the
 implemented route or authority contract.
+
+[ADR-019](adr/ADR-019-m6-offline-conformance-and-capture-artifacts.md) is the documentation-only M6.3 definition
+candidate. It proposes a closed catalog of all twenty-two beats, atomic adversarial cases, and the carried M6.2
+infrastructure assertions; genuine execution under both exact initial lane bindings; strict public JSON Schemas;
+an immutable domain-separated plan; path-confined local staging; fixed-projection sanitization; and offline/dry-run
+entry points with no dormant live mode. Review is pending. This definition authorizes no source implementation,
+provider call, checkpoint operation, capture artifact, publication, or push.
+The same documentation tranche corrects ADR-015's carried inventory wording: twenty-one routes at M5.13,
+twenty-three after M6.1, and the current twenty-four after M6.2. It changes no route or interface.
 
 The preceding reviewed implementation is
 `5f51caadf84db57e9b4fae963d6c699179c58201` (`5f51caa`). Exact-SHA review returned **GO — no blocking findings**
@@ -158,7 +168,7 @@ assessed, the Charter vocabulary and provenance pin are unchanged, and no M6.1 s
 | M3 — vertical slice | Implemented | Deterministic authorize → propose → rule → commit-verify → effect → receipt path, adapters, service ledger, and signed cards are present. |
 | M4 — escalation + governance console | **Complete** | Final exact-SHA review of `e326562` returned GO with no findings; the offline acceptance ledger preserves the remaining partial and not-assessed boundaries. |
 | M5 — screening + empathy + switching | **Complete within the bounded POC acceptance** | M5.1–M5.12 culminate in the authority-bearing baseline `5b27b0e`. ADR-015's zero-route M5.13 definition received GO at `a08fa98`; its fixture/test/acceptance implementation at `5251500` received GO with no findings. The acceptance ledger retains four partial and two not-assessed empathy red-line families. This is not assurance, semantic clearance, or deployment readiness. |
-| M6 — full pass + demo capture | **Definition, M6.0 prerequisites, M6.1, and M6.2 reviewed** | [ADR-016](adr/ADR-016-m6-evidence-capture.md) received GO at `582eaeb`; M6.0a received GO at `be7f2ef`; M6.0b received GO at `36126fa`; M6.1 received GO at `5f51caa` using synthetic loopback providers only; M6.2 received GO at `b3a4992` using synthetic adapters and one local mock effect only. M6.3 has not started. No live provider call, checkpoint push, or capture artifact is authorized. |
+| M6 — full pass + demo capture | **Through M6.2 reviewed; M6.3 definition candidate** | [ADR-016](adr/ADR-016-m6-evidence-capture.md) received GO at `582eaeb`; M6.0a received GO at `be7f2ef`; M6.0b received GO at `36126fa`; M6.1 received GO at `5f51caa` using synthetic loopback providers only; M6.2 received GO at `b3a4992` using synthetic adapters and one local mock effect only. ADR-019 defines M6.3 offline conformance/artifacts; review is pending and implementation has not started. No live provider call, checkpoint push, or capture artifact is authorized. |
 | M7 — article | Not started | Publication claims follow a reviewed and explicitly published M6 artifact. |
 
 These labels describe repository implementation status, not assurance, certification, or independent
@@ -752,10 +762,11 @@ authorization route. The bounded handoff and session implementation was independ
 
 ## Ordered next slices
 
-1. **M6.3 — offline full pass and capture contract.** After separate approval, implement the strict
-   plan/artifact schemas, two-lane twenty-two-beat and adversarial matrix, acceptance ledger, gitignored staging,
-   sanitization checks, and dry-run assets. Close M6.2 review's non-blocking services/browser test-matrix gaps in
-   this full matrix. No live provider call or push. Stop for exact-SHA review.
+1. **M6.3 — offline full pass and capture contract.** Obtain exact-SHA GO on ADR-019. Only after separate approval,
+   implement its strict schemas, closed catalog, genuinely executed two-lane matrix, acceptance ledger, gitignored
+   staging, fixed-projection sanitization, offline/dry-run entry points, and the carried M6.2 test assertions. No
+   live entry point, provider call, checkpoint operation, capture materialization, or push. Stop for exact-SHA
+   implementation review.
 2. **M6.4 — live capture and publication.** Freeze one plan, require M6.0a's current `remotely_acknowledged`
    predicate, obtain action-time approval for its bounded acting and
    screening-provider calls and separate approval for checkpoint pushes, capture through `runtime:start`, sanitize and review the

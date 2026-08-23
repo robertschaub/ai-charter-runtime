@@ -90,8 +90,9 @@ M5.13 adds no production route, handler, schema, credential, model call, provide
 field, dialogue disposition, commitment, token, service call, effect, or persistent-memory/training capability.
 At the M5.13 baseline, ADR-002's reviewed inventory remained exactly twenty-one orchestrator process gate/data
 routes plus the dedicated handoff redemption and close routes; M5.13 added none. M6.1 later added two
-non-authorizing screening terminal routes, bringing the current reviewed inventory to twenty-three. Fixed
-precommit remains the only authority-changing orchestrator process mutation in either inventory.
+non-authorizing screening terminal routes, bringing its reviewed inventory to twenty-three. M6.2 later added one
+non-authorizing execution-preparation route, bringing the current reviewed inventory to twenty-four. Fixed
+precommit remains the only authority-changing orchestrator process mutation in every inventory.
 
 The implementation tranche is limited to synthetic fixtures, conformance tests, the M5 acceptance ledger, and
 truthful status documentation. If those tests expose a production defect, implementation stops and proposes a
