@@ -7,8 +7,8 @@
 separate M6.0a anchoring-flow prerequisite received GO at `be7f2ef`. The M6.0b unsupported-`reverse` implementation
 received GO at `36126fa`; both M6.0 prerequisites are complete. M6.1's authorization-owned live-screening
 implementation received GO at `5f51caa` with synthetic loopback providers only. ADR-018's corrected M6.2
-definition received GO at `d0b8cc6` with no findings; M6.2 capability implementation and live capture have not
-started and remain approval- and review-gated.
+definition received GO at `d0b8cc6`; its implementation received GO at `b3a4992` with no blocking findings.
+M6.3 capability implementation and live capture have not started and remain approval- and review-gated.
 
 This file tracks implementation status and sequencing in `ai-charter-runtime`. It does not replace or
 reinterpret the authoritative specification. On divergence, the specification and its linked Charter
@@ -41,19 +41,26 @@ URLs, commit, paths, and digests above. A later upstream change does not silentl
 ## Reviewed implementation baseline
 
 The latest cross-model adversarially reviewed implementation is
+`b3a49929fccff8a93bb10cca14c8e305d7c8b719` (`b3a4992`). Exact-SHA review returned **GO — no blocking findings**
+for M6.2's proposal-bound execution preparation, atomic services-host Commit/`commit-verify`, local idempotent
+mock-effect enforcement, ambiguity recovery, token confinement, two-gesture browser path, and native/headless
+separation. The review reproduced the real three-process path with authorization-owned Submit and Verify screening,
+418 Vitest tests across 44 files, and both unchanged signed cards. It confirmed no live provider, external effect,
+capture, checkpoint operation, provenance move, or push.
+
+The review recorded one non-blocking Low test-matrix gap: tests do not yet pin legacy-services Origin rejection,
+`Cache-Control: no-store`, open health/unmatched-path behavior, or the exact five-route services inventory; two new
+browser routes also rely on sibling-route coverage for stale-session and foreign-Origin negatives. Direct review
+verified the production guards in every case. M6.3's full matrix must add those assertions without changing the
+implemented route or authority contract.
+
+The preceding reviewed implementation is
 `5f51caadf84db57e9b4fae963d6c699179c58201` (`5f51caa`). Exact-SHA review returned **GO — no blocking findings**
 for M6.1's authorization-owned, paused fixed-precommit screening lifecycle, strict screening terminal routes,
 exact evidence binding, signal monotonicity, fail-closed terminal states, and raw-byte exclusion. The review used
 synthetic loopback providers only and confirmed no Commit, effect, live provider call, retry, or fallback path.
 It recorded one non-blocking API-symmetry observation: the public screening-start helper relies on the actor guards
 of its current status-method callers; no unguarded production caller exists.
-
-[ADR-018](adr/ADR-018-native-commitment-continuation.md) is the reviewed documentation-only M6.2 definition. It
-starts with the complete five-route post-M6.2 services-host inventory, then freezes one native proposal-bound
-execution preparation, one atomic services-host Commit/`commit-verify` transaction, local idempotent mock-effect
-enforcement, read-only ambiguity recovery, and native/headless separation. The corrected definition at `d0b8cc6`
-received GO with no findings; that disposition authorizes no source implementation, provider call, effect, capture,
-checkpoint operation, or push.
 
 The preceding reviewed implementation is
 `36126fad475cf0269e13662464eae9e41f1db26b` (`36126fa`). Exact-SHA review returned **GO — no findings** for
@@ -99,14 +106,14 @@ aggregate-ceiling escalation behaviour. Its regression proves the legacy Verify 
 opening an escalation or dialogue item. Focused exact-SHA re-review returned **GO — finding closed; no new
 findings** and independently reproduced the red state against the parent.
 
-Latest reviewed validation is `npm run typecheck` clean, 4 Git-safety hook tests, 411 Vitest tests across 44 files,
-`git diff --check`, and verification of both unchanged signed cards. The reviewer confirmed M6.1 used synthetic
-loopback providers only and made no live provider call. Neither implementation nor review moved the Charter
-provenance baseline.
+Latest reviewed validation is `npm run typecheck` clean, 4 Git-safety hook tests, 418 Vitest tests across 44 files,
+`git diff --check`, and verification of both unchanged signed cards. The reviewer confirmed M6.2 used synthetic
+adapters and one local mock effect only, with no live provider call. Neither implementation nor review moved the
+Charter provenance baseline.
 
-The published runtime head is `354d64590cbd64b3509cc3672175582bb3a354c4` (`354d645`). It contains the reviewed
-M5.3–M5.11 integration range, the M5.11 retry-idempotency evidence and review closure, and the separate open-finding
-plan note.
+The published runtime head is `2eef22f4987e197a0973b889afd83503335d9b66` (`2eef22f`). It contains the reviewed
+M6.2 definition and its documentation-only review closure. The reviewed M6.2 implementation and this status
+closure remain unpublished until separately approved for push.
 
 The M5.9 definition at `2a508ba7500d6f0775e4cb52b63a7ac222066f64` received one focused browser-redaction
 finding. Commit `be01667d169beb918ec4ceffb384edb8a526020e` bound field-by-field construction and exact-key
@@ -151,7 +158,7 @@ assessed, the Charter vocabulary and provenance pin are unchanged, and no M6.1 s
 | M3 — vertical slice | Implemented | Deterministic authorize → propose → rule → commit-verify → effect → receipt path, adapters, service ledger, and signed cards are present. |
 | M4 — escalation + governance console | **Complete** | Final exact-SHA review of `e326562` returned GO with no findings; the offline acceptance ledger preserves the remaining partial and not-assessed boundaries. |
 | M5 — screening + empathy + switching | **Complete within the bounded POC acceptance** | M5.1–M5.12 culminate in the authority-bearing baseline `5b27b0e`. ADR-015's zero-route M5.13 definition received GO at `a08fa98`; its fixture/test/acceptance implementation at `5251500` received GO with no findings. The acceptance ledger retains four partial and two not-assessed empathy red-line families. This is not assurance, semantic clearance, or deployment readiness. |
-| M6 — full pass + demo capture | **Definition, M6.0 prerequisites, M6.1, and M6.2 definition reviewed** | [ADR-016](adr/ADR-016-m6-evidence-capture.md) received GO at `582eaeb`; M6.0a received GO at `be7f2ef`; M6.0b received GO at `36126fa`; M6.1 received GO at `5f51caa` using synthetic loopback providers only; ADR-018's corrected M6.2 definition received GO at `d0b8cc6` with no findings. M6.2 implementation has not started. No live provider call, checkpoint push, or capture artifact is authorized. |
+| M6 — full pass + demo capture | **Definition, M6.0 prerequisites, M6.1, and M6.2 reviewed** | [ADR-016](adr/ADR-016-m6-evidence-capture.md) received GO at `582eaeb`; M6.0a received GO at `be7f2ef`; M6.0b received GO at `36126fa`; M6.1 received GO at `5f51caa` using synthetic loopback providers only; M6.2 received GO at `b3a4992` using synthetic adapters and one local mock effect only. M6.3 has not started. No live provider call, checkpoint push, or capture artifact is authorized. |
 | M7 — article | Not started | Publication claims follow a reviewed and explicitly published M6 artifact. |
 
 These labels describe repository implementation status, not assurance, certification, or independent
@@ -745,14 +752,11 @@ authorization route. The bounded handoff and session implementation was independ
 
 ## Ordered next slices
 
-1. **M6.2 — native commitment continuation.** ADR-018 now enumerates the complete services-host route set and
-   freezes the proposal-bound execution-preparation → services-host Commit/verify → local mock-effect contract.
-   Its corrected definition received GO at `d0b8cc6`; obtain separate implementation approval before changing
-   source. Then implement with synthetic loopback tests only and stop for a separate exact-SHA implementation review.
-2. **M6.3 — offline full pass and capture contract.** After M6.2 GO and separate approval, implement the strict
+1. **M6.3 — offline full pass and capture contract.** After separate approval, implement the strict
    plan/artifact schemas, two-lane twenty-two-beat and adversarial matrix, acceptance ledger, gitignored staging,
-   sanitization checks, and dry-run assets. No live provider call or push. Stop for exact-SHA review.
-3. **M6.4 — live capture and publication.** Freeze one plan, require M6.0a's current `remotely_acknowledged`
+   sanitization checks, and dry-run assets. Close M6.2 review's non-blocking services/browser test-matrix gaps in
+   this full matrix. No live provider call or push. Stop for exact-SHA review.
+2. **M6.4 — live capture and publication.** Freeze one plan, require M6.0a's current `remotely_acknowledged`
    predicate, obtain action-time approval for its bounded acting and
    screening-provider calls and separate approval for checkpoint pushes, capture through `runtime:start`, sanitize and review the
    candidate artifact, then obtain separate commit/push approval. Only a published exact SHA and final cross-model

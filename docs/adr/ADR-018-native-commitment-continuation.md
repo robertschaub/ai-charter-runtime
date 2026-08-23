@@ -2,19 +2,20 @@
 # ADR-018 — Native commitment continuation
 
 **Status:** definition reviewed at `d0b8cc6`, GO — both contract-accuracy findings from the initial `46b40eb`
-review closed, no new findings. Implementation has not started and remains separately approval-gated. **Spec:**
+review closed, no new findings. Implementation reviewed at `b3a4992`, GO — no blocking findings. The one Low
+finding covering test-matrix gaps is recorded for M6.3; production behavior was verified present. **Spec:**
 §§3–7 and 10 (M6), especially the commitment boundary, criteria 1, 4, 6, and 7, beats 3 and 6–8, and the
 bypass/replay/mid-flight adversarial set.
 **Depends on:** ADR-001, ADR-002, ADR-007 through ADR-017, and the reviewed M6.1 implementation at `5f51caa`.
 
 ## Context
 
-The reviewed native proposal path now freezes one authorization-owned proposal and runs the fixed
-Authorize → Submit → Verify sequence, including authorization-owned screening evidence. It still stops after a
-Verify allow. The existing M3/M4 headless path can demonstrate Commit and a local mock effect, but it accepts a
+Before M6.2, the reviewed native proposal path froze one authorization-owned proposal and ran the fixed
+Authorize → Submit → Verify sequence, including authorization-owned screening evidence, but stopped after a
+Verify allow. The existing M3/M4 headless path could demonstrate Commit and a local mock effect, but accepted a
 complete caller-carried proposal, service, action class, ruling reference, and effect intent. Reusing that path for
-M6 would discard the native proposal-run, case-session, conversation, model-selection, and currentness lineage that
-M5 established.
+M6 would have discarded the native proposal-run, case-session, conversation, model-selection, and currentness
+lineage that M5 established.
 
 ADR-016 §4 fixes the outer M6.2 shape: one short-lived execution preparation, a second explicit browser gesture,
 Commit consumption by the services host, and one local mock effect. This ADR freezes the remaining implementation

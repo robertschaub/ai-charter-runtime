@@ -15,8 +15,9 @@ full-pass, authorization-owned live-screening, native commitment-continuation, a
 The separate M6.0a anchoring prerequisite was reviewed at `be7f2ef`, and the M6.0b unsupported-`reverse` removal
 was reviewed at `36126fa`. M6.1's authorization-owned live-screening protocol was reviewed at `5f51caa` with
 synthetic loopback providers only. [ADR-018](docs/adr/ADR-018-native-commitment-continuation.md) freezes the M6.2
-definition, beginning with the complete services-host route set; its corrected definition received GO at `d0b8cc6`
-with no findings. No M6.2 implementation, capture runner, live run, checkpoint push, or capture artifact exists yet.
+contract, beginning with the complete services-host route set. Its native commitment continuation was implemented
+and reviewed at `b3a4992`, GO — no blocking findings, using synthetic adapters and one local mock effect only. No
+M6.3 capture runner, live run, checkpoint push, or capture artifact exists yet.
 
 The authoritative build specification lives in the documentation repository:
 [runtime-gates-poc-spec.md](https://github.com/robertschaub/our-ai-charter/blob/main/docs/wip/runtime-gates-poc-spec.md).
@@ -188,11 +189,11 @@ precommit checks. It makes no live provider claim and never reaches Commit or an
 implementation reviewed at `5251500` adds fixture-pinned beat-5 conformance and an honest acceptance map. This
 completes the bounded M5 milestone, not the partial or unassessed areas recorded in that map. ADR-016 remains the
 reviewed M6 definition. Its M6.1 implementation, reviewed at `5f51caa`, adds a paused authorization-owned screening
-lifecycle exercised only with synthetic loopback providers; it makes no live-provider or capture claim and cannot
-reach Commit or effect execution. M6.2 onward still require separate reviewed implementation; live-provider use,
-checkpoint pushes, artifact review, and publication retain their own action-time approval gates.
-ADR-018 is a reviewed definition only: it adds no route or effect, and implementation still requires separate
-approval and exact-SHA review.
+lifecycle exercised only with synthetic loopback providers. M6.2, reviewed at `b3a4992`, continues one exact
+verified native proposal through an authorization-owned Commit decision and services-host verification to one
+local synthetic effect. It adds no live-provider or capture claim. M6.3 onward remain separately approval- and
+review-gated; live-provider use, checkpoint pushes, artifact review, and publication retain their own action-time
+approval gates.
 
 Offline and deterministic verification uses synthetic records and skips only the remote-presence step:
 

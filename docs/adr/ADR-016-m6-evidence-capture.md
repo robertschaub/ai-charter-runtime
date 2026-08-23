@@ -2,22 +2,21 @@
 # ADR-016 — M6 full-pass evidence and dual-model capture
 
 **Status:** definition reviewed at `582eaeb`, GO — no findings; M6.1 implementation reviewed at `5f51caa`, GO —
-no blocking findings, using synthetic loopback providers only. ADR-018's corrected M6.2 definition received GO at
-`d0b8cc6` with no findings; implementation remains unauthorized. Live provider use, capture, checkpoint push, and
-publication have not started and remain separately approval-gated. The separate M6.0a
-anchoring prerequisite was reviewed at `be7f2ef`, and the M6.0b unsupported-`reverse` prerequisite was reviewed at
-`36126fa`.
+no blocking findings, using synthetic loopback providers only. ADR-018's M6.2 implementation was reviewed at
+`b3a4992`, GO — no blocking findings, using synthetic adapters and one local mock effect only. Live provider use,
+M6.3 capture, checkpoint push, and publication have not started and remain separately approval-gated. The
+separate M6.0a anchoring prerequisite was reviewed at `be7f2ef`, and the M6.0b unsupported-`reverse` prerequisite
+was reviewed at `36126fa`.
 **Spec:** §§1, 3, 5, 6, 7, 9, and 10 (M6), especially the two-layer comparison rule in §7.
 **Depends on:** ADR-001 through ADR-015 and the reviewed M5 baseline at `5251500`.
 
 ## Context
 
 The bounded M5 milestone is complete. The repository now contains the reviewed M6.1 authorization-owned live
-screening protocol, exercised only with synthetic loopback providers, but it does not yet contain an M6 capture
-runner, public M6 artifact contract, live-provider capture, or native continuation from an authorization-owned
-verified proposal through Commit to the mock services host. The browser path therefore still stops after
-Authorize → Submit → Verify. Reusing the legacy headless action route for a live demonstration would weaken that
-boundary: the route accepts a complete caller-carried proposal and is retained only as a synthetic HTTP-test seam.
+screening protocol and M6.2 native continuation from an authorization-owned verified proposal through Commit to
+the mock services host, exercised only with synthetic adapters and a local mock effect. It does not yet contain an
+M6 capture runner, public M6 artifact contract, or live-provider capture. The legacy headless action route remains
+only a synthetic HTTP-test seam and is barred from the native continuation.
 
 The authoritative specification requires two different kinds of M6 evidence. First, every scripted beat and the
 adversarial set must run deterministically under both acting-model lane configurations to show that gate semantics
@@ -126,9 +125,9 @@ implementation schemas may only narrow the fixed fields and limits.
 
 ### 4. M6.2 adds one native, proposal-bound continuation to the mock effect
 
-The live core cannot honestly claim beats 3 and 6 while the native proposal path stops before Commit. M6.2 therefore
-adds a narrowly scoped execution-preparation protocol. It is not a general action API and does not reopen the
-legacy headless route.
+Before M6.2, the live core could not honestly claim beats 3 and 6 because the native proposal path stopped before
+Commit. M6.2 therefore adds a narrowly scoped execution-preparation protocol. It is not a general action API and
+does not reopen the legacy headless route.
 
 An active dynamic case-officer session may request one preparation for one exact proposal run whose current durable
 precommit state ended with Verify `allow`. The browser mutation accepts strict `{}` on the run resource. The
@@ -176,8 +175,8 @@ sessions remain denied on the headless `/actions/execute` seam, and M6 capture m
 
 ADR-018 refines this outer route contract into the complete services-host inventory, exact preparation binding,
 effect-intent-basis digest, atomic Commit/`commit-verify` transaction, ambiguity recovery, projections, and
-native/headless separation required for implementation. Its reviewed definition changes no route until separately
-approved and implemented.
+native/headless separation. The implementation at `b3a4992` received exact-SHA GO with no blocking findings and
+realizes that contract without a live provider, external effect, capture artifact, checkpoint operation, or push.
 
 ### 5. Every capture begins from an immutable plan
 
@@ -297,10 +296,10 @@ is:
    implemented with synthetic loopback providers only and reviewed at `5f51caa`, GO — no blocking findings. Review
    confirmed projection minimization, exact call/evidence binding, signal monotonicity, fail-closed terminal
    states, no retry/fallback, ACLs, and raw-byte exclusion. No live provider call was made or authorized.
-3. **M6.2 native commitment continuation:** ADR-018's corrected definition received exact-SHA GO at `d0b8cc6` with
-   no findings. Only after separate maintainer approval may implementation proceed with synthetic loopback tests
-   proving exact binding, ACLs, denial/escalation, races, invalidation, ambiguous failure, idempotent recovery, and
-   no headless/browser bypass. Stop again for exact-SHA implementation review.
+3. **M6.2 native commitment continuation:** ADR-018's corrected definition received exact-SHA GO at `d0b8cc6`.
+   The separately approved implementation at `b3a4992` received exact-SHA GO with no blocking findings. Review
+   confirmed exact binding, ACLs, denial/escalation, races, invalidation, ambiguity recovery, one local mock effect,
+   and no headless/browser bypass. No live provider call, capture, checkpoint operation, or push was made.
 4. **M6.3 offline full pass and capture contract:** add the strict plan/artifact schemas, deterministic two-lane
    twenty-two-beat and adversarial matrix, acceptance ledger, local staging boundary, sanitization checks, and
    dry-run assets. No live provider. Stop for exact-SHA review.

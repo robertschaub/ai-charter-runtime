@@ -136,28 +136,28 @@ credential, or authority path. At M5.13 the reviewed inventory remained exactly 
 gate/data routes plus dedicated case-session-handoff redemption and close routes. Fixed precommit remains the
 only authority-changing M5.11/M5.12 process mutation available to the orchestrator.
 
-**M6 definition and reviewed M6.1 implementation:** ADR-016 keeps the headless `/actions/execute` seam
+**M6 definition and reviewed M6.1/M6.2 implementations:** ADR-016 keeps the headless `/actions/execute` seam
 synthetic-test-only. M6.1, reviewed at `5f51caa`, adds exactly two non-authorizing screening terminal routes and a
 paused, authorization-owned extension of fixed precommit, raising the `proc:orchestrator` gate/data inventory from
-twenty-one to twenty-three. ADR-016 separately defines a future native execution preparation for an exact
+twenty-one to twenty-three. M6.2, reviewed at `b3a4992`, implements a native execution preparation for an exact
 authorization-owned proposal run that has ended precommit with Verify `allow`; that non-authorizing process route
-would raise the M6.2 inventory to twenty-four. Only `proc:services_host` may consume the preparation at the future
+raises the inventory to twenty-four. Only `proc:services_host` may consume the preparation at the
 Commit boundary. The browser and orchestrator may carry no signal, proposal, intent, gate, ruling, reservation,
 nonce, or commit token. Fixed precommit remains the only authority-changing route available to
-`proc:orchestrator`. M6.1 authorizes no live provider call; M6.2 remains unimplemented and separately gated.
+`proc:orchestrator`. Neither implementation authorizes a live provider call or M6.3 capture.
 
-**M6.2 definition reviewed at `d0b8cc6`:** ADR-018 freezes the complete services-host route set, the strict native
-preparation/execute carriers, the authorization-only effect-intent-basis derivation, and one atomic services-host
-Commit/`commit-verify` transaction. The reviewed definition authorizes no implementation. A native
-proposal-origin record is barred from the legacy caller-carried Commit seam; the native path cannot accept a
-headless proposal.
+**M6.2 implementation reviewed at `b3a4992`, GO — no blocking findings:** ADR-018 freezes the complete
+services-host route set, the strict native preparation/execute carriers, the authorization-only
+effect-intent-basis derivation, and one atomic services-host Commit/`commit-verify` transaction. The reviewed
+implementation preserves those boundaries. A native proposal-origin record is barred from the legacy
+caller-carried Commit seam; the native path cannot accept a headless proposal.
 
 The two implemented M6.1 process additions are exactly
 `POST /w/{world_id}/screening-calls/{screening_call_id}/outputs` and
 `POST /w/{world_id}/screening-calls/{screening_call_id}/failures`; both are Origin-guarded, access-recorded, and
-`authorityChanging: false`. The proposed M6.2 process addition is exactly
+`authorityChanging: false`. The implemented M6.2 process addition is exactly
 `POST /w/{world_id}/cases/{case_id}/proposal-runs/{proposal_run_id}/execution-preparations` for
-`proc:orchestrator`, also Origin-guarded, access-recorded, and `authorityChanging: false`. Its proposed Commit
+`proc:orchestrator`, also Origin-guarded, access-recorded, and `authorityChanging: false`. Its Commit
 boundary is exactly
 `POST /w/{world_id}/execution-preparations/{execution_preparation_id}/commit-verify` for
 `proc:services_host` only. The orchestrator-side browser and services-host carrier routes, strict inputs, projections,
@@ -349,20 +349,22 @@ Services host: `POST /w/{w}/services/{service}/execute` `proc:orchestrator`;
 `commit-verify`, effect outcomes, and reconciliation probes carry both the current services-host boot id
 and the persistent services-ledger id; only absence under the same ledger id can release a commitment.
 
-ADR-018's reviewed M6.2 definition adds only
+ADR-018's reviewed M6.2 implementation adds only
 `POST /w/{w}/execution-preparations/{execution_preparation_id}/execute` for `proc:orchestrator`, with a strict
-`{}` body. The post-M6.2 services-host inventory would therefore be exactly five routes: open health; the existing
+`{}` body. The services-host inventory is therefore exactly five routes: open health; the existing
 legacy headless execute; the native preparation execute; the authorization-only effect probe; and the
 authorization-only registry read. Authenticated services routes reject a present browser Origin and emit no CORS.
 The native response omits token, intent, proposal, ruling internals, nonce, reservation, credentials, and handler
-detail. This paragraph defines a reviewed requirement, not an implemented route.
+detail.
 
 **The reviewed M5.11 implementation exposes the orchestrator's process credential on exactly twenty gate/data
 routes plus dedicated case-session-handoff redemption and close routes. The reviewed M5.12 implementation adds one
 gate/data route, making exactly twenty-one; M5.13 adds none. M6.1 adds exactly two non-authorizing screening
-terminal routes, making exactly twenty-three.** The resulting twenty-three are proposal submission,
+terminal routes, making exactly twenty-three; M6.2 adds one non-authorizing execution-preparation route, making
+exactly twenty-four.** The resulting twenty-four are proposal submission,
 proposal-intake consumption,
-proposal-intake status, proposal-run status, proposal precommit, proposal-precommit status, model-call begin,
+proposal-intake status, proposal-run status, proposal precommit, proposal-precommit status,
+execution-preparation issuance, model-call begin,
 model-output admission, model-call failure, screening-output admission, screening-call failure,
 conversation-message ingestion, model-output-release consumption,
 model-output-release status, conversation read,
