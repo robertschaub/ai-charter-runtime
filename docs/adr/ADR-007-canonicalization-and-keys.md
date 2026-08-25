@@ -23,10 +23,11 @@ never ruling or action authority.
 authorization-owned semantic fields prepared before the Commit ruling id exists. It is distinct from the complete
 `effect-intent` digest and carries no ruling, token, or execution authority.
 
-**Proposed amendment (M6.3 definition; review pending, 2026-08-23):** `m6-capture-plan` binds the strict immutable
-capture plan without its own digest, and `m6-offline-outcome` binds one bounded lane-comparison projection. The
-latter proves gate identity when permissions are invariant and binds exact expected outcomes for the specification's
-provider-specific permission cases. Neither grants provider, checkpoint, publication, or action authority.
+**Proposed amendment (M6.3 definition reviewed at `5952066`, GO — no findings, 2026-08-25):** `m6-capture-plan`
+binds the strict immutable capture plan without its own digest, and `m6-offline-outcome` binds one bounded
+lane-comparison projection. The latter proves gate identity when permissions are invariant and binds exact expected
+outcomes for the specification's provider-specific permission cases. Neither grants provider, checkpoint,
+publication, or action authority; implementation remains separately approval-gated.
 
 ## Context
 Frozen proposals, mandate bindings, rulings, record entries, and checkpoints (ADR-003) are hashed over canonical JSON; every ruling carries a policy content digest and an evaluator build id, because a version label alone cannot prove which rules ran. One byte-level convention has to hold across all of them, and the cryptography stays deliberately minimal — hash chain plus HMAC, with a single asymmetric exception for model cards.

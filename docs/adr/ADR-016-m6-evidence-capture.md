@@ -5,7 +5,8 @@
 no blocking findings, using synthetic loopback providers only. ADR-018's M6.2 implementation was reviewed at
 `b3a4992`, GO — no blocking findings, using synthetic adapters and one local mock effect only. Live provider use,
 M6.3 implementation, live capture, checkpoint push, and publication have not started and remain separately
-approval-gated. ADR-019 is the M6.3 definition candidate; exact-SHA review is pending and it authorizes no code.
+approval-gated. ADR-019's corrected M6.3 definition was reviewed at `5952066`, GO — no findings; it authorizes no
+code by itself.
 The separate M6.0a anchoring prerequisite was reviewed at `be7f2ef`, and the M6.0b unsupported-`reverse` prerequisite
 was reviewed at `36126fa`.
 **Spec:** §§1, 3, 5, 6, 7, 9, and 10 (M6), especially the two-layer comparison rule in §7.
@@ -301,10 +302,10 @@ is:
    The separately approved implementation at `b3a4992` received exact-SHA GO with no blocking findings. Review
    confirmed exact binding, ACLs, denial/escalation, races, invalidation, ambiguity recovery, one local mock effect,
    and no headless/browser bypass. No live provider call, capture, checkpoint operation, or push was made.
-4. **M6.3 offline full pass and capture contract:** ADR-019 proposes the strict plan/artifact schemas, closed atomic
+4. **M6.3 offline full pass and capture contract:** ADR-019 freezes the strict plan/artifact schemas, closed atomic
    case catalog, genuinely executed two-lane twenty-two-beat/adversarial matrix, acceptance ledger, local staging
-   boundary, sanitization checks, and offline/dry-run entry points. Its definition is review-pending; no
-   implementation or live-provider path is authorized. Stop for exact-SHA definition review.
+   boundary, sanitization checks, and offline/dry-run entry points. Its corrected definition received exact-SHA GO
+   at `5952066`; implementation remains separately approval-gated and no live-provider path is authorized.
 5. **M6.4 approved live capture and publication:** freeze and review one plan, obtain action-time provider and push
    approvals, perform the bounded live run, sanitize without rewriting evidence, review the resulting artifact,
    then obtain separate commit/push approval. Only after the published exact SHA and final cross-model review may a

@@ -19,7 +19,7 @@ contract, beginning with the complete services-host route set. Its native commit
 and reviewed at `b3a4992`, GO — no blocking findings, using synthetic adapters and one local mock effect only. No
 M6.3 capture runner, live run, checkpoint push, or capture artifact exists yet. [ADR-019](docs/adr/ADR-019-m6-offline-conformance-and-capture-artifacts.md)
 proposes the M6.3 offline two-lane matrix, strict artifact schemas, staging, and sanitization boundary; its
-definition is review-pending and authorizes no implementation.
+corrected definition was reviewed at `5952066`, GO — no findings. Implementation remains separately approval-gated.
 
 The authoritative build specification lives in the documentation repository:
 [runtime-gates-poc-spec.md](https://github.com/robertschaub/our-ai-charter/blob/main/docs/wip/runtime-gates-poc-spec.md).
@@ -193,9 +193,10 @@ completes the bounded M5 milestone, not the partial or unassessed areas recorded
 reviewed M6 definition. Its M6.1 implementation, reviewed at `5f51caa`, adds a paused authorization-owned screening
 lifecycle exercised only with synthetic loopback providers. M6.2, reviewed at `b3a4992`, continues one exact
 verified native proposal through an authorization-owned Commit decision and services-host verification to one
-local synthetic effect. It adds no live-provider or capture claim. M6.3 onward remain separately approval- and
-review-gated; live-provider use, checkpoint pushes, artifact review, and publication retain their own action-time
-approval gates. ADR-019 is the review-pending M6.3 definition only; it deliberately exposes no live runner.
+local synthetic effect. It adds no live-provider or capture claim. M6.3 implementation and later stages remain
+separately approval- and review-gated; live-provider use, checkpoint pushes, artifact review, and publication retain their own action-time
+approval gates. ADR-019's corrected M6.3 definition was reviewed at `5952066`, GO — no findings; it deliberately
+exposes no live runner and authorizes no implementation by itself.
 
 Offline and deterministic verification uses synthetic records and skips only the remote-presence step:
 
