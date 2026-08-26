@@ -4,6 +4,7 @@
     { "path": "./packages/gate-core" },
     { "path": "./packages/adapters" },
     { "path": "./packages/services-mock" },
-    { "path": "./packages/consoles" }
+    { "path": "./packages/consoles" },
+    { "path": "./packages/m6-offline" }
   ]
 }

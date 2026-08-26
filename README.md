@@ -16,10 +16,12 @@ The separate M6.0a anchoring prerequisite was reviewed at `be7f2ef`, and the M6.
 was reviewed at `36126fa`. M6.1's authorization-owned live-screening protocol was reviewed at `5f51caa` with
 synthetic loopback providers only. [ADR-018](docs/adr/ADR-018-native-commitment-continuation.md) freezes the M6.2
 contract, beginning with the complete services-host route set. Its native commitment continuation was implemented
-and reviewed at `b3a4992`, GO — no blocking findings, using synthetic adapters and one local mock effect only. No
-M6.3 capture runner, live run, checkpoint push, or capture artifact exists yet. [ADR-019](docs/adr/ADR-019-m6-offline-conformance-and-capture-artifacts.md)
-proposes the M6.3 offline two-lane matrix, strict artifact schemas, staging, and sanitization boundary; its
-corrected definition was reviewed at `5952066`, GO — no findings. Implementation remains separately approval-gated.
+and reviewed at `b3a4992`, GO — no blocking findings, using synthetic adapters and one local mock effect only.
+[ADR-019](docs/adr/ADR-019-m6-offline-conformance-and-capture-artifacts.md) defines the M6.3 offline two-lane
+matrix, strict artifact schemas, gitignored staging, and sanitization boundary; its corrected definition was
+reviewed at `5952066`, GO — no findings. The implementation candidate executes only deterministic synthetic
+fixtures and nine dedicated loopback transport assertions; it creates no public capture. Exact-SHA review remains
+pending. No live run, provider call, checkpoint operation, publication, or push is authorized.
 
 The authoritative build specification lives in the documentation repository:
 [runtime-gates-poc-spec.md](https://github.com/robertschaub/our-ai-charter/blob/main/docs/wip/runtime-gates-poc-spec.md).
@@ -27,7 +29,8 @@ On any divergence, the specification and its linked Charter source documents pre
 The exact upstream revision, digest, reviewed runtime baseline, and remaining milestone work are tracked in
 [docs/implementation-plan.md](docs/implementation-plan.md); the offline M4 beat and adversarial mapping is in
 [docs/m4-acceptance.md](docs/m4-acceptance.md), and the bounded M5 acceptance evidence is in
-[docs/m5-acceptance.md](docs/m5-acceptance.md).
+[docs/m5-acceptance.md](docs/m5-acceptance.md). The generated M6.3 offline catalog and honest coverage ledger is
+[docs/m6/acceptance.md](docs/m6/acceptance.md); it is not a live or published capture.
 
 ## Honest limits — read this first
 

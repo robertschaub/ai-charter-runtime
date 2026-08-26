@@ -15,6 +15,9 @@ import {
 } from 'gate-core';
 import { z } from 'zod';
 
+import { ServicesAuthorizationHttpError } from './authorizationHttpError.js';
+export { ServicesAuthorizationHttpError } from './authorizationHttpError.js';
+
 const commitDefect = z.enum([
   ...AUTHORITY_DEFECTS,
   'not-allowed',
@@ -99,16 +102,6 @@ export interface ServicesAuthorizationHttpClientOptions {
   readonly timeoutMs?: number;
   readonly maxResponseBytes?: number;
   readonly fetchImplementation?: typeof fetch;
-}
-
-export class ServicesAuthorizationHttpError extends Error {
-  constructor(
-    readonly status: number,
-    readonly code: string | null,
-  ) {
-    super(`authorization service rejected transport request with HTTP ${status}`);
-    this.name = 'ServicesAuthorizationHttpError';
-  }
 }
 
 export class ServicesAuthorizationHttpClient

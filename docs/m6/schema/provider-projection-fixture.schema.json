@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://robertschaub.github.io/ai-charter-runtime/m6/schema/provider-projection-fixture-v1.json",
+  "title": "M6 provider-specific comparison fixture",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "case_id", "lanes"],
+  "properties": {
+    "schema_version": { "const": "m6-provider-projection-fixture/v1" },
+    "case_id": { "const": "beat-20" },
+    "lanes": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 2,
+      "items": { "$ref": "#/$defs/lane" }
+    }
+  },
+  "$defs": {
+    "digest": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "card": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["card_id", "card_version", "card_digest", "requested_id"],
+      "properties": {
+        "card_id": { "type": "string", "minLength": 1 },
+        "card_version": { "type": "integer", "minimum": 1 },
+        "card_digest": { "$ref": "#/$defs/digest" },
+        "requested_id": { "type": "string", "minLength": 1 }
+      }
+    },
+    "expected": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mandate_permission", "submit_verdict", "matched_rule_id", "disclosure_boundary", "containment_state"],
+      "properties": {
+        "mandate_permission": { "enum": ["approved", "unapproved"] },
+        "submit_verdict": { "enum": ["allow", "deny", "escalate"] },
+        "matched_rule_id": { "anyOf": [{ "type": "string" }, { "type": "null" }] },
+        "disclosure_boundary": { "enum": ["permitted", "blocked_before_disclosure"] },
+        "containment_state": { "enum": ["continued", "stopped"] }
+      }
+    },
+    "lane": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["lane_slot", "card_binding", "expected"],
+      "properties": {
+        "lane_slot": { "enum": ["lane-0", "lane-1"] },
+        "card_binding": { "$ref": "#/$defs/card" },
+        "expected": { "$ref": "#/$defs/expected" }
+      }
+    }
+  }
+}

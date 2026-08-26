@@ -10,6 +10,14 @@
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./offline-safe": {
+      "types": "./dist/offlineSafe.d.ts",
+      "default": "./dist/offlineSafe.js"
+    },
+    "./m6-infrastructure": {
+      "types": "./dist/m6Infrastructure.d.ts",
+      "default": "./dist/m6Infrastructure.js"
     }
   },
   "dependencies": {

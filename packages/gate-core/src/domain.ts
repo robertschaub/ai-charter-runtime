@@ -35,6 +35,8 @@ export const DOMAIN_TAGS = [
   'screening-output',
   'system-use-decision',
   'system-use-configuration',
+  'm6-capture-plan',
+  'm6-offline-outcome',
 ] as const;
 
 export type DomainTag = (typeof DOMAIN_TAGS)[number];

@@ -67,17 +67,16 @@ import {
   type ScreeningCallOutputRequest,
   type ScreeningCallStart,
   type ScreeningCallTerminalProjection,
-} from 'gate-core';
+} from 'gate-core/offline-safe';
 import {
   ModelAdapterError,
   type ActingRequest,
   type ActingResponse,
   type ModelLane,
-  type OpenAiCompatibleAdapter,
-} from 'model-adapters';
+} from 'model-adapters/offline-safe';
 import { z } from 'zod';
 
-import { RuntimeDependencyError } from './runtimeHttpClients.js';
+import { RuntimeDependencyError } from './runtimeDependencyError.js';
 
 const modelTurnInput = z
   .object({
@@ -221,7 +220,7 @@ export interface ModelTurnLaneConfig {
   readonly cardId: string;
   readonly cardVersion: number;
   readonly requestedId: string;
-  readonly adapter: Pick<OpenAiCompatibleAdapter, 'act' | 'lane' | 'requestedId'> | ActingAdapter;
+  readonly adapter: ActingAdapter;
 }
 
 export interface ModelTurnAuthorizationClient {
@@ -1262,11 +1261,7 @@ export class ModelTurnCoordinator {
             ),
           );
         } catch (error) {
-          if (
-            error instanceof RuntimeDependencyError &&
-            error.httpStatus >= 400 &&
-            error.httpStatus < 500
-          ) {
+          if (error instanceof RuntimeDependencyError && error.httpStatus >= 400 && error.httpStatus < 500) {
             this.#haltedLanes.add(key);
             throw new ModelTurnError('authorization-refused', 'confirmed', response.servedId);
           }

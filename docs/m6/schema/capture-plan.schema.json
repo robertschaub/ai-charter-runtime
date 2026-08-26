@@ -1,0 +1,234 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://robertschaub.github.io/ai-charter-runtime/m6/schema/capture-plan-v1.json",
+  "title": "M6 immutable capture plan",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "capture_id", "supersedes_capture_id", "scenario_id", "layers", "catalog_digest", "lanes", "screening_role", "provenance", "synthetic_inputs", "clock_profile", "deterministic_id_profile", "expected_boundaries", "runtime_environment", "commands", "network_classification", "timeout_ms", "write_roots", "request_ceilings", "no_retry", "no_fallback", "checkpoint_requirements", "artifact_schema_versions", "storyboards", "plan_digest"],
+  "properties": {
+    "schema_version": { "const": "m6-capture-plan/v1" },
+    "capture_id": { "$ref": "#/$defs/captureId" },
+    "supersedes_capture_id": { "anyOf": [{ "$ref": "#/$defs/captureId" }, { "type": "null" }] },
+    "scenario_id": { "type": "string", "pattern": "^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$" },
+    "layers": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 3,
+      "uniqueItems": true,
+      "items": { "enum": ["dry-run", "live", "offline-fixture"] }
+    },
+    "catalog_digest": { "$ref": "#/$defs/digest" },
+    "lanes": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 2,
+      "prefixItems": [
+        { "allOf": [{ "$ref": "#/$defs/lane" }, { "type": "object", "properties": { "lane_slot": { "const": "lane-0" } } }] },
+        { "allOf": [{ "$ref": "#/$defs/lane" }, { "type": "object", "properties": { "lane_slot": { "const": "lane-1" } } }] }
+      ],
+      "items": false
+    },
+    "screening_role": { "$ref": "#/$defs/card" },
+    "provenance": { "$ref": "#/$defs/provenance" },
+    "synthetic_inputs": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": { "$ref": "#/$defs/namedDigest" }
+    },
+    "clock_profile": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$" },
+    "deterministic_id_profile": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$" },
+    "expected_boundaries": { "$ref": "#/$defs/boundaries" },
+    "runtime_environment": { "$ref": "#/$defs/environment" },
+    "commands": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 3,
+      "items": { "$ref": "#/$defs/command" }
+    },
+    "network_classification": { "enum": ["dry-run", "live", "offline-fixture"] },
+    "timeout_ms": { "type": "integer", "minimum": 1, "maximum": 3600000 },
+    "write_roots": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 1,
+      "items": { "const": ".m6-staging" }
+    },
+    "request_ceilings": { "$ref": "#/$defs/ceilings" },
+    "no_retry": { "const": true },
+    "no_fallback": { "const": true },
+    "checkpoint_requirements": { "$ref": "#/$defs/checkpoints" },
+    "artifact_schema_versions": { "$ref": "#/$defs/schemaVersions" },
+    "storyboards": {
+      "type": "array",
+      "minItems": 3,
+      "maxItems": 3,
+      "uniqueItems": true,
+      "items": { "$ref": "#/$defs/storyboard" }
+    },
+    "plan_digest": { "$ref": "#/$defs/digest" }
+  },
+  "$defs": {
+    "captureId": { "type": "string", "pattern": "^(?!(?:con|prn|aux|nul|com[1-9]|lpt[1-9])$)[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$" },
+    "digest": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "card": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["card_id", "card_version", "card_digest", "requested_id"],
+      "properties": {
+        "card_id": { "type": "string", "minLength": 1 },
+        "card_version": { "type": "integer", "minimum": 1 },
+        "card_digest": { "$ref": "#/$defs/digest" },
+        "requested_id": { "type": "string", "minLength": 1 }
+      }
+    },
+    "lane": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["lane_slot", "card_binding"],
+      "properties": {
+        "lane_slot": { "enum": ["lane-0", "lane-1"] },
+        "card_binding": { "$ref": "#/$defs/card" }
+      }
+    },
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["runtime_commit", "charter_commit", "runtime_specification", "system_use_decision", "policy", "evaluator", "fixture_file_set_digest"],
+      "properties": {
+        "runtime_commit": { "$ref": "#/$defs/digest" },
+        "charter_commit": { "$ref": "#/$defs/digest" },
+        "runtime_specification": { "$ref": "#/$defs/source" },
+        "system_use_decision": { "$ref": "#/$defs/systemUse" },
+        "policy": { "$ref": "#/$defs/versionedDigest" },
+        "evaluator": { "$ref": "#/$defs/evaluator" },
+        "fixture_file_set_digest": { "$ref": "#/$defs/digest" }
+      }
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "digest"],
+      "properties": {
+        "path": { "type": "string", "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._/-]*$" },
+        "digest": { "$ref": "#/$defs/digest" }
+      }
+    },
+    "systemUse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["decision_id", "decision_version", "decision_digest", "source_path", "source_digest"],
+      "properties": {
+        "decision_id": { "type": "string", "minLength": 1 },
+        "decision_version": { "type": "integer", "minimum": 1 },
+        "decision_digest": { "$ref": "#/$defs/digest" },
+        "source_path": { "type": "string", "pattern": "^[a-zA-Z0-9][a-zA-Z0-9._/-]*$" },
+        "source_digest": { "$ref": "#/$defs/digest" }
+      }
+    },
+    "versionedDigest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "content_digest"],
+      "properties": {
+        "version": { "type": "integer", "minimum": 1 },
+        "content_digest": { "$ref": "#/$defs/digest" }
+      }
+    },
+    "evaluator": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["build_id", "build_digest"],
+      "properties": {
+        "build_id": { "type": "string", "minLength": 1 },
+        "build_digest": { "$ref": "#/$defs/digest" }
+      }
+    },
+    "namedDigest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "digest"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{0,127}$" },
+        "digest": { "$ref": "#/$defs/digest" }
+      }
+    },
+    "boundaries": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["stop_case_ids", "effect_case_ids"],
+      "properties": {
+        "stop_case_ids": { "type": "array", "uniqueItems": true, "items": { "type": "string", "pattern": "^(?:beat-[0-9]{2}|adv-[a-z0-9-]+)$" } },
+        "effect_case_ids": { "type": "array", "uniqueItems": true, "items": { "type": "string", "pattern": "^beat-[0-9]{2}$" } }
+      }
+    },
+    "environment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["node_version", "npm_version", "os_platform", "os_release", "architecture"],
+      "properties": {
+        "node_version": { "type": "string", "minLength": 1 },
+        "npm_version": { "type": "string", "minLength": 1 },
+        "os_platform": { "type": "string", "minLength": 1 },
+        "os_release": { "type": "string", "minLength": 1 },
+        "architecture": { "type": "string", "minLength": 1 }
+      }
+    },
+    "command": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "argv"],
+      "properties": {
+        "name": { "enum": ["m6:dry-run", "m6:offline", "m6:schemas"] },
+        "argv": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 8,
+          "items": { "type": "string", "pattern": "^[^\u0000-\u001f\u007f]*$" }
+        }
+      }
+    },
+    "ceilings": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["provider_requests", "screening_requests", "effects"],
+      "properties": {
+        "provider_requests": { "type": "integer", "minimum": 0, "maximum": 100 },
+        "screening_requests": { "type": "integer", "minimum": 0, "maximum": 100 },
+        "effects": { "type": "integer", "minimum": 0, "maximum": 10 }
+      }
+    },
+    "checkpoints": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["run_start", "run_end"],
+      "properties": {
+        "run_start": { "enum": ["not_required", "remotely_acknowledged"] },
+        "run_end": { "enum": ["not_required", "remotely_acknowledged"] }
+      }
+    },
+    "schemaVersions": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["case_catalog", "provider_projection_fixture", "capture_plan", "offline_matrix", "attempt_events", "sanitization_report", "capture_manifest"],
+      "properties": {
+        "case_catalog": { "const": "m6-case-catalog/v1" },
+        "provider_projection_fixture": { "const": "m6-provider-projection-fixture/v1" },
+        "capture_plan": { "const": "m6-capture-plan/v1" },
+        "offline_matrix": { "const": "m6-offline-matrix/v1" },
+        "attempt_events": { "const": "m6-attempt-events/v1" },
+        "sanitization_report": { "const": "m6-sanitization-report/v1" },
+        "capture_manifest": { "const": "m6-capture-manifest/v1" }
+      }
+    },
+    "storyboard": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "case_ids"],
+      "properties": {
+        "id": { "enum": ["conflict-to-effect", "injection-contained", "model-switch-contained"] },
+        "case_ids": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "string", "pattern": "^beat-[0-9]{2}$" } }
+      }
+    }
+  }
+}

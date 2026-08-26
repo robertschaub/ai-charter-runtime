@@ -1,15 +1,16 @@
 <!-- SPDX-License-Identifier: CC-BY-4.0 -->
 # Runtime implementation plan
 
-**Status date:** 2026-08-25
+**Status date:** 2026-08-26
 
 **Current milestone:** M4 and bounded M5 complete; the ADR-016 M6 definition received GO at `582eaeb`, and the
 separate M6.0a anchoring-flow prerequisite received GO at `be7f2ef`. The M6.0b unsupported-`reverse` implementation
 received GO at `36126fa`; both M6.0 prerequisites are complete. M6.1's authorization-owned live-screening
 implementation received GO at `5f51caa` with synthetic loopback providers only. ADR-018's corrected M6.2
 definition received GO at `d0b8cc6`; its implementation received GO at `b3a4992` with no blocking findings.
-ADR-019's corrected M6.3 definition received GO at `5952066` with no findings. M6.3 implementation and live
-capture have not started and remain approval- and review-gated.
+ADR-019's corrected M6.3 definition received GO at `5952066` with no findings. Its bounded offline implementation
+candidate is present and awaits exact-SHA review. M6.4 live capture has not started and remains separately
+approval- and review-gated.
 
 This file tracks implementation status and sequencing in `ai-charter-runtime`. It does not replace or
 reinterpret the authoritative specification. On divergence, the specification and its linked Charter
@@ -60,8 +61,14 @@ closed catalog of all twenty-two beats, atomic adversarial cases, and the carrie
 infrastructure assertions; genuine execution under both exact initial lane bindings; strict public JSON Schemas;
 an immutable domain-separated plan; path-confined local staging; fixed-projection sanitization; and offline/dry-run
 entry points with no dormant live mode. The initial `f5583a1` review returned NO-GO on four bounded definition
-defects; correction `5952066` received exact-SHA **GO — no findings**. This definition authorizes no source
-implementation, provider call, checkpoint operation, capture artifact, publication, or push.
+defects; correction `5952066` received exact-SHA **GO — no findings**. The approved implementation candidate adds
+the exact catalog, shared two-lane executors, nine isolated loopback assertions, strict schemas and plan digest,
+path-confined gitignored staging, fixed bounded projections, sanitization, and generated acceptance ledger. It
+adds no live entry point, provider call, checkpoint operation, public capture, publication, or push and remains
+review-pending.
+Candidate validation is `npm run typecheck` clean, 4/4 Git-safety tests, 423/423 Vitest tests across 45 files,
+both unchanged signed cards verified, `npm run m6:schemas` clean, and `git diff --check` clean. These are local
+maintainer-run conformance results, not the pending exact-SHA review or a live capture.
 The same documentation tranche corrects ADR-015's carried inventory wording: twenty-one routes at M5.13,
 twenty-three after M6.1, and the current twenty-four after M6.2. It changes no route or interface.
 
@@ -169,7 +176,7 @@ assessed, the Charter vocabulary and provenance pin are unchanged, and no M6.1 s
 | M3 — vertical slice | Implemented | Deterministic authorize → propose → rule → commit-verify → effect → receipt path, adapters, service ledger, and signed cards are present. |
 | M4 — escalation + governance console | **Complete** | Final exact-SHA review of `e326562` returned GO with no findings; the offline acceptance ledger preserves the remaining partial and not-assessed boundaries. |
 | M5 — screening + empathy + switching | **Complete within the bounded POC acceptance** | M5.1–M5.12 culminate in the authority-bearing baseline `5b27b0e`. ADR-015's zero-route M5.13 definition received GO at `a08fa98`; its fixture/test/acceptance implementation at `5251500` received GO with no findings. The acceptance ledger retains four partial and two not-assessed empathy red-line families. This is not assurance, semantic clearance, or deployment readiness. |
-| M6 — full pass + demo capture | **M6.3 definition reviewed; implementation gated** | [ADR-016](adr/ADR-016-m6-evidence-capture.md) received GO at `582eaeb`; M6.0a received GO at `be7f2ef`; M6.0b received GO at `36126fa`; M6.1 received GO at `5f51caa` using synthetic loopback providers only; M6.2 received GO at `b3a4992` using synthetic adapters and one local mock effect only. ADR-019's corrected M6.3 offline conformance/artifact definition received GO at `5952066`; implementation has not started. No live provider call, checkpoint push, or capture artifact is authorized. |
+| M6 — full pass + demo capture | **M6.3 implementation candidate; review pending** | [ADR-016](adr/ADR-016-m6-evidence-capture.md) received GO at `582eaeb`; M6.0a received GO at `be7f2ef`; M6.0b received GO at `36126fa`; M6.1 received GO at `5f51caa` using synthetic loopback providers only; M6.2 received GO at `b3a4992` using synthetic adapters and one local mock effect only. ADR-019's corrected M6.3 definition received GO at `5952066`; its bounded offline implementation candidate is present but not yet reviewed. No live provider call, checkpoint push, public capture, or publication is authorized. |
 | M7 — article | Not started | Publication claims follow a reviewed and explicitly published M6 artifact. |
 
 These labels describe repository implementation status, not assurance, certification, or independent
@@ -763,12 +770,10 @@ authorization route. The bounded handoff and session implementation was independ
 
 ## Ordered next slices
 
-1. **M6.3 — offline full pass and capture contract.** The corrected ADR-019 definition received exact-SHA GO at
-   `5952066`. Only after separate approval, implement its strict schemas, closed catalog, genuinely executed
-   two-lane matrix, acceptance ledger, gitignored staging, fixed-projection sanitization, offline/dry-run entry
-   points, and the carried M6.2 test assertions. No
-   live entry point, provider call, checkpoint operation, capture materialization, or push. Stop for exact-SHA
-   implementation review.
+1. **M6.3 — exact-SHA implementation review.** Review the bounded candidate against ADR-019: strict schemas,
+   closed catalog, genuinely executed two-lane matrix, acceptance ledger, gitignored staging, fixed-projection
+   sanitization, offline/dry-run entry points, and the carried M6.2 transport assertions. No live entry point,
+   provider call, checkpoint operation, capture materialization, or push is part of this review.
 2. **M6.4 — live capture and publication.** Freeze one plan, require M6.0a's current `remotely_acknowledged`
    predicate, obtain action-time approval for its bounded acting and
    screening-provider calls and separate approval for checkpoint pushes, capture through `runtime:start`, sanitize and review the

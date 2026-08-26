@@ -79,6 +79,9 @@ import {
 import type { ServicesHostExecution } from 'services-mock';
 import { z } from 'zod';
 
+import { RuntimeDependencyError } from './runtimeDependencyError.js';
+export { RuntimeDependencyError } from './runtimeDependencyError.js';
+
 const handoffRedeemInput = z
   .object({
     handoff_id: id,
@@ -119,16 +122,6 @@ async function responseJson(response: Response, maxBytes: number): Promise<unkno
     return JSON.parse(buffer.toString('utf8')) as unknown;
   } catch {
     throw new Error('runtime response was not JSON');
-  }
-}
-
-export class RuntimeDependencyError extends Error {
-  constructor(
-    readonly httpStatus: number,
-    readonly responseCode: string | null,
-  ) {
-    super(`runtime dependency rejected transport request with HTTP ${httpStatus}`);
-    this.name = 'RuntimeDependencyError';
   }
 }
 

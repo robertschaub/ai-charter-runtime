@@ -15,6 +15,9 @@
     "keys": "node tooling/keys.mjs",
     "cards:verify": "tsc -b && node tooling/cards.mjs verify all",
     "runtime:start": "tsc -b && node --env-file=.env.local packages/consoles/dist/runtimeSupervisor.js",
+    "m6:schemas": "tsc -b && node packages/m6-offline/dist/cli.js schemas",
+    "m6:offline": "tsc -b && node packages/m6-offline/dist/cli.js offline-fixture",
+    "m6:dry-run": "tsc -b && node packages/m6-offline/dist/cli.js dry-run",
     "typecheck": "tsc -b",
     "verify:records": "tsc -b && node tooling/verify-records.mjs",
     "pretest": "tsc -b",
@@ -22,6 +25,8 @@
   },
   "devDependencies": {
     "@types/node": "^22.15.0",
+    "ajv": "8.17.1",
+    "ajv-formats": "3.0.1",
     "typescript": "^5.9.0",
     "vitest": "^3.2.0"
   },

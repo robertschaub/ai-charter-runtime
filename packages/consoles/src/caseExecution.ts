@@ -4,7 +4,7 @@ import {
   browserExecutionPreparation,
   executionPreparationProjection,
   type ExecutionPreparationProjection,
-} from 'gate-core';
+} from 'gate-core/offline-safe';
 
 import type { CaseSessionRecord } from './caseSessionStore.js';
 

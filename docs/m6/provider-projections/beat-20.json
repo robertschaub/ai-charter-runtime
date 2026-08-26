@@ -1,0 +1,38 @@
+{
+  "schema_version": "m6-provider-projection-fixture/v1",
+  "case_id": "beat-20",
+  "lanes": [
+    {
+      "lane_slot": "lane-0",
+      "card_binding": {
+        "card_id": "publicai-apertus-v1.5-70b",
+        "card_version": 1,
+        "card_digest": "bd2cbb6a3fe27ae71d84f132acaee091751e3772e703ef7fb5750bac2201c5ab",
+        "requested_id": "swiss-ai/apertus-v1.5-70b"
+      },
+      "expected": {
+        "mandate_permission": "approved",
+        "submit_verdict": "allow",
+        "matched_rule_id": "allow-grant-submit",
+        "disclosure_boundary": "permitted",
+        "containment_state": "continued"
+      }
+    },
+    {
+      "lane_slot": "lane-1",
+      "card_binding": {
+        "card_id": "openai-gpt-5.5",
+        "card_version": 1,
+        "card_digest": "0577111a4a86dd783d0a9aa9138427c534364994368a85e622abcc33a3c7decf",
+        "requested_id": "gpt-5.5"
+      },
+      "expected": {
+        "mandate_permission": "unapproved",
+        "submit_verdict": "deny",
+        "matched_rule_id": "authority:substituted-model",
+        "disclosure_boundary": "blocked_before_disclosure",
+        "containment_state": "stopped"
+      }
+    }
+  ]
+}

@@ -28,7 +28,7 @@ import {
   type RecordsVerificationReport,
 } from './checkpoint.js';
 import { digestFileSet } from './fileSetDigest.js';
-import { loadKeyring } from './keyring.js';
+import { loadKeyring } from './keyringLoader.js';
 import { loadPolicyFile } from './policyLoader.js';
 import { runRuntimeMaintenance } from './runtimeMaintenance.js';
 import { screeningFixtureSet } from './screeningFixture.js';

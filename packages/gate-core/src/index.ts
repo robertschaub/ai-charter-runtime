@@ -16,6 +16,7 @@ export * from './fileSetDigest.js';
 export * from './chain.js';
 export * from './checkpoint.js';
 export * from './keyring.js';
+export * from './keyringLoader.js';
 export * from './servedModel.js';
 export * from './conversationProjection.js';
 export * from './conversationProjectionService.js';

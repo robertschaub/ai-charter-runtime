@@ -8,11 +8,11 @@ import type {
   EffectOutcomeReportResult,
   NativeCommitVerifyResult,
   NativeServicesExecutionResult,
-} from 'gate-core';
-import { nativeServicesExecutionResult } from 'gate-core';
+} from 'gate-core/offline-safe';
+import { nativeServicesExecutionResult } from 'gate-core/offline-safe';
 
 import { EffectLedger, type ProposedEffectOutcome, type ServiceEffectRecord } from './effectLedger.js';
-import { ServicesAuthorizationHttpError } from './authorizationHttpClient.js';
+import { ServicesAuthorizationHttpError } from './authorizationHttpError.js';
 
 const SERVICES_HOST = { credential: 'proc:services_host', claimed_role: null } as const;
 

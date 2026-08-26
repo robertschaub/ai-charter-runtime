@@ -12,6 +12,7 @@ Full license texts are in [`LICENSES/`](LICENSES/). Strategic choice, not legal 
 | `packages/adapters/` | MIT | `MIT` | Model adapters (OpenAI-compatible clients) — maximum reuse |
 | `packages/consoles/` | MIT | `MIT` | Case console + governance console assets |
 | `packages/services-mock/` | MIT | `MIT` | Mock connected services (registry, filing, notification) |
+| `packages/m6-offline/` | MIT | `MIT` | Deterministic M6 offline conformance, artifact validation, staging, and sanitization tooling |
 | `tooling/` | MIT | `MIT` | Probes, scripts, test harness |
 | `fixtures/` | MIT | `MIT` | Synthetic demo data (no ODbL: not a curated database) |
 | Root build/config files (`package.json`, `tsconfig*.json`, `vitest.config.ts`, lockfile) | MIT | `MIT` | Build scaffolding (JSON files carry no header; the map governs) |

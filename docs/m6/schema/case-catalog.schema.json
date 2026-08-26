@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://robertschaub.github.io/ai-charter-runtime/m6/schema/case-catalog-v1.json",
+  "title": "M6 closed case catalog",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "rows", "exclusions"],
+  "properties": {
+    "schema_version": { "const": "m6-case-catalog/v1" },
+    "rows": {
+      "type": "array",
+      "minItems": 66,
+      "maxItems": 66,
+      "items": { "$ref": "#/$defs/row" }
+    },
+    "exclusions": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 1,
+      "items": { "$ref": "#/$defs/exclusion" }
+    }
+  },
+  "$defs": {
+    "row": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "class", "comparison_mode", "coverage", "required_terminal_evidence"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^(?:beat-[0-9]{2}|adv-[a-z0-9-]+|infra-[a-z0-9-]+)$" },
+        "class": { "enum": ["beat", "adversarial", "infrastructure"] },
+        "comparison_mode": { "enum": ["invariant", "provider_specific", "single"] },
+        "coverage": { "enum": ["exercised", "partial", "not_assessed", "not_applicable"] },
+        "required_terminal_evidence": { "type": "string", "minLength": 1, "maxLength": 500 }
+      }
+    },
+    "exclusion": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "coverage", "reason"],
+      "properties": {
+        "id": { "const": "subdelegation" },
+        "coverage": { "const": "not_assessed" },
+        "reason": { "type": "string", "minLength": 1, "maxLength": 300 }
+      }
+    }
+  }
+}

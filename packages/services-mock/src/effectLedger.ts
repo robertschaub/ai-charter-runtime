@@ -27,7 +27,7 @@ import {
   type CommitToken,
   type EffectIntent,
   type Keyring,
-} from 'gate-core';
+} from 'gate-core/offline-safe';
 import { z } from 'zod';
 
 export const serviceEffectRecord = z

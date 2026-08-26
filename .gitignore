@@ -12,6 +12,7 @@ records/
 dist/
 *.log
 docs/m0-probe-results.json
+/.m6-staging/
 
 # local agent / editor state — personal, never shared
 .claude/settings.local.json

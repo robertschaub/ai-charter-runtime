@@ -10,10 +10,10 @@ import {
   KeyringError,
   createEmbeddedMac,
   createMac,
-  loadKeyring,
   verifyEmbeddedMac,
   verifyMac,
 } from './keyring.js';
+import { DEFAULT_KEYRING_RELATIVE_PATH, loadKeyring } from './keyringLoader.js';
 import type { MacStatus } from './keyring.js';
 
 const ACTIVE_KEY = 'a'.repeat(64);

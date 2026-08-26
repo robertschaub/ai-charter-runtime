@@ -1,49 +1,14 @@
 // SPDX-License-Identifier: MIT
 /** Minimal fail-closed adapter shared by the two M0-probed OpenAI-compatible lanes. */
 import { z } from 'zod';
-
-export type ModelLane = 'publicai' | 'openai';
-
-export interface ModelLaneConfig {
-  readonly lane: ModelLane;
-  readonly baseUrl: string;
-  readonly requestedModel: string;
-  readonly apiKey: string;
-  readonly tokenParameter: 'max_tokens' | 'max_completion_tokens';
-  readonly timeoutMs?: number;
-  readonly maxResponseBytes?: number;
-}
-
-export interface ChatMessage {
-  readonly role: 'system' | 'user' | 'assistant';
-  readonly content: string;
-}
-
-export interface ActingRequest {
-  readonly messages: readonly ChatMessage[];
-  readonly maxOutputTokens: number;
-  readonly tools?: readonly unknown[];
-  readonly responseFormat?: unknown;
-}
-
-export interface ActingResponse {
-  readonly lane: ModelLane;
-  readonly requestedId: string;
-  readonly servedId: string;
-  readonly content: string | null;
-  readonly toolCalls: readonly unknown[];
-}
-
-export class ModelAdapterError extends Error {
-  constructor(
-    readonly code: 'invalid-config' | 'timeout' | 'provider-http' | 'malformed-response',
-    message: string,
-    readonly httpStatus?: number,
-  ) {
-    super(message);
-    this.name = 'ModelAdapterError';
-  }
-}
+import {
+  ModelAdapterError,
+  type ActingRequest,
+  type ActingResponse,
+  type ModelLane,
+  type ModelLaneConfig,
+} from './contracts.js';
+export * from './contracts.js';
 
 const printableModelId = z.string().max(256).regex(/^[\x21-\x7e]+$/);
 const providerResponse = z

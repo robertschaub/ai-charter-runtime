@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 /** Immutable synthetic registry evidence for ADR-004's third-party-confirmation path. */
-import { canonicalize, registryRecordRef, sha256Hex, timestamp, type RegistryEvidence } from 'gate-core';
+import { canonicalize, registryRecordRef, sha256Hex, timestamp, type RegistryEvidence } from 'gate-core/offline-safe';
 
 const SYNTHETIC_RECORDS = {
   'reg:CH-0042': {
