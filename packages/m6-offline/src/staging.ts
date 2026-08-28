@@ -5,14 +5,27 @@ import { dirname, join, relative, resolve } from 'node:path';
 import { canonicalize } from 'gate-core/offline-safe';
 
 import { REPOSITORY_ROOT } from './repository.js';
+import type { AttemptEvent } from './types.js';
 
 const CAPTURE_ID = /^(?!(?:con|prn|aux|nul|com[1-9]|lpt[1-9])$)[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$/;
 const STAGING_ROOT = join(REPOSITORY_ROOT, '.m6-staging');
 
+export function assertStagingNodeType(
+  path: string,
+  info: { readonly symbolicLink: boolean; readonly directory: boolean; readonly file: boolean; readonly linkCount: number },
+): void {
+  if (info.symbolicLink || (!info.directory && !info.file)) throw new Error(`m6 staging refused linked/special path ${path}`);
+  if (info.file && info.linkCount !== 1) throw new Error(`m6 staging refused hard-linked file ${path}`);
+}
+
 function assertPlainComponent(path: string): void {
   const info = lstatSync(path);
-  if (info.isSymbolicLink() || (!info.isDirectory() && !info.isFile())) throw new Error(`m6 staging refused linked/special path ${path}`);
-  if (info.isFile() && info.nlink !== 1) throw new Error(`m6 staging refused hard-linked file ${path}`);
+  assertStagingNodeType(path, {
+    symbolicLink: info.isSymbolicLink(),
+    directory: info.isDirectory(),
+    file: info.isFile(),
+    linkCount: info.nlink,
+  });
 }
 
 function assertContained(path: string, root: string): void {
@@ -65,7 +78,7 @@ export function writeExclusiveCanonicalJson(captureRoot: string, relativePath: s
 }
 
 export class AttemptLifecycle {
-  readonly events: { sequence: number; attempt_id: string; layer: 'dry-run' | 'offline-fixture'; state: string; recorded_at: string; failure_class: string | null }[] = [];
+  readonly events: AttemptEvent[] = [];
   #state: string | null = null;
   constructor(readonly attemptId: string, readonly layer: 'dry-run' | 'offline-fixture', readonly now: string) {}
   transition(state: 'planned' | 'preflighted' | 'running' | 'complete' | 'failed' | 'indeterminate' | 'sanitized', failureClass: string | null = null): void {

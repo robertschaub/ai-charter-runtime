@@ -7,7 +7,8 @@ import { loadCatalog } from './catalog.js';
 import { comparePair } from './comparison.js';
 import { assertExecutorBijection, executorFor } from './executors.js';
 import { assertExecutableOfflinePlan, loadPlan, M6PlanError } from './plan.js';
-import { sanitizeArtifact } from './sanitization.js';
+import { currentNpmVersion } from './runtimeEnvironment.js';
+import { sanitizeArtifact, sanitizeAttemptArtifacts } from './sanitization.js';
 import { SchemaRegistry } from './schemas.js';
 import { AttemptLifecycle, createCaptureDirectory, createCaptureStaging, writeExclusiveCanonicalJson } from './staging.js';
 import type { BoundedCaseResult, CapturePlan, PairComparison } from './types.js';
@@ -27,10 +28,19 @@ export async function runOfflinePlan(relativePlanPath: string): Promise<OfflineR
   // This check intentionally precedes every staging or executor operation.
   assertExecutableOfflinePlan(plan);
   const expectedEnvironment = plan.runtime_environment;
-  if (
-    expectedEnvironment.node_version !== process.version || expectedEnvironment.os_platform !== platform() ||
-    expectedEnvironment.os_release !== release() || expectedEnvironment.architecture !== arch()
-  ) throw new M6PlanError('m6-runtime-environment-mismatch', 'offline plan does not bind the current bounded runtime environment');
+  const currentEnvironment = {
+    node_version: process.version,
+    npm_version: currentNpmVersion(),
+    os_platform: platform(),
+    os_release: release(),
+    architecture: arch(),
+  };
+  const environmentMismatches = Object.keys(currentEnvironment).filter(
+    (key) => expectedEnvironment[key] !== currentEnvironment[key as keyof typeof currentEnvironment],
+  );
+  if (environmentMismatches.length > 0) {
+    throw new M6PlanError('m6-runtime-environment-mismatch', `offline plan does not bind: ${environmentMismatches.join(', ')}`);
+  }
   const loaded = loadCatalog(registry);
   assertExecutorBijection(loaded.catalog.rows.map((row) => row.id));
   const root = createCaptureStaging(plan.capture_id);
@@ -70,16 +80,16 @@ export async function runOfflinePlan(relativePlanPath: string): Promise<OfflineR
     const failedSanitization = {
       schema_version: 'm6-sanitization-report/v1', capture_id: plan.capture_id, attempt_id: 'offline-attempt', plan_digest: plan.plan_digest,
       layer: 'offline-fixture', status: 'pass',
-      checks: ['artifact-schema', 'bounded-environment', 'fixed-projection', 'layer-labels', 'no-forbidden-content', 'no-secret-material', 'path-confinement', 'retained-failures', 'synthetic-only'],
+      checks: ['artifact-schema', 'bounded-environment', 'fixed-projection', 'layer-labels', 'no-forbidden-content', 'no-secret-material', 'path-confinement', 'retained-failures', 'success-only-omission'],
       failed_attempt_count: 1, indeterminate_attempt_count: 0, sanitized_at: '2026-08-01T09:00:00.000Z',
     } as const;
-    sanitizeArtifact('attemptEvents', failedEvents, 'offline-fixture', registry);
-    sanitizeArtifact('sanitizationReport', failedSanitization, 'offline-fixture', registry);
+    const failedSummary = { total: 1, complete: 0, failed: 1, indeterminate: 0 } as const;
+    sanitizeAttemptArtifacts(failedEvents, failedSanitization, failedSummary, [], 'offline-fixture', registry);
     artifacts.push(writeArtifact(root, 'attempt-events.json', failedEvents.schema_version, failedEvents));
     artifacts.push(writeArtifact(root, 'sanitization-report.json', failedSanitization.schema_version, failedSanitization));
     const failedManifest = {
       schema_version: 'm6-capture-manifest/v1', capture_id: plan.capture_id, plan_digest: plan.plan_digest, layer: 'offline-fixture', artifacts,
-      attempt_summary: { total: 1, complete: 0, failed: 1, indeterminate: 0 }, publication_state: 'staged-not-published',
+      attempt_summary: failedSummary, publication_state: 'staged-not-published',
     } as const;
     sanitizeArtifact('captureManifest', failedManifest, 'offline-fixture', registry);
     writeArtifact(root, 'capture-manifest.json', failedManifest.schema_version, failedManifest);
@@ -96,17 +106,17 @@ export async function runOfflinePlan(relativePlanPath: string): Promise<OfflineR
   const sanitization = {
     schema_version: 'm6-sanitization-report/v1', capture_id: plan.capture_id, attempt_id: 'offline-attempt', plan_digest: plan.plan_digest,
     layer: 'offline-fixture', status: 'pass',
-    checks: ['artifact-schema', 'bounded-environment', 'fixed-projection', 'layer-labels', 'no-forbidden-content', 'no-secret-material', 'path-confinement', 'retained-failures', 'synthetic-only'],
+    checks: ['artifact-schema', 'bounded-environment', 'fixed-projection', 'layer-labels', 'no-forbidden-content', 'no-secret-material', 'path-confinement', 'retained-failures', 'success-only-omission'],
     failed_attempt_count: 0, indeterminate_attempt_count: 0, sanitized_at: '2026-08-01T09:00:00.000Z',
   } as const;
-  sanitizeArtifact('attemptEvents', events, 'offline-fixture', registry);
-  sanitizeArtifact('sanitizationReport', sanitization, 'offline-fixture', registry);
+  const attemptSummary = { total: 1, complete: 1, failed: 0, indeterminate: 0 } as const;
+  sanitizeAttemptArtifacts(events, sanitization, attemptSummary, ['offline-attempt'], 'offline-fixture', registry);
   artifacts.push(writeArtifact(root, 'offline-matrix.json', matrix.schema_version, matrix));
   artifacts.push(writeArtifact(root, 'attempt-events.json', events.schema_version, events));
   artifacts.push(writeArtifact(root, 'sanitization-report.json', sanitization.schema_version, sanitization));
   const manifest = {
     schema_version: 'm6-capture-manifest/v1', capture_id: plan.capture_id, plan_digest: plan.plan_digest, layer: 'offline-fixture', artifacts,
-    attempt_summary: { total: 1, complete: 1, failed: 0, indeterminate: 0 }, publication_state: 'staged-not-published',
+    attempt_summary: attemptSummary, publication_state: 'staged-not-published',
   } as const;
   sanitizeArtifact('captureManifest', manifest, 'offline-fixture', registry);
   writeArtifact(root, 'capture-manifest.json', manifest.schema_version, manifest);

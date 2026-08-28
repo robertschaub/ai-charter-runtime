@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 /** ADR-003 composite checkpoints, local record verification, and receipt references. */
-import { execFile } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import {
   closeSync,
@@ -14,7 +13,7 @@ import {
   rmSync,
   writeSync,
 } from 'node:fs';
-import { basename, dirname, join, relative, resolve } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 
 import { z } from 'zod';
 
@@ -279,15 +278,6 @@ function compactTimestamp(value: string): string {
 
 function expectedCheckpointFile(artifact: CheckpointArtifact): string {
   return `${checkpointNumber(artifact.seq)}-${compactTimestamp(artifact.created_at)}.json`;
-}
-
-function pointerForArtifact(file: string, artifact: CheckpointArtifact): CheckpointPointer {
-  return checkpointPointer.parse({
-    seq: artifact.seq,
-    file,
-    checkpoint_id: artifact.checkpoint_id,
-    composite_digest: artifact.composite_digest,
-  });
 }
 
 function decodeUtf8(bytes: Buffer, label: string): string {
@@ -680,159 +670,6 @@ function validBranch(value: string): boolean {
   );
 }
 
-function runGit(
-  cwd: string,
-  args: readonly string[],
-  allowExitOne = false,
-): Promise<{ readonly stdout: string; readonly exitCode: 0 | 1 }> {
-  const inheritedNames = [
-    'SystemRoot',
-    'TEMP',
-    'TMP',
-    'ComSpec',
-    'PATHEXT',
-    'Path',
-    'PATH',
-  ];
-  const inherited = Object.fromEntries(
-    inheritedNames.flatMap((name) => (process.env[name] === undefined ? [] : [[name, process.env[name]]])),
-  );
-  return new Promise((resolveResult, reject) => {
-    execFile(
-      'git',
-      [...args],
-      {
-        cwd,
-        env: { ...inherited, GIT_TERMINAL_PROMPT: '0', GCM_INTERACTIVE: 'Never' },
-        timeout: 10_000,
-        windowsHide: true,
-        maxBuffer: 1024 * 1024,
-      },
-      (error, stdout) => {
-        if (error === null) {
-          resolveResult({ stdout, exitCode: 0 });
-          return;
-        }
-        if (allowExitOne && typeof error === 'object' && error !== null && 'code' in error && error.code === 1) {
-          resolveResult({ stdout, exitCode: 1 });
-          return;
-        }
-        reject(error);
-      },
-    );
-  });
-}
-
-export async function resolveCheckpointCommit(
-  context: LocalCheckpointCommitContext,
-): Promise<LocalCheckpointCommitEvidence> {
-  const executeGit = context.gitRunner ?? runGit;
-  const repoRoot = resolve(context.repoRoot);
-  const artifactPath = resolve(context.checkpointsRoot, context.file);
-  const relativeArtifact = relative(repoRoot, artifactPath).replaceAll('\\', '/');
-  const relativePointer = relative(repoRoot, resolve(context.checkpointsRoot, 'latest.json')).replaceAll('\\', '/');
-  if (
-    relativeArtifact.startsWith('../') ||
-    relativeArtifact === '' ||
-    relativePointer.startsWith('../') ||
-    relativePointer === ''
-  ) {
-    throw acknowledgmentAmbiguous('checkpoint artifact or pointer is outside the configured repository');
-  }
-  try {
-    const history = (await executeGit(repoRoot, ['log', '--format=%H', '--', relativeArtifact])).stdout
-      .split(/\r?\n/)
-      .map((value) => value.trim())
-      .filter((value) => value.length > 0);
-    for (const commitSha of history) {
-      if (!gitCommitSha.safeParse(commitSha).success) {
-        throw acknowledgmentAmbiguous(`checkpoint ${context.artifact.checkpoint_id} has an invalid local commit sha`);
-      }
-    }
-    const localArtifact = decodeUtf8(readFileSync(artifactPath), context.file);
-    const expectedPointer = `${canonicalize(pointerForArtifact(context.file, context.artifact))}\n`;
-    for (const commitSha of history) {
-      let committedArtifact: string;
-      let committedPointer: string;
-      try {
-        committedArtifact = (await executeGit(repoRoot, ['show', `${commitSha}:${relativeArtifact}`])).stdout;
-        committedPointer = (await executeGit(repoRoot, ['show', `${commitSha}:${relativePointer}`])).stdout;
-      } catch {
-        continue;
-      }
-      if (committedPointer !== expectedPointer) continue;
-      if (committedArtifact !== localArtifact) {
-        throw acknowledgmentAmbiguous(`checkpoint commit ${commitSha} differs from the exact artifact bytes`);
-      }
-      return { status: 'committed', commitSha };
-    }
-    if (context.latest && history.length > 0) {
-      throw acknowledgmentAmbiguous(
-        `latest checkpoint ${context.artifact.checkpoint_id} is committed without its exact matching pointer`,
-      );
-    }
-    return { status: 'uncommitted' };
-  } catch (error) {
-    if (error instanceof RecordVerificationError) throw error;
-    throw acknowledgmentAmbiguous(`local commit evidence for ${context.artifact.checkpoint_id} is unavailable`);
-  }
-}
-
-export async function observeCheckpointRemote(
-  context: RemoteCheckpointObservationContext,
-): Promise<RemoteCheckpointObservation> {
-  if (context.branch !== undefined && !validBranch(context.branch)) {
-    throw acknowledgmentAmbiguous('configured checkpoint branch is invalid');
-  }
-  const requestedUrl = context.repoUrl === undefined ? undefined : safeRepoUrl(context.repoUrl);
-  if (context.repoUrl !== undefined && requestedUrl === null) {
-    throw acknowledgmentAmbiguous('configured checkpoint repository is not a public HTTP URL');
-  }
-  try {
-    const executeGit = context.gitRunner ?? runGit;
-    const repoRoot = resolve(context.repoRoot);
-    const branchResult = context.branch === undefined
-      ? await executeGit(repoRoot, ['symbolic-ref', '--short', 'HEAD'])
-      : { stdout: context.branch, exitCode: 0 as const };
-    const branch = branchResult.stdout.trim();
-    if (!validBranch(branch)) return { status: 'unavailable', reason: 'repository has no verifiable branch' };
-    const originUrl = safeRepoUrl((await executeGit(repoRoot, ['remote', 'get-url', 'origin'])).stdout.trim());
-    if (originUrl === null) throw acknowledgmentAmbiguous('origin is not a public HTTP repository URL');
-    if (requestedUrl !== undefined && requestedUrl !== originUrl) {
-      throw acknowledgmentAmbiguous('configured checkpoint repository does not match origin');
-    }
-    const repoUrl = requestedUrl ?? originUrl;
-    const ref = `refs/heads/${branch}`;
-    const remoteOutput = (await executeGit(repoRoot, ['ls-remote', '--heads', 'origin', ref])).stdout.trim();
-    const remoteLine = remoteOutput
-      .split(/\r?\n/)
-      .filter((line) => line.length > 0)
-      .map((line) => line.trim().split(/\s+/))
-      .find((parts) => parts[1] === ref);
-    if (remoteLine === undefined) return { status: 'ref_absent', repoUrl, branch };
-    const remoteHeadSha = remoteLine[0] ?? '';
-    if (!gitCommitSha.safeParse(remoteHeadSha).success) {
-      throw acknowledgmentAmbiguous(`remote branch ${branch} returned an invalid commit sha`);
-    }
-    const contains: Record<string, boolean> = {};
-    for (const commitSha of [...new Set(context.commitShas)]) {
-      if (!gitCommitSha.safeParse(commitSha).success) {
-        throw acknowledgmentAmbiguous('remote observation received an invalid local checkpoint commit sha');
-      }
-      if (commitSha === remoteHeadSha) {
-        contains[commitSha] = true;
-        continue;
-      }
-      const ancestor = await executeGit(repoRoot, ['merge-base', '--is-ancestor', commitSha, remoteHeadSha], true);
-      contains[commitSha] = ancestor.exitCode === 0;
-    }
-    return { status: 'ref_present', remoteHeadSha, repoUrl, branch, contains };
-  } catch (error) {
-    if (error instanceof RecordVerificationError) throw error;
-    return { status: 'unavailable', reason: 'remote checkpoint observation is unavailable' };
-  }
-}
-
 function containsCommit(
   observation: Extract<RemoteCheckpointObservation, { readonly status: 'ref_present' }>,
   commitSha: string,
@@ -942,7 +779,10 @@ async function resolveCheckpointEvidence(
   attempts: ReadonlyMap<string, AnchorAttempt>,
   options: VerifyRecordsOptions,
 ): Promise<readonly CheckpointEvidence[]> {
-  const resolver = options.localCommitResolver ?? resolveCheckpointCommit;
+  const resolver = options.localCommitResolver;
+  if (resolver === undefined) {
+    throw acknowledgmentAmbiguous('remote verification requires an injected local checkpoint commit resolver');
+  }
   const evidence = await Promise.all(
     checkpoints.artifacts.map(async (item, index): Promise<CheckpointEvidence> => ({
       ...item,
@@ -1010,8 +850,11 @@ export async function verifyRecords(options: VerifyRecordsOptions): Promise<Reco
   } else if (latest !== null && checkpoints.pointer !== null) {
     const evidence = await resolveCheckpointEvidence(checkpoints, attempts, options);
     const commits = evidence.flatMap((item) => item.commit.status === 'committed' ? [item.commit.commitSha] : []);
+    if (options.remoteObserver === undefined) {
+      throw acknowledgmentAmbiguous('remote verification requires an injected remote checkpoint observer');
+    }
     const observation = validateRemoteObservation(
-      await (options.remoteObserver ?? observeCheckpointRemote)({
+      await options.remoteObserver({
         repoRoot: options.repoRoot ?? process.cwd(),
         commitShas: commits,
         ...(options.branch === undefined ? {} : { branch: options.branch }),

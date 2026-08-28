@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: CC-BY-4.0 -->
 # Runtime implementation plan
 
-**Status date:** 2026-08-26
+**Status date:** 2026-08-28
 
 **Current milestone:** M4 and bounded M5 complete; the ADR-016 M6 definition received GO at `582eaeb`, and the
 separate M6.0a anchoring-flow prerequisite received GO at `be7f2ef`. The M6.0b unsupported-`reverse` implementation
@@ -64,9 +64,11 @@ entry points with no dormant live mode. The initial `f5583a1` review returned NO
 defects; correction `5952066` received exact-SHA **GO — no findings**. The approved implementation candidate adds
 the exact catalog, shared two-lane executors, nine isolated loopback assertions, strict schemas and plan digest,
 path-confined gitignored staging, fixed bounded projections, sanitization, and generated acceptance ledger. It
-adds no live entry point, provider call, checkpoint operation, public capture, publication, or push and remains
-review-pending.
-Candidate validation is `npm run typecheck` clean, 4/4 Git-safety tests, 423/423 Vitest tests across 45 files,
+adds no live entry point, provider call, repository checkpoint/Git operation, public capture, publication, or push
+and remains review-pending. The bounded correction performs a row-by-row non-vacuity self-audit of all 35
+adversarial executors: required outcomes now come from the named production mechanism, with no caller-injected
+authority defect or hard-coded terminal evidence; beat 15 alone writes and verifies a staging-only checkpoint fixture.
+Candidate validation is `npm run typecheck` clean, 4/4 Git-safety tests, 426/426 Vitest tests across 45 files,
 both unchanged signed cards verified, `npm run m6:schemas` clean, and `git diff --check` clean. These are local
 maintainer-run conformance results, not the pending exact-SHA review or a live capture.
 The same documentation tranche corrects ADR-015's carried inventory wording: twenty-one routes at M5.13,
@@ -773,7 +775,7 @@ authorization route. The bounded handoff and session implementation was independ
 1. **M6.3 — exact-SHA implementation review.** Review the bounded candidate against ADR-019: strict schemas,
    closed catalog, genuinely executed two-lane matrix, acceptance ledger, gitignored staging, fixed-projection
    sanitization, offline/dry-run entry points, and the carried M6.2 transport assertions. No live entry point,
-   provider call, checkpoint operation, capture materialization, or push is part of this review.
+   provider call, repository checkpoint/Git operation, capture materialization, or push is part of this review.
 2. **M6.4 — live capture and publication.** Freeze one plan, require M6.0a's current `remotely_acknowledged`
    predicate, obtain action-time approval for its bounded acting and
    screening-provider calls and separate approval for checkpoint pushes, capture through `runtime:start`, sanitize and review the

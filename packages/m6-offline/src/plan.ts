@@ -48,6 +48,9 @@ export function validatePlan(value: unknown, registry = new SchemaRegistry()): C
   for (const command of plan.commands) assertCommand(command);
   assertSortedUnique(plan.storyboards.map((storyboard) => storyboard.id), 'storyboard ids');
   for (const storyboard of plan.storyboards) assertSortedUnique(storyboard.case_ids, `${storyboard.id} case ids`);
+  const expectedBoundaries = plan.expected_boundaries as { stop_case_ids: readonly string[]; effect_case_ids: readonly string[] };
+  assertSortedUnique(expectedBoundaries.stop_case_ids, 'expected stop case ids');
+  assertSortedUnique(expectedBoundaries.effect_case_ids, 'expected effect case ids');
   if (plan.lanes[0].card_binding.card_digest === plan.lanes[1].card_binding.card_digest) {
     throw new M6PlanError('m6-plan-lanes-not-distinct', 'lane card bindings must be distinct');
   }

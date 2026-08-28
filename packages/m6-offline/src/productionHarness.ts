@@ -5,12 +5,16 @@ import { join } from 'node:path';
 import {
   AuthorizationCore,
   bindMandate,
+  CaseSessionHandoffService,
   CardRegistry,
   ConversationProjectionService,
   digestFor,
+  ExecutionPreparationService,
   freezeProposal,
   Keyring,
   loadPolicyFile,
+  ProposalIntakeService,
+  ProposalPrecommitService,
   type LoadedPolicy,
   syntheticSystemUseForTests,
   type SystemUseDecisionService,
@@ -33,7 +37,10 @@ const MANDATE_PATH = join(REPOSITORY_ROOT, 'fixtures', 'demo', 'mandate.json');
 const KEY_ID = 'm6-offline-hmac';
 const KEY = 'a'.repeat(64);
 const PRINCIPAL = { credential: 'role:principal', claimed_role: 'principal' } as const;
+const CASE_OFFICER = { credential: 'role:case_officer', claimed_role: 'case_officer' } as const;
 const ORCHESTRATOR = { credential: 'proc:orchestrator', claimed_role: null } as const;
+const AUTHZ = { credential: 'proc:authz', claimed_role: null } as const;
+const SERVICES_HOST = { credential: 'proc:services_host', claimed_role: null } as const;
 
 class DeterministicIds implements IdFactory {
   #next = 0;
@@ -70,10 +77,16 @@ export class ProductionHarness {
   readonly selectedCard: CardBinding;
   readonly systemUse: SystemUseDecisionService;
   readonly authorizationBootId: string;
+  readonly sessionId: string;
+  readonly conversationProjections: ConversationProjectionService;
+  readonly proposalIntakes: ProposalIntakeService;
+  readonly proposalPrecommit: ProposalPrecommitService;
+  readonly executionPreparations: ExecutionPreparationService;
   readonly #getNow: () => string;
   readonly #setNow: (value: string) => void;
   readonly #signals = new Map<'submit' | 'verify', readonly ScreeningSignal[]>();
   #proposalSequence = 0;
+  #nativeContextReady = false;
 
   private constructor(options: ProductionHarnessOptions, store: WalStore, core: AuthorizationCore, keyring: Keyring, cards: CardRegistry, policy: LoadedPolicy, mandate: Mandate, selectionId: string, systemUse: SystemUseDecisionService, authorizationBootId: string, getNow: () => string, setNow: (value: string) => void) {
     this.store = store;
@@ -88,8 +101,51 @@ export class ProductionHarness {
     this.selectedCard = options.selectedCard;
     this.systemUse = systemUse;
     this.authorizationBootId = authorizationBootId;
+    this.sessionId = `session_${safeId(options.caseId)}_${safeId(options.laneSlot)}`;
     this.#getNow = getNow;
     this.#setNow = setNow;
+    let intakeSequence = 0;
+    let proposalSequence = 0;
+    let actionSequence = 0;
+    let executionPreparationSequence = 0;
+    this.proposalIntakes = new ProposalIntakeService({
+      store,
+      cards,
+      keyring,
+      systemUse,
+      caseId: safeId(options.caseId),
+      authorizationBootId,
+      now: getNow,
+      nextIntakeId: () => `pint_${safeId(options.caseId)}_${safeId(options.laneSlot)}_${++intakeSequence}`,
+      nextProposalId: () => `prp_native_${safeId(options.caseId)}_${safeId(options.laneSlot)}_${++proposalSequence}`,
+      nextActionId: () => `act_native_${safeId(options.caseId)}_${safeId(options.laneSlot)}_${++actionSequence}`,
+    });
+    this.conversationProjections = new ConversationProjectionService({
+      store,
+      cards,
+      keyring,
+      caseId: safeId(options.caseId),
+      authorizationBootId,
+      screeningFixtures: [],
+      systemUse,
+      proposalIntakes: this.proposalIntakes,
+      now: getNow,
+    });
+    this.proposalPrecommit = new ProposalPrecommitService({
+      store,
+      authorization: core,
+      proposalIntakes: this.proposalIntakes,
+      now: getNow,
+    });
+    this.executionPreparations = new ExecutionPreparationService({
+      store,
+      authorization: core,
+      proposalIntakes: this.proposalIntakes,
+      authorizationBootId,
+      authorizedAgentId: 'agent_demo',
+      now: getNow,
+      nextId: () => `xpr_${safeId(options.caseId)}_${safeId(options.laneSlot)}_${++executionPreparationSequence}`,
+    });
   }
 
   static async create(options: ProductionHarnessOptions): Promise<ProductionHarness> {
@@ -144,8 +200,8 @@ export class ProductionHarness {
     };
     const mandate = bindMandate(keyring, {
       ...mandateBody,
-      ...options.mandateOverrides,
       default_acting_model: selectedDefault,
+      ...options.mandateOverrides,
     });
     await core.grantMandate(mandate, PRINCIPAL);
     const selectionId = `sel_${caseId}_${lane}`;
@@ -222,16 +278,39 @@ export class ProductionHarness {
   }
 
   projections(): ConversationProjectionService {
-    return new ConversationProjectionService({
+    return this.conversationProjections;
+  }
+
+  async prepareNativeContext(): Promise<void> {
+    if (this.#nativeContextReady) return;
+    const caseId = safeId(this.caseId);
+    const handoffs = new CaseSessionHandoffService({
       store: this.store,
-      cards: this.cards,
-      keyring: this.keyring,
-      caseId: safeId(this.caseId),
+      worldId: 'w-demo',
       authorizationBootId: this.authorizationBootId,
-      screeningFixtures: [],
-      systemUse: this.systemUse,
-      now: () => this.now,
+      targetOrigin: 'http://127.0.0.1:7802',
+      caseExists: (candidate) => candidate === caseId,
+      randomCode: () => 'b'.repeat(64),
+      nextHandoffId: () => `handoff_${caseId}_${safeId(this.laneSlot)}`,
     });
+    const minted = await handoffs.mint(caseId, CASE_OFFICER);
+    const { expires_at: ignoredExpiry, ...input } = minted;
+    void ignoredExpiry;
+    await handoffs.redeem({ ...input, session_id: this.sessionId }, ORCHESTRATOR);
+    await this.core.putConversationItems({
+      caseId,
+      actor: AUTHZ,
+      items: [{
+        id: `said_${caseId}_${safeId(this.laneSlot)}`,
+        store: 'said',
+        turn: `turn_${caseId}`,
+        text: 'Synthetic applicant filing facts.',
+        provenance: { derived_from: [], hops: [] },
+        tags: ['conf:case', 'purpose:grant-assessment'],
+        origin_actor: 'applicant',
+      }],
+    });
+    this.#nativeContextReady = true;
   }
 
   setSignals(gate: 'submit' | 'verify', signals: readonly ScreeningSignal[]): void {
@@ -305,6 +384,22 @@ export class ProductionHarness {
       now: () => this.now,
     });
     return new MockServicesHost(ledger, this.core);
+  }
+
+  nativeServices(recordsRoot: string): MockServicesHost {
+    const ledger = new EffectLedger({
+      recordsRoot,
+      worldId: 'w-demo',
+      bootId: `services_boot_${safeId(this.caseId)}_${safeId(this.laneSlot)}`,
+      keyring: this.keyring,
+      now: () => this.now,
+    });
+    return new MockServicesHost(ledger, {
+      commitVerify: (input) => this.core.commitVerify(input),
+      reportEffectOutcome: (input) => this.core.reportEffectOutcome(input),
+      commitVerifyPreparation: (_worldId, preparationId, servicesHostBootId, servicesLedgerId) =>
+        this.executionPreparations.commitVerify(preparationId, servicesHostBootId, servicesLedgerId, SERVICES_HOST),
+    });
   }
 
   close(): void {

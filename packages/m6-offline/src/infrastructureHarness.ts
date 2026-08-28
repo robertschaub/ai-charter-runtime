@@ -3,6 +3,7 @@
 import { CaseExecutionStore, CaseSessionStore, OrchestratorHttpServer } from 'runtime-consoles/m6-infrastructure';
 import { ServicesHttpServer } from 'services-mock/m6-infrastructure';
 
+import { M6CapabilityTrap } from './capabilityTrap.js';
 import { boundedResult } from './result.js';
 import type { BoundedCaseResult, ScenarioContext } from './types.js';
 
@@ -10,8 +11,10 @@ const ORCHESTRATOR_TOKEN = 'b'.repeat(64);
 const AUTHORIZATION_TOKEN = 'c'.repeat(64);
 const ACTIVE_SESSION_TOKEN = 'd'.repeat(64);
 const STALE_SESSION_TOKEN = 'e'.repeat(64);
+const CAPABILITIES = new M6CapabilityTrap(true);
 
 async function request(origin: string, path: string, init: RequestInit = {}): Promise<Response> {
+  CAPABILITIES.assertSocket(origin);
   const parsed = new URL(origin);
   if (parsed.protocol !== 'http:' || parsed.hostname !== '127.0.0.1') {
     throw new Error('m6 infrastructure harness refused a non-loopback origin');
@@ -53,6 +56,7 @@ async function withServices<T>(operation: (origin: string) => Promise<T>): Promi
     host: '127.0.0.1', port: 0,
   });
   const address = await server.listen();
+  CAPABILITIES.assertListen(address.host);
   if (address.host !== '127.0.0.1') throw new Error('listener escaped IPv4 loopback');
   try { return await operation(address.origin); } finally { await server.close(); }
 }
@@ -79,6 +83,7 @@ async function withOrchestrator<T>(operation: (origin: string) => Promise<T>): P
     host: '127.0.0.1', port: 0,
   });
   const address = await server.listen();
+  CAPABILITIES.assertListen(address.host);
   if (address.host !== '127.0.0.1') throw new Error('listener escaped IPv4 loopback');
   try { return await operation(address.origin); } finally { await server.close(); }
 }

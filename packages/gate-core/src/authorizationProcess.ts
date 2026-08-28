@@ -27,6 +27,7 @@ import {
   verifyRecords,
   type RecordsVerificationReport,
 } from './checkpoint.js';
+import { observeCheckpointRemote, resolveCheckpointCommit } from './checkpointGitObserver.js';
 import { digestFileSet } from './fileSetDigest.js';
 import { loadKeyring } from './keyringLoader.js';
 import { loadPolicyFile } from './policyLoader.js';
@@ -231,6 +232,8 @@ export async function startAuthorizationProcess(
         worldId: world,
         local: verifyLocally,
         repoRoot: process.cwd(),
+        localCommitResolver: resolveCheckpointCommit,
+        remoteObserver: observeCheckpointRemote,
         ...(env['RUNTIME_CHECKPOINT_BRANCH'] === undefined
           ? {}
           : { branch: env['RUNTIME_CHECKPOINT_BRANCH'] }),

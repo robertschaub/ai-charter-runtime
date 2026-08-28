@@ -7,7 +7,7 @@ import { REPOSITORY_ROOT } from './repository.js';
 const SAFE_BUILTINS = new Set(['node:assert', 'node:buffer', 'node:crypto', 'node:fs', 'node:module', 'node:os', 'node:path', 'node:url', 'node:util']);
 const SAFE_PACKAGES = new Set(['ajv', 'ajv/dist/2020.js', 'ajv-formats', 'gate-core/offline-safe', 'model-adapters/offline-safe', 'runtime-consoles/offline-safe', 'services-mock/offline-safe']);
 const INFRA_PACKAGES = new Set(['runtime-consoles/m6-infrastructure', 'services-mock/m6-infrastructure']);
-const IMPORT = /(?:from\s+|import\s*\()(['"])([^'"]+)\1/g;
+const IMPORT = /(?:from\s+|import\s*\(\s*|import\s+)(['"])([^'"]+)\1/g;
 const SAFE_ENTRYPOINTS = new Map([
   ['gate-core/offline-safe', join(REPOSITORY_ROOT, 'packages', 'gate-core', 'src', 'offlineSafe.ts')],
   ['model-adapters/offline-safe', join(REPOSITORY_ROOT, 'packages', 'adapters', 'src', 'contracts.ts')],
@@ -51,17 +51,29 @@ export function assertOfflineImportBoundary(): void {
   for (const name of readdirSync(sourceRoot).filter((entry) => entry.endsWith('.ts') && !entry.endsWith('.test.ts')).sort()) {
     const text = readFileSync(join(sourceRoot, name), 'utf8');
     const infrastructure = name === 'infrastructureHarness.ts';
-    for (const match of text.matchAll(IMPORT)) {
-      if (typeOnlyImport(text, match.index ?? 0)) continue;
-      const specifier = match[2]!;
-      if (specifier.startsWith('.')) continue;
-      if (SAFE_BUILTINS.has(specifier) || SAFE_PACKAGES.has(specifier)) continue;
-      if (infrastructure && INFRA_PACKAGES.has(specifier)) continue;
-      throw new Error(`M6 offline import boundary refused ${specifier} in ${name}`);
-    }
-    if (name !== 'importBoundary.ts' && !infrastructure && /\b(?:fetch|WebSocket)\b|process\.env/u.test(text)) throw new Error(`M6 offline global boundary refused ${name}`);
-    if (infrastructure && /process\.env|WebSocket/u.test(text)) throw new Error('M6 infrastructure harness may not access environment credentials or WebSocket');
+    assertOfflineSourceText(name, text, infrastructure);
   }
   const visited = new Set<string>();
   for (const entry of SAFE_ENTRYPOINTS.values()) scanSafeGraph(entry, visited);
+}
+
+/** Testable source-level boundary used by the repository scanner and negative fixtures. */
+export function assertOfflineSourceText(name: string, text: string, infrastructure = false): void {
+  for (const match of text.matchAll(IMPORT)) {
+    if (typeOnlyImport(text, match.index ?? 0)) continue;
+    const specifier = match[2]!;
+    if (specifier.startsWith('.')) continue;
+    if (SAFE_BUILTINS.has(specifier) || SAFE_PACKAGES.has(specifier)) continue;
+    if (infrastructure && INFRA_PACKAGES.has(specifier)) continue;
+    throw new Error(`M6 offline import boundary refused ${specifier} in ${name}`);
+  }
+  const globalText = name === 'runtimeEnvironment.ts'
+    ? text.replaceAll('process.env.npm_config_user_agent', '')
+    : text;
+  if (name !== 'importBoundary.ts' && !infrastructure && /\b(?:fetch|WebSocket)\b|process\.env/u.test(globalText)) {
+    throw new Error(`M6 offline global boundary refused ${name}`);
+  }
+  if (infrastructure && /process\.env|WebSocket/u.test(text)) {
+    throw new Error('M6 infrastructure harness may not access environment credentials or WebSocket');
+  }
 }

@@ -42,7 +42,15 @@ function assertProviderSpecific(result: BoundedCaseResult): void {
     submit?.verdict !== expected.expected.submit_verdict || submit.matched_rule_id !== expected.expected.matched_rule_id ||
     actualContainment !== expected.expected.containment_state ||
     result.effect_count !== 0 || result.commitment_state !== (result.lane_slot === 'lane-0' ? 'none' : 'blocked')
-  ) throw new Error(`beat-20 ${result.lane_slot} diverged from its exact provider fixture`);
+  ) throw new Error(`beat-20 ${result.lane_slot} diverged from its exact provider fixture: ${JSON.stringify({
+    mandate_permission: assertion(result, 'mandate_permission'),
+    disclosure_boundary: assertion(result, 'disclosure_boundary'),
+    submit_verdict: submit?.verdict ?? null,
+    matched_rule_id: submit?.matched_rule_id ?? null,
+    containment_state: actualContainment,
+    effect_count: result.effect_count,
+    commitment_state: result.commitment_state,
+  })}`);
 }
 
 export function comparePair(lane0: BoundedCaseResult, lane1: BoundedCaseResult, mode: 'invariant' | 'provider_specific'): PairComparison {

@@ -21,7 +21,8 @@ and reviewed at `b3a4992`, GO — no blocking findings, using synthetic adapters
 matrix, strict artifact schemas, gitignored staging, and sanitization boundary; its corrected definition was
 reviewed at `5952066`, GO — no findings. The implementation candidate executes only deterministic synthetic
 fixtures and nine dedicated loopback transport assertions; it creates no public capture. Exact-SHA review remains
-pending. No live run, provider call, checkpoint operation, publication, or push is authorized.
+pending. Beat 15 may write and verify only its disposable staging checkpoint fixture; no live run, provider call,
+repository checkpoint/Git operation, publication, or push is authorized.
 
 The authoritative build specification lives in the documentation repository:
 [runtime-gates-poc-spec.md](https://github.com/robertschaub/our-ai-charter/blob/main/docs/wip/runtime-gates-poc-spec.md).

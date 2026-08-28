@@ -6,7 +6,9 @@ import { resolve } from 'node:path';
 import {
   digestFileSet,
   loadPolicyFile,
+  observeCheckpointRemote,
   recordVerificationAccess,
+  resolveCheckpointCommit,
   verifyRecords,
   WalStore,
 } from 'gate-core';
@@ -48,6 +50,8 @@ async function main() {
       worldId,
       local,
       repoRoot: process.cwd(),
+      localCommitResolver: resolveCheckpointCommit,
+      remoteObserver: observeCheckpointRemote,
       ...(process.env.RUNTIME_CHECKPOINT_BRANCH === undefined
         ? {}
         : { branch: process.env.RUNTIME_CHECKPOINT_BRANCH }),

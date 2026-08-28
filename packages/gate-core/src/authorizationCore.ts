@@ -556,7 +556,9 @@ function authorityDefects(
     selection.target.card_id !== input.proposal.acting_model.card_id ||
     selection.target.card_version !== input.proposal.acting_model.card_version ||
     selection.target.requested_id !== input.proposal.acting_model.requested_id ||
-    selection.target.card_digest !== approved?.card_digest ||
+    // An absent approval is the distinct substituted-model defect; selection staleness
+    // still covers every mismatch against an approval that actually exists.
+    (approved !== undefined && selection.target.card_digest !== approved.card_digest) ||
     (modelEvidence.cardStatus === 'current' &&
       (selection.target.card_digest !== modelEvidence.cardDigest ||
         selection.target.verifying_key_id !== modelEvidence.cardKeyId))

@@ -10,10 +10,10 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { appendEntry, verifyChain } from './chain.js';
 import {
   checkpointReceiptReference,
-  resolveCheckpointCommit,
   verifyRecords,
   writeCheckpoint,
 } from './checkpoint.js';
+import { resolveCheckpointCommit } from './checkpointGitObserver.js';
 import { WalStore } from './walStore.js';
 
 const ROOT = fileURLToPath(new URL('../../..', import.meta.url));

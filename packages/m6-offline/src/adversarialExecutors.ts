@@ -12,7 +12,6 @@ import {
   createEmbeddedMac,
   createWorldState,
   digestFor,
-  evaluatePolicy,
   freezeProposal,
   interventionContract,
   loadPolicyFile,
@@ -229,13 +228,17 @@ async function executeCredentialConfinement(context: ScenarioContext): Promise<B
       ],
     });
     const token = context.row.id === 'adv-handoff-on-authority-route' ? 'b'.repeat(64) : 'session_m6_untrusted';
+    let handlerReached = false;
     const response = await adapter.dispatch(
       { method: 'POST', pathname: '/w/w-demo/mandates', authorization: `Bearer ${token}`, origin: 'http://127.0.0.1:7801' },
-      async () => ({ status: 500, body: { unexpected: true } }),
+      async () => {
+        handlerReached = true;
+        return { status: 500, body: { unexpected: true } };
+      },
     );
-    if (response.status !== 401) throw new Error('non-authority credential reached authority handler');
+    if (response.status !== 401 || handlerReached) throw new Error('non-authority credential reached authority handler');
     return failureResult(context, 'credential-not-authorized', 'authorization-http-adapter:credential-map', [
-      { name: 'http_status', observed: response.status }, { name: 'handler_reached', observed: false },
+      { name: 'http_status', observed: response.status }, { name: 'handler_reached', observed: handlerReached },
     ]);
   } finally { harness.close(); }
 }
@@ -251,8 +254,9 @@ export async function executeAdversarial(context: ScenarioContext): Promise<Boun
       try {
         const ledger = new EffectLedger({ recordsRoot: join(context.recordsRoot, 'services'), worldId: 'w-demo', bootId: 'services_boot_m6', keyring: harness.keyring, now: () => harness.now });
         const rejected = ledger.execute({}, {}, () => ({ outcome: 'success' }));
-        if (rejected.accepted || rejected.reason !== 'malformed') throw new Error('service accepted a request without token');
-        return failureResult(context, rejected.reason, 'effect-ledger:token-verification', [{ name: 'accepted', observed: rejected.accepted }, { name: 'ledger_probe_absent', observed: true }]);
+        const probe = ledger.probe('0'.repeat(64));
+        if (rejected.accepted || rejected.reason !== 'malformed' || probe.state !== 'absent') throw new Error('service accepted or recorded a request without token');
+        return failureResult(context, rejected.reason, 'effect-ledger:token-verification', [{ name: 'accepted', observed: rejected.accepted }, { name: 'ledger_probe_state', observed: probe.state }]);
       } finally { harness.close(); }
     }
     case 'adv-consumed-token-replay': {
@@ -310,7 +314,9 @@ export async function executeAdversarial(context: ScenarioContext): Promise<Boun
           await harness.projections().beginCall({ turn_id: 'turn_overlap', selection_id: harness.selectionId, ingress_binding: null, proposal_binding: null, revision_binding: null, actor: ORCHESTRATOR });
         } catch { refused = true; }
         if (!refused) throw new Error('overlapping mandates did not fail the sole-mandate projection boundary');
-        return failureResult(context, 'mandate-ambiguous', 'conversation-projection:single-active-mandate', [{ name: 'active_mandate_count', observed: 2 }, { name: 'model_call_opened', observed: harness.store.snapshot().modelCalls.size }]);
+        const activeMandateCount = [...harness.store.snapshot().mandateStatus.values()].filter((status) => status.state === 'active').length;
+        if (activeMandateCount !== 2) throw new Error('overlapping mandate fixture did not create two active mandates');
+        return failureResult(context, 'mandate-ambiguous', 'conversation-projection:single-active-mandate', [{ name: 'active_mandate_count', observed: activeMandateCount }, { name: 'model_call_opened', observed: harness.store.snapshot().modelCalls.size }]);
       } finally { harness.close(); }
     }
     case 'adv-changed-mandate-ordering': {
@@ -320,10 +326,12 @@ export async function executeAdversarial(context: ScenarioContext): Promise<Boun
         void ignoredBinding;
         const changed = bindMandate(harness.keyring, { ...body, version: 2, ordering_rule: 'earliest-version-wins', issued_at: harness.now });
         await harness.core.amendMandate(changed, PRINCIPAL);
-        const proposal = harness.proposal({ mandate_ref: { mandate_id: changed.mandate_id, version: changed.version } });
-        const evaluated = evaluatePolicy(harness.policy.policy, { gate: 'authorize', proposal, mandate: changed, context: {}, counters: {}, signals: [], screeningPerformed: false, patternEvents: [], now: harness.now, authorityDefects: ['invalid-mandate-binding'] });
-        if (evaluated.verdict !== 'deny') throw new Error('changed ordering was not denied');
-        return boundedResult(context, { gates: [{ name: 'authorize', verdict: evaluated.verdict, matched_rule_id: evaluated.matchedRuleId, ux_class: evaluated.uxClass }], intervention: null, commitment_state: 'blocked', effect_count: 0, failure_class: 'invalid-mandate-binding', containment_class: 'fail-closed', mechanism: 'policy-evaluator:ordering-rule', observed_assertions: [{ name: 'ordering_rule', observed: changed.ordering_rule }, { name: 'effect_count', observed: harness.store.snapshot().effects.size }] });
+        // Preserve the previously valid proposal/selection binding. The core must compare it
+        // with the newly current, invalid-ordering mandate rather than accepting a caller defect.
+        const proposal = harness.proposal();
+        const ruled = await harness.rule('authorize', proposal);
+        if (ruled.ruling.verdict !== 'deny' || ruled.ruling.matched_rule_id !== 'authority:invalid-mandate-binding') throw new Error('core did not derive the changed-ordering authority defect');
+        return failureResult(context, 'invalid-mandate-binding', 'authorization-core:mandate-ordering-rule', [{ name: 'ordering_rule', observed: changed.ordering_rule }, { name: 'matched_rule', observed: ruled.ruling.matched_rule_id }, { name: 'effect_count', observed: harness.store.snapshot().effects.size }], [ruled]);
       } finally { harness.close(); }
     }
     case 'adv-revocation-before-commit':
@@ -353,8 +361,11 @@ export async function executeAdversarial(context: ScenarioContext): Promise<Boun
         const results = await Promise.all([harness.rule('commit', make('race-a')), harness.rule('commit', make('race-b'))]);
         const allowed = results.filter((result) => result.ruling.verdict === 'allow').length;
         const escalated = results.filter((result) => result.ruling.verdict === 'escalate').length;
-        if (allowed !== 1 || escalated !== 1) throw new Error('counter ceiling race did not serialize');
-        return failureResult(context, 'aggregate-ceiling', 'world-lock:counter-reservation', [{ name: 'allowed_count', observed: allowed }, { name: 'escalated_count', observed: escalated }, { name: 'reserved_amount', observed: 60 }], results);
+        const reservedAmount = [...harness.store.snapshot().reservations.values()]
+          .filter((reservation) => reservation.counter === 'amount' && reservation.state === 'reserved')
+          .reduce((total, reservation) => total + reservation.delta, 0);
+        if (allowed !== 1 || escalated !== 1 || reservedAmount !== 60) throw new Error('counter ceiling race did not serialize');
+        return failureResult(context, 'aggregate-ceiling', 'world-lock:counter-reservation', [{ name: 'allowed_count', observed: allowed }, { name: 'escalated_count', observed: escalated }, { name: 'reserved_amount', observed: reservedAmount }], results);
       } finally { harness.close(); }
     }
     case 'adv-crash-after-commitment': {
@@ -408,7 +419,8 @@ export async function executeAdversarial(context: ScenarioContext): Promise<Boun
       const invalid = { trigger_and_state: { trigger: 'missing-field', state: 'open' } };
       const parsed = interventionContract.safeParse(invalid);
       if (parsed.success) throw new Error('incomplete intervention contract was accepted');
-      return failureResult(context, 'invalid-intervention-contract', 'schema:intervention-contract', [{ name: 'schema_accepted', observed: parsed.success }, { name: 'durable_escalation_count', observed: 0 }]);
+      const state = createWorldState('w-demo');
+      return failureResult(context, 'invalid-intervention-contract', 'schema:intervention-contract', [{ name: 'schema_accepted', observed: parsed.success }, { name: 'durable_escalation_count', observed: state.escalations.size }]);
     }
     case 'adv-concurrent-dispositions': {
       const { harness, result, escalationId } = await openEscalation(context);

@@ -7,7 +7,7 @@
   "required": ["schema_version", "capture_id", "attempt_id", "plan_digest", "layer", "status", "checks", "failed_attempt_count", "indeterminate_attempt_count", "sanitized_at"],
   "properties": {
     "schema_version": { "const": "m6-sanitization-report/v1" },
-    "capture_id": { "$ref": "#/$defs/id" },
+    "capture_id": { "$ref": "#/$defs/captureId" },
     "attempt_id": { "$ref": "#/$defs/id" },
     "plan_digest": { "$ref": "#/$defs/digest" },
     "layer": { "enum": ["dry-run", "offline-fixture"] },
@@ -16,7 +16,7 @@
       "type": "array",
       "minItems": 1,
       "uniqueItems": true,
-      "items": { "enum": ["artifact-schema", "bounded-environment", "fixed-projection", "layer-labels", "no-forbidden-content", "no-secret-material", "path-confinement", "retained-failures", "synthetic-only"] }
+      "items": { "enum": ["artifact-schema", "bounded-environment", "fixed-projection", "layer-labels", "no-forbidden-content", "no-secret-material", "path-confinement", "retained-failures", "success-only-omission"] }
     },
     "failed_attempt_count": { "type": "integer", "minimum": 0 },
     "indeterminate_attempt_count": { "type": "integer", "minimum": 0 },
@@ -24,6 +24,7 @@
   },
   "$defs": {
     "id": { "type": "string", "pattern": "^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$" },
+    "captureId": { "type": "string", "pattern": "^(?!(?:con|prn|aux|nul|com[1-9]|lpt[1-9])$)[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$" },
     "digest": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
   }
 }

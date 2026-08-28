@@ -23,8 +23,8 @@
       "minItems": 2,
       "maxItems": 2,
       "prefixItems": [
-        { "allOf": [{ "$ref": "#/$defs/lane" }, { "type": "object", "properties": { "lane_slot": { "const": "lane-0" } } }] },
-        { "allOf": [{ "$ref": "#/$defs/lane" }, { "type": "object", "properties": { "lane_slot": { "const": "lane-1" } } }] }
+        { "description": "The referenced closed lane schema supplies the required fields and additionalProperties=false; this branch fixes only lane_slot.", "allOf": [{ "$ref": "#/$defs/lane" }, { "type": "object", "properties": { "lane_slot": { "const": "lane-0" } } }] },
+        { "description": "The referenced closed lane schema supplies the required fields and additionalProperties=false; this branch fixes only lane_slot.", "allOf": [{ "$ref": "#/$defs/lane" }, { "type": "object", "properties": { "lane_slot": { "const": "lane-1" } } }] }
       ],
       "items": false
     },

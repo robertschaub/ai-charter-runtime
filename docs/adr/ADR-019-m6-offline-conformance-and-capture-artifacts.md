@@ -272,6 +272,8 @@ evidence is limited to Node version, npm version, OS platform, OS release, and a
 machine id, environment variables, and local directories are forbidden. Digests and already-public verification
 key ids remain allowed by their exact schema fields.
 
+Machine sanitization does not claim semantic detection of non-synthetic text; M6.4's required human privacy review owns that screening before publication.
+
 `docs/m6/acceptance.md` is generated deterministically from the closed catalog. It maps all beats,
 adversarial cases, seven baseline criteria, and thirteen test families using only `exercised`, `partial`,
 `not_assessed`, and `not_applicable`. It preserves the specification's current gaps and cannot upgrade a family
@@ -296,6 +298,8 @@ After exact-SHA GO and separate maintainer approval, M6.3 implementation may add
 It may refactor test helpers only when production semantics stay byte-equivalent. It may not add or change a
 runtime route, ACL, policy rule, mandate/proposal/ruling/record schema, authority transition, provider adapter,
 live runner, checkpoint writer, model card, generated record, or external effect.
+
+The implementation may expose the behavior-equivalent local checkpoint writer/verifier through `offline-safe` for beat 15's staging-only fixture after separating the `child_process` Git observer into a non-offline-safe module; this authorizes no repository checkpoint or Git operation.
 
 ## Acceptance tests
 
@@ -332,7 +336,7 @@ The M6.3 implementation is acceptable only if deterministic tests prove:
 
 ## Deferred and excluded
 
-M6.3 does not authorize or implement live provider/screening calls, live capture, checkpoint creation/commit/push,
+M6.3 does not authorize or implement live provider/screening calls, live capture, checkpoint creation/commit/push outside beat 15's staging-only verification fixture,
 capture materialization/publication, probe/key/card operations, real data, external effects, retries/fallbacks,
 model ranking, semantic quality claims, independent-review claims, M6 completion, M6.5 authority-basis/source-
 admissibility work, or M7 article claims.

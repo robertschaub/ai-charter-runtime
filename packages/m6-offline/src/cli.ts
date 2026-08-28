@@ -7,8 +7,9 @@ import { assertOfflineImportBoundary } from './importBoundary.js';
 import { SchemaRegistry } from './schemas.js';
 
 function planArgument(args: readonly string[]): string {
-  if (args.length !== 2 || args[0] !== '--plan' || args[1] === undefined) throw new Error('usage requires exactly --plan <repository-relative-json>');
-  return args[1];
+  const normalized = args[0] === '--' ? args.slice(1) : args;
+  if (normalized.length !== 2 || normalized[0] !== '--plan' || normalized[1] === undefined) throw new Error('usage requires exactly --plan <repository-relative-json>');
+  return normalized[1];
 }
 
 async function main(): Promise<void> {
