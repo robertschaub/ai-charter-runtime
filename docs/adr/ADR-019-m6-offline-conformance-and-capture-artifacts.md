@@ -2,7 +2,8 @@
 # ADR-019 — M6 offline conformance and capture-artifact contract
 
 **Status:** definition reviewed (initial `f5583a1` NO-GO; corrected `5952066` GO — no findings).
-**Implementation:** bounded offline candidate present; exact-SHA review pending. M6.4 remains unstarted and gated.
+**Implementation:** bounded offline implementation reviewed at `d24fe33`, GO — no findings. M6.4 remains
+unstarted and separately approval- and review-gated.
 **Spec:** §§6–7 and 9–10 (M6), especially all twenty-two scripted beats, the complete named adversarial set, the
 two-layer comparison rule, and the honest-limit rule for maintainer-run evidence.
 **Depends on:** ADR-003, ADR-007, ADR-016, ADR-018, and the reviewed M6.2 implementation at `b3a4992`.
