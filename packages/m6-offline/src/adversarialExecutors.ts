@@ -13,7 +13,6 @@ import {
   createWorldState,
   digestFor,
   freezeProposal,
-  interventionContract,
   loadPolicyFile,
   sha256Hex,
   type CommitToken,
@@ -24,6 +23,11 @@ import {
   type ScreeningSignal,
   type TransactionActor,
 } from 'gate-core/offline-safe';
+import {
+  ModelTurnCoordinator,
+  type ModelTurnAuthorizationClient,
+  type ModelTurnLaneConfig,
+} from 'runtime-consoles/offline-safe';
 import { EffectLedger } from 'services-mock/offline-safe';
 
 import { ProductionHarness, type ProductionHarnessOptions } from './productionHarness.js';
@@ -43,6 +47,64 @@ function signal(kind: ScreeningSignal['signal']): ScreeningSignal {
   return {
     kind: 'screening_signal', signal: kind, confidence_pct: 100,
     rationale: `Synthetic adversarial ${kind} fixture.`, model_id: 'screening-model', model_version_reported: 'screening-model-v1',
+  };
+}
+
+function modelAuthorization(harness: ProductionHarness): ModelTurnAuthorizationClient {
+  const projections = harness.projections();
+  return {
+    currentModelSelection: async () => projections.currentSelection(ORCHESTRATOR),
+    checkModelSelection: async (_world, _case, input) => projections.checkSelection({ ...input, actor: ORCHESTRATOR }),
+    selectModel: async (_world, _case, input) => projections.selectModel({ ...input, actor: ORCHESTRATOR }),
+    beginModelCall: async (input, onBehalfOf) => projections.beginCall({
+      turn_id: input.turnId,
+      selection_id: input.selectionId,
+      ingress_binding: input.ingressBinding ?? null,
+      proposal_binding: input.proposalBinding ?? null,
+      revision_binding: input.revisionBinding ?? null,
+      ...(onBehalfOf === undefined ? {} : { sessionId: onBehalfOf.session_id }),
+      actor: ORCHESTRATOR,
+    }),
+    admitModelOutput: async (_world, callId, input, onBehalfOf) => projections.completeCall({
+      call_id: callId,
+      output: input,
+      ...(onBehalfOf === undefined ? {} : { sessionId: onBehalfOf.session_id }),
+      actor: ORCHESTRATOR,
+    }),
+    failModelCall: async (_world, input) => projections.failCall({ ...input, actor: ORCHESTRATOR }),
+    consumeProposalIntake: async (_world, intakeId, content) => harness.proposalIntakes.consume(intakeId, content, ORCHESTRATOR),
+    proposalIntakeStatus: async (_world, intakeId) => harness.proposalIntakes.status(intakeId, ORCHESTRATOR),
+  };
+}
+
+function nativeProposalContent(materialInputId: string): string {
+  return JSON.stringify({
+    declared_objective: 'File the synthetic grant application.',
+    proposed_action: 'Submit the synthetic grant filing.',
+    target: { recipient: 'grant-office', resource: 'application-42' },
+    exact_parameters: { amount_minor_units: 50, reference: 'm6-native-recovery' },
+    material_input_ids: [materialInputId],
+    derived_claim_ids: [],
+    data_to_be_disclosed: ['applicant_name'],
+    cost_obligation: { amount_minor_units: 50, description: 'Synthetic grant amount.' },
+    material_consequences: ['Creates a synthetic public-funds commitment.'],
+    reversibility_class: 'partially-reversible',
+    commercial_influence: { applicable: false, note: 'Not applicable.' },
+  });
+}
+
+function laneConfig(context: ScenarioContext, act: ModelTurnLaneConfig['adapter']['act']): ModelTurnLaneConfig {
+  if (context.selectedCard === null || context.laneSlot === 'single') throw new Error('model boundary requires a lane');
+  return {
+    lane: context.laneSlot === 'lane-0' ? 'publicai' : 'openai',
+    cardId: context.selectedCard.card_id,
+    cardVersion: context.selectedCard.card_version,
+    requestedId: context.selectedCard.requested_id,
+    adapter: {
+      lane: context.laneSlot === 'lane-0' ? 'publicai' : 'openai',
+      requestedId: context.selectedCard.requested_id,
+      act,
+    },
   };
 }
 
@@ -369,11 +431,80 @@ export async function executeAdversarial(context: ScenarioContext): Promise<Boun
       } finally { harness.close(); }
     }
     case 'adv-crash-after-commitment': {
-      const { harness, ruling, intent } = await commitFixture(context);
+      const harness = await harnessFor(context);
       try {
-        const committed = await harness.core.commitVerify({ rulingId: ruling.ruling.ruling_id, intent, servicesHostBootId: 'services_boot_m6', servicesLedgerId: 'ledger_m6', actor: SERVICES_HOST });
-        if (!committed.ok || harness.store.snapshot().commitments.size !== 1 || harness.store.snapshot().effects.size !== 0) throw new Error('crash fixture did not stop between commitment and effect');
-        return failureResult(context, 'unknown-reconciliation-required', 'authorization-core:commitment-linearization', [{ name: 'commitment_count', observed: harness.store.snapshot().commitments.size }, { name: 'effect_count', observed: harness.store.snapshot().effects.size }, { name: 'commitment_state', observed: [...harness.store.snapshot().commitments.values()][0]?.state ?? null }], [ruling], 'committed');
+        await harness.prepareNativeContext();
+        const caseId = context.row.id.replaceAll('-', '_');
+        const lane = context.laneSlot.replaceAll('-', '_');
+        const materialInputId = `said_${caseId}_${lane}`;
+        const proposalRunId = `prun_${caseId}_${lane}`;
+        const coordinator = new ModelTurnCoordinator({
+          worldId: 'w-demo',
+          caseId,
+          authorization: modelAuthorization(harness),
+          lanes: [laneConfig(context, async () => ({
+            lane: context.laneSlot === 'lane-0' ? 'publicai' : 'openai',
+            requestedId: context.selectedCard?.requested_id ?? '',
+            servedId: context.selectedCard?.requested_id ?? '',
+            content: nativeProposalContent(materialInputId),
+            toolCalls: [],
+          }))],
+        });
+        const frozen = await coordinator.runProposal({
+          proposalRunId,
+          conversationVersion: harness.store.snapshot().conversationVersionByCase.get(caseId) ?? 0,
+          turnId: `turn_${caseId}_${lane}`,
+          selectionId: harness.selectionId,
+          cardId: context.selectedCard?.card_id ?? '',
+          cardVersion: context.selectedCard?.card_version ?? 0,
+          requestedId: context.selectedCard?.requested_id ?? '',
+        }, { onBehalfOf: { role: 'case_officer', session_id: harness.sessionId } });
+        const proposal = harness.store.snapshot().proposals.get(frozen.proposal.proposal_id);
+        if (proposal === undefined) throw new Error('native recovery fixture lost its frozen proposal');
+        const precommit = await harness.proposalPrecommit.run(proposal.proposal_id, ORCHESTRATOR);
+        if (precommit.state !== 'verified' || precommit.gates.some((gate) => gate.verdict !== 'allow')) {
+          throw new Error('native recovery fixture did not reach verified precommit');
+        }
+        const preparation = await harness.executionPreparations.issue(caseId, proposalRunId, harness.sessionId, ORCHESTRATOR);
+        const services = harness.nativeServices(join(context.recordsRoot, 'services'));
+        const committed = await harness.executionPreparations.commitVerify(
+          preparation.execution_preparation_id,
+          services.ledger.bootId,
+          services.ledger.ledgerId,
+          SERVICES_HOST,
+        );
+        if (committed.state !== 'committed') throw new Error('native recovery fixture did not stop after commitment');
+        const recovery = await services.executePrepared('w-demo', preparation.execution_preparation_id);
+        const ledgerProbe = services.ledger.probe(committed.token.idempotency_key);
+        const state = harness.store.snapshot();
+        const commitment = state.commitments.get(committed.commitment_id);
+        const commitRuling = state.rulings.get(committed.ruling.ruling_id);
+        if (
+          recovery.state !== 'indeterminate' ||
+          recovery.effect_outcome !== 'unknown-reconciliation-required' ||
+          ledgerProbe.state !== 'absent' ||
+          commitment?.state !== 'bound' ||
+          commitRuling?.verdict !== 'allow' ||
+          state.effects.size !== 0
+        ) throw new Error('services-host recovery did not preserve the commitment without duplicating an effect');
+        return failureResult(
+          context,
+          recovery.effect_outcome,
+          'services-host:already-consumed-ledger-probe',
+          [
+            { name: 'execution_preparation_state', observed: state.executionPreparations.get(preparation.execution_preparation_id)?.state ?? null },
+            { name: 'recovery_state', observed: recovery.state },
+            { name: 'recovery_effect_outcome', observed: recovery.effect_outcome },
+            { name: 'ledger_probe_state', observed: ledgerProbe.state },
+            { name: 'commit_ruling_verdict', observed: commitRuling.verdict },
+            { name: 'commitment_count', observed: state.commitments.size },
+            { name: 'commitment_state', observed: commitment.state },
+            { name: 'effect_count', observed: state.effects.size },
+          ],
+          [],
+          'committed',
+          state.effects.size,
+        );
       } finally { harness.close(); }
     }
     case 'adv-illegal-stage-transition': {
@@ -416,11 +547,49 @@ export async function executeAdversarial(context: ScenarioContext): Promise<Boun
       } finally { harness.close(); }
     }
     case 'adv-escalation-missing-contract-field': {
-      const invalid = { trigger_and_state: { trigger: 'missing-field', state: 'open' } };
-      const parsed = interventionContract.safeParse(invalid);
-      if (parsed.success) throw new Error('incomplete intervention contract was accepted');
-      const state = createWorldState('w-demo');
-      return failureResult(context, 'invalid-intervention-contract', 'schema:intervention-contract', [{ name: 'schema_accepted', observed: parsed.success }, { name: 'durable_escalation_count', observed: state.escalations.size }]);
+      const { harness, result, escalationId } = await openEscalation(context);
+      try {
+        const stateBefore = harness.store.snapshot();
+        const source = stateBefore.escalations.get(escalationId);
+        if (source === undefined) throw new Error('contract-refusal fixture lost its source escalation');
+        const { record_and_feedback: omitted, ...incompleteContract } = source.contract;
+        void omitted;
+        const threatenedId = `${escalationId}_missing_contract`;
+        let refused = false;
+        try {
+          await harness.store.transact(
+            'm6_incomplete_intervention_contract',
+            AUTHZ,
+            [{
+              op: 'escalation.open',
+              escalation: {
+                ...source,
+                escalation_id: threatenedId,
+                contract: incompleteContract,
+              },
+            } as never],
+            harness.now,
+          );
+        } catch {
+          refused = true;
+        }
+        const stateAfter = harness.store.snapshot();
+        if (!refused || stateAfter.escalations.size !== stateBefore.escalations.size || stateAfter.escalations.has(threatenedId)) {
+          throw new Error('incomplete intervention contract reached the durable escalation state');
+        }
+        return failureResult(
+          context,
+          'invalid-intervention-contract',
+          'wal-transaction:intervention-contract',
+          [
+            { name: 'wal_transaction_refused', observed: refused },
+            { name: 'durable_escalation_count_before', observed: stateBefore.escalations.size },
+            { name: 'durable_escalation_count_after', observed: stateAfter.escalations.size },
+            { name: 'threatened_escalation_present', observed: stateAfter.escalations.has(threatenedId) },
+          ],
+          [result],
+        );
+      } finally { harness.close(); }
     }
     case 'adv-concurrent-dispositions': {
       const { harness, result, escalationId } = await openEscalation(context);
