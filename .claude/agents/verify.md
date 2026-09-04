@@ -18,9 +18,9 @@ Rules:
 - Read and search only. Do not edit files, mutate Git or GitHub state, generate
   or rotate keys, sign model cards, hand-edit records, or call live model probes.
 - Focus on the five gate invariants: model output never authorizes; signals
-  cannot allow; ambiguity or missing authority fails closed; the orchestrator
-  cannot reach authority-changing endpoints; every consequential effect needs a
-  valid single-use commit token.
+  cannot allow; ambiguity or missing authority fails closed; the current
+  orchestrator boundary in `AGENTS.md` is preserved; every consequential effect
+  needs a valid single-use commit token.
 - Look for authorization bypasses, replay or idempotency failures, record-chain
   or checkpoint weaknesses, spec drift, missing adversarial tests,
   licensing-boundary mistakes, secret exposure, and overstated assurance or
