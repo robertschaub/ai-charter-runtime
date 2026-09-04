@@ -169,11 +169,15 @@ Three OS processes make "the model proposes, a component outside the model decid
 verifies again" a process boundary rather than a comment. Static per-role tokens (principal, case officer,
 applicant) stay at the authorization origin, per-process credentials authenticate inter-process calls, and
 an ephemeral handoff creates the case officer's browser session at the orchestrator origin. Every decision
-records the authenticated role. The boundary that matters: **the orchestrator can reach no authority-changing
-endpoint**; the dedicated redemption route changes only one-time protocol-credential state and cannot affect
-a mandate, ruling, escalation, commitment, effect, or dialogue answer. The orchestrator can neither read a
-person's authorization-service credential nor forge a confirmation. This is demo-grade authentication by
-declared limit (§9), not an IAM design.
+records the authenticated role. In the reviewed dynamic-session/native path, the orchestrator invokes only
+explicitly allowlisted, authorization-owned operations, notably fixed precommit; it supplies no authority facts and
+chooses no ruling. The dedicated redemption route changes only one-time protocol-credential state; fixed precommit
+may append rulings or open an escalation, but authorization alone selects the outcome. The caller-carried
+`/actions/execute` and escalation-revision paths remain synthetic headless-test seams; they may request a gate ruling
+or submit a revision, but authorization alone evaluates and records the result. The orchestrator cannot change
+standing authority, invoke `commit-verify`, receive a Commit token, or create an effect. It can neither read a
+person's authorization-service credential nor forge a confirmation. This is demo-grade authentication by declared
+limit (§9), not an IAM design.
 
 ## Decision
 

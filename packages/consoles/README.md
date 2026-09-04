@@ -30,28 +30,36 @@ authorization-origin `localStorage`, and sends them only on same-origin bearer r
 deep link loads its routed question and six-field contract on that origin and posts the answer there directly.
 The orchestrator-origin case surface uses only its dynamic tab session: it displays signed-card evidence,
 requires an in-tab evidence review before a model can be prepared, and polls a ruling-status mirror without
-receiving the question, contract, answer, or role credential. Model interaction remains closed with an explicit
-`501`. M5.3 supplies the authorization-owned output-admission boundary, but a later reviewed ingress slice must
-make its use mandatory before any provider response can reach this browser surface.
+receiving the question, contract, answer, or role credential. At M5.2 model interaction remained closed with an
+explicit `501`. M5.3 supplied the authorization-owned output-admission boundary, before later reviewed slices made
+that boundary mandatory in the dynamic-session path.
 M5.4, reviewed at `b247d5b`, adds a headless `ModelTurnCoordinator`: it accepts only a configured card/version/requested-id
 tuple, fetches the current authorization-owned projection, invokes an injected adapter, and returns the raw result
 to authorization for M5.3 admission. An admitted result is copied into a process-private quarantine that exposes
 metadata and destruction only, with bounded entry and byte capacity. Its seal capability is module-private to the
 coordinator; this is structural confinement, not cryptographic provenance or release approval. Withheld output or any
 authority/provider/protocol/capacity failure adds no held-buffer entry and halts that lane for the coordinator
-lifetime. Real-listener tests use a synthetic loopback provider. The coordinator has no HTTP, browser,
-conversation-store, proposal, or runtime-process entry point, so this is containment plumbing rather than active
-provider ingress or output release.
+lifetime. Real-listener tests use a synthetic loopback provider. At M5.4 the coordinator had no HTTP, browser,
+conversation-store, proposal, or runtime-process entry point, so that slice was containment plumbing rather than
+active provider ingress or output release.
 M5.5, reviewed at `1d992fa`, makes the authorization-owned call reference mandatory around that flow. Before the
 adapter can receive projected items, authorization durably records the exact turn, mandate, card, requested model,
 case, and projection digest. Admission or a fixed failure report consumes that boot-bound reference once. Provider
 timeout, outage, malformed response, tool calls, and post-response authority invalidation record bounded metadata
 only; reporting failure never includes provider text or error detail. If reporting is interrupted, the durable
-attempt stays indeterminate and the lane remains halted. The coordinator is still not mounted by the native
-runtime or exposed to a browser, and the quarantine still has no output-release path.
+attempt stays indeterminate and the lane remains halted. At M5.5 the coordinator was not yet mounted by the native
+runtime or exposed to a browser, and the quarantine had no output-release path.
 M5.6, reviewed at `b57c01e`, adds an authorization-derived `system-use-invalidated` terminal outcome when the
 bound decision changes after provider disclosure. The coordinator retains no output and halts the lane;
 authorization, not the caller, derives confirmed disclosure from the served output-admission request.
 The applicant surface can also submit an extract-bound factual correction directly to authorization. The
 result is an append-only challenge plus a principal routing obligation and withdrawn-reliance marker, not a
 remedy decision or a mutation of the earlier effect record.
+
+The current bounded dynamic-session path, after reviewed M5.7–M5.12, mounts the coordinator behind message
+preparation/use, authorization-owned ingestion, and single-use output release. Authorization then owns proposal
+intake, field-by-field construction and freeze, and fixed Authorize → Submit → Verify precommit, including the
+focused revision path. M6.2 continues one verified native proposal through explicit preparation and execution
+requests to a services-host-only Commit/`commit-verify` transaction and one local synthetic effect. The
+orchestrator never receives the Commit token. No live provider run, real external effect, production identity,
+independent review, or remedy decision is claimed.

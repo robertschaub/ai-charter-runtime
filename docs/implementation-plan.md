@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: CC-BY-4.0 -->
 # Runtime implementation plan
 
-**Status date:** 2026-08-29
+**Status date:** 2026-09-04
 
 **Current milestone:** M4 and bounded M5 complete; the ADR-016 M6 definition received GO at `582eaeb`, and the
 separate M6.0a anchoring-flow prerequisite received GO at `be7f2ef`. The M6.0b unsupported-`reverse` implementation
@@ -143,14 +143,14 @@ aggregate-ceiling escalation behaviour. Its regression proves the legacy Verify 
 opening an escalation or dialogue item. Focused exact-SHA re-review returned **GO — finding closed; no new
 findings** and independently reproduced the red state against the parent.
 
-Latest reviewed validation is `npm run typecheck` clean, 4 Git-safety hook tests, 418 Vitest tests across 44 files,
-`git diff --check`, and verification of both unchanged signed cards. The reviewer confirmed M6.2 used synthetic
+Latest verified validation at the current published head is `npm run typecheck` clean, 4 Git-safety hook tests,
+426 Vitest tests across 45 files, and `git diff --check` clean. The M6.2 review separately confirmed synthetic
 adapters and one local mock effect only, with no live provider call. Neither implementation nor review moved the
 Charter provenance baseline.
 
-The published runtime head is `2eef22f4987e197a0973b889afd83503335d9b66` (`2eef22f`). It contains the reviewed
-M6.2 definition and its documentation-only review closure. The reviewed M6.2 implementation and this status
-closure remain unpublished until separately approved for push.
+The published runtime head is `21ea679bf76e3b71f6ac29b170a344920b1950d7` (`21ea679`); local `main` and
+`origin/main` both point to it. It includes the reviewed M6.3 implementation and documentation closure. M6.4
+remains separately approval- and review-gated.
 
 The M5.9 definition at `2a508ba7500d6f0775e4cb52b63a7ac222066f64` received one focused browser-redaction
 finding. Commit `be01667d169beb918ec4ceffb384edb8a526020e` bound field-by-field construction and exact-key
