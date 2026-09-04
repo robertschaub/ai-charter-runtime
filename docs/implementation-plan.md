@@ -148,9 +148,9 @@ Latest verified validation at the current published head is `npm run typecheck` 
 adapters and one local mock effect only, with no live provider call. Neither implementation nor review moved the
 Charter provenance baseline.
 
-The published runtime head is `21ea679bf76e3b71f6ac29b170a344920b1950d7` (`21ea679`); local `main` and
-`origin/main` both point to it. It includes the reviewed M6.3 implementation and documentation closure. M6.4
-remains separately approval- and review-gated.
+The latest runtime code head covered by this validation is
+`21ea679bf76e3b71f6ac29b170a344920b1950d7` (`21ea679`). It includes the reviewed M6.3 implementation and
+documentation closure. M6.4 remains separately approval- and review-gated.
 
 The M5.9 definition at `2a508ba7500d6f0775e4cb52b63a7ac222066f64` received one focused browser-redaction
 finding. Commit `be01667d169beb918ec4ceffb384edb8a526020e` bound field-by-field construction and exact-key
