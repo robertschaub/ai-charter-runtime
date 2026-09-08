@@ -11,6 +11,8 @@
 - **Secrets and data.** Keys live only in the gitignored `.env.local` — never in code, logs, fixtures, records, or probe output. Fixtures are synthetic by rule; no real personal data. Treat every commit to this public repo as permanent and worldwide.
 - **Repository boundary.** Stay in this public repository and the linked public Charter/spec sources unless the maintainer explicitly names another path. Never import or disclose private-repository material, private paths, or unpublished operational context in a public artifact.
 - **Records are part of the system under test.** Never hand-edit files under `records/`; tamper tests do that deliberately through the test harness.
-- **Git safety.** Work directly on `main`; conventional commits (`type(scope): description`). Avoid destructive git (`reset --hard`, forced push, `clean -f`, `checkout -- .`) — prefer a revert commit or a targeted edit. The maintainer decides when to push.
+- **Git safety.** Follow root AGENTS.md for solo/main and concurrent worktree ownership; the integrator owns shared records and integration, restricted writers return edits/evidence. Use conventional commits only within current authority. Avoid destructive git (`reset --hard`, forced push, `clean -f`, `checkout -- .`) — prefer a revert commit or a targeted edit. The maintainer decides when to push.
 - **Verification.** Normal checks are `npm run typecheck`, `npm test`, and, for model-card changes, `npm run cards:verify`. Do not run live probes, generate or rotate keys, or sign model cards without explicit maintainer approval.
 - **Platform:** Windows, PowerShell-compatible commands.
+
+Read applicable nested instructions before target work. Use focused checks within assigned state; strict read-only review uses captured evidence and creates no output. Client metadata does not establish installed control coverage. Existing task authority persists; preparation/review does not grant live/provider-spending or external actions.
