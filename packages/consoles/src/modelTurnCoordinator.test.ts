@@ -1355,6 +1355,58 @@ describe('M5.4 containment with M5.5 durable model-call evidence', () => {
     ).map((ruling) => ruling.status)).toEqual(['invalidated', 'invalidated', 'invalidated']);
   });
 
+  it('denies a native draft whose zero declared cost contradicts an above-ceiling exact amount before any execution preparation', async () => {
+    const h = await authorizationHarness();
+    const provider = await loopbackProvider();
+    provider.enqueue({
+      model: h.mandateBody.default_acting_model.requested_id,
+      content: nativeProposalContent({
+        exact_parameters: { amount_minor_units: 20_001, reference: 'zero-cost-above-ceiling' },
+        cost_obligation: { amount_minor_units: 0, description: 'No declared cost.' },
+      }),
+    });
+    const coordinator = new ModelTurnCoordinator({
+      worldId: 'w-demo',
+      caseId: 'case_demo',
+      authorization: h.authorization,
+      lanes: [lane(provider)],
+    });
+    const claim = { role: 'case_officer' as const, session_id: h.sessionId };
+    const frozen = await coordinator.runProposal({
+      proposalRunId: 'prun_native_zero_cost',
+      conversationVersion: h.store.snapshot().conversationVersionByCase.get('case_demo') ?? 0,
+      turnId: 'turn_native_zero_cost',
+      selectionId: h.selectionId,
+      cardId: h.mandateBody.default_acting_model.card_id,
+      cardVersion: h.mandateBody.default_acting_model.card_version,
+      requestedId: h.mandateBody.default_acting_model.requested_id,
+    }, { onBehalfOf: claim });
+    expect(frozen).toMatchObject({ disposition: 'proposal-frozen' });
+    const stored = h.store.snapshot().proposals.get(frozen.proposal.proposal_id);
+    if (stored === undefined) throw new Error('expected the native proposal to be frozen');
+    expect(stored.exact_parameters).toMatchObject({ amount_minor_units: 20_001 });
+    expect(stored.cost_obligation.amount_minor_units).toBe(0);
+    expect(h.mandateBody.limits.amount_minor_units).toBeLessThan(20_001);
+
+    const precommit = await h.authorization.runProposalPrecommit('w-demo', frozen.proposal.proposal_id, claim);
+    expect(precommit).toMatchObject({
+      state: 'denied',
+      gates: [expect.objectContaining({ gate: 'authorize', verdict: 'deny', reason: expect.stringContaining('broadened-request') })],
+      execution: { state: 'unavailable' },
+    });
+    await expect(
+      h.authorization.prepareExecution('w-demo', 'case_demo', 'prun_native_zero_cost', claim),
+    ).rejects.toMatchObject({ httpStatus: 409, responseCode: 'currentness' });
+    const state = h.store.snapshot();
+    expect([...state.rulings.values()]
+      .filter((ruling) => ruling.binding.frozen_proposal_hash === stored.proposal_hash)
+      .map((ruling) => [ruling.gate, ruling.verdict, ruling.matched_rule_id]))
+      .toEqual([['authorize', 'deny', 'authority:broadened-request']]);
+    expect(state.executionPreparations.size).toBe(0);
+    expect(state.commitments.size).toBe(0);
+    expect(state.effects.size).toBe(0);
+  });
+
   it('continues one verified native proposal through an atomic Commit and exactly one local mock effect', async () => {
     const h = await authorizationHarness();
     const provider = await loopbackProvider();

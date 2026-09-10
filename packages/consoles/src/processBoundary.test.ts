@@ -900,6 +900,29 @@ describe('M4 native three-process boundary', () => {
       });
       expect(hasTokenKey(actionBody)).toBe(false);
 
+      const zeroCostAboveCeiling = freezeProposal({
+        ...dialogueBase,
+        proposal_id: 'prp_process_zero_cost',
+        action_id: 'act_process_zero_cost',
+        exact_parameters: { amount_minor_units: 20_001, reference: 'case-process-zero-cost' },
+        cost_obligation: { amount_minor_units: 0, description: 'No declared cost.' },
+      });
+      const refusedAction = await postJson(
+        orchestratorOrigin,
+        '/w/w-demo/actions/execute',
+        caseAtOrchestrator,
+        { proposal: zeroCostAboveCeiling, service: 'filing', action_class: 'grant-filing' },
+      );
+      expect(refusedAction.status).toBe(200);
+      const refusedBody = (await refusedAction.json()) as Record<string, unknown>;
+      expect(refusedBody).toMatchObject({
+        ok: false,
+        stage: 'ruling',
+        ruling: { verdict: 'deny', reason: expect.stringContaining('broadened-request') },
+      });
+      expect(refusedBody['execution']).toBeUndefined();
+      expect(hasTokenKey(refusedBody)).toBe(false);
+
       const recordView = await requestJson(
         authorizationOrigin,
         'GET',

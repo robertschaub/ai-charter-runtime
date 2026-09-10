@@ -527,15 +527,25 @@ function authorityDefects(
     if (current.ordering_rule !== 'latest-version-wins') defects.push('invalid-mandate-binding');
     if (current.connected_service !== input.service) defects.push('substituted-service');
     const exactAmount = input.proposal.exact_parameters['amount_minor_units'];
+    const declaredCost = input.proposal.cost_obligation.amount_minor_units;
+    const declaredVolume = input.proposal.exact_parameters['notification_volume'];
+    const recipients = input.proposal.exact_parameters['recipients'];
     const broadened =
       current.action_class !== input.actionClass ||
       !equalTarget(input.proposal.target, current.target) ||
       !input.proposal.data_to_be_disclosed.every((field) => current.permitted_data_fields.includes(field)) ||
       (input.proposal.data_to_be_disclosed.length > 0 && !current.disclosure_destinations.includes(input.service)) ||
-      (input.proposal.cost_obligation.amount_minor_units > 0 &&
-        exactAmount !== input.proposal.cost_obligation.amount_minor_units) ||
-      (current.limits.amount_minor_units !== undefined &&
-        input.proposal.cost_obligation.amount_minor_units > current.limits.amount_minor_units);
+      // The amount ceiling and the amount counter are enforced on the declared cost, so an exact
+      // execution amount must equal it whenever either field asserts an amount. A zero declared
+      // cost may not carry a larger execution amount; the contradiction fails closed.
+      ((exactAmount !== undefined || declaredCost > 0) && exactAmount !== declaredCost) ||
+      (current.limits.amount_minor_units !== undefined && declaredCost > current.limits.amount_minor_units) ||
+      // The notification-volume counter is reserved from the declared volume, so a declared
+      // volume may not contradict an enumerated recipients list.
+      (input.actionClass === 'notification' &&
+        declaredVolume !== undefined &&
+        Array.isArray(recipients) &&
+        declaredVolume !== recipients.length);
     if (broadened) defects.push('broadened-request');
   }
 

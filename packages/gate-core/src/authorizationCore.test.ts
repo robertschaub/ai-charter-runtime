@@ -1178,6 +1178,82 @@ describe('M2 authorization transactions', () => {
     expect(result.ruling.reason).toContain('substituted-model');
   });
 
+  it('denies a zero-cost proposal whose exact amount contradicts the declared cost and refuses its execution', async () => {
+    const h = harness();
+    await initialize(h);
+    // A fractional amount never reaches the authority checks: the integer-only schema refuses it first.
+    expect(() =>
+      proposal(400, {
+        exact_parameters: { amount_minor_units: 0.5, reference: 'case-400' },
+        cost_obligation: { amount_minor_units: 0, description: 'No declared cost.' },
+      }),
+    ).toThrow();
+
+    // Schema-valid contradictions: above the 100 ceiling, inside it, and a string amount.
+    const contradictions: ReadonlyArray<readonly [number, number | string]> = [
+      [401, 101],
+      [402, 1],
+      [403, '50'],
+    ];
+    for (const [sequence, exactAmount] of contradictions) {
+      const frozen = proposal(sequence, {
+        exact_parameters: { amount_minor_units: exactAmount, reference: `case-${sequence}` },
+        cost_obligation: { amount_minor_units: 0, description: 'No declared cost.' },
+      });
+      let commitRulingId: string | undefined;
+      for (const gate of ['authorize', 'submit', 'verify', 'commit'] as const) {
+        const denied = await h.core.ruleProposal(ruleInput(frozen, { gate }));
+        expect(denied.ruling, `${gate} with exact amount ${String(exactAmount)}`).toMatchObject({
+          gate,
+          verdict: 'deny',
+          matched_rule_id: 'authority:broadened-request',
+          counter_reservations: [],
+        });
+        expect(denied.escalationId).toBeNull();
+        if (gate === 'commit') commitRulingId = denied.ruling.ruling_id;
+      }
+      if (commitRulingId === undefined) throw new Error('expected a commit ruling');
+      await expect(
+        h.core.commitVerify({
+          rulingId: commitRulingId,
+          intent: intentFor(frozen, commitRulingId),
+          servicesHostBootId: 'services_boot_contradiction',
+          servicesLedgerId: SERVICES_LEDGER_ID,
+          actor: SERVICES_HOST,
+        }),
+      ).resolves.toMatchObject({ ok: false, defect: 'not-allowed' });
+    }
+    const state = h.store.snapshot();
+    expect(state.reservations.size).toBe(0);
+    expect(state.commitments.size).toBe(0);
+    expect(state.effects.size).toBe(0);
+    expect(counterValue(state, 'mdt_demo', 'amount')).toBe(0);
+  });
+
+  it('keeps zero-cost proposals without a contradicting amount and matching amounts inside the mandate', async () => {
+    const h = harness();
+    await initialize(h);
+    const noAmount = proposal(411, {
+      exact_parameters: { reference: 'case-411' },
+      cost_obligation: { amount_minor_units: 0, description: 'No declared cost.' },
+    });
+    const zeroAmount = proposal(412, {
+      exact_parameters: { amount_minor_units: 0, reference: 'case-412' },
+      cost_obligation: { amount_minor_units: 0, description: 'No declared cost.' },
+    });
+    for (const frozen of [noAmount, zeroAmount]) {
+      const ruled = await h.core.ruleProposal(ruleInput(frozen));
+      expect(ruled.ruling).toMatchObject({ verdict: 'allow', matched_rule_id: 'allow-grant-filing' });
+      expect(ruled.ruling.counter_reservations.map((reservation) => reservation.counter)).toEqual(['actions']);
+    }
+    const matching = await h.core.ruleProposal(ruleInput(proposal(413)));
+    expect(matching.ruling).toMatchObject({ verdict: 'allow', matched_rule_id: 'allow-grant-filing' });
+    expect(matching.ruling.counter_reservations).toEqual(
+      expect.arrayContaining([expect.objectContaining({ counter: 'amount', delta: 50 })]),
+    );
+    expect(counterValue(h.store.snapshot(), 'mdt_demo', 'amount')).toBe(50);
+  });
+
   it('preserves an authority deny when Verify records an unconfirmed-inference signal', async () => {
     const h = harness();
     await initialize(h);
@@ -1992,6 +2068,7 @@ describe('M2 authorization transactions', () => {
         await actions.core.ruleProposal(
           ruleInput(
             proposal(index, {
+              exact_parameters: { amount_minor_units: 0, reference: `case-${index}` },
               cost_obligation: { amount_minor_units: 0, description: 'No cost.' },
             }),
           ),
@@ -2209,6 +2286,68 @@ describe('M2 authorization transactions', () => {
     expect(
       verifyEmbeddedMac(h.keyring, 'mandate-binding', narrowed as unknown as Record<string, unknown>, 'binding'),
     ).toBe('valid');
+  });
+
+  it('denies a notification whose declared volume contradicts its recipients and keeps the recipients fallback', async () => {
+    const h = harness();
+    await initialize(
+      h,
+      mandateBody({
+        action_class: 'notification',
+        connected_service: 'notification',
+        disclosure_destinations: ['notification'],
+      }),
+    );
+    const notificationInput = { service: 'notification', actionClass: 'notification' };
+    const sixRecipients = ['r1', 'r2', 'r3', 'r4', 'r5', 'r6'];
+    for (const [sequence, declared] of [[440, 0], [441, 5]] as const) {
+      const frozen = proposal(sequence, {
+        cost_obligation: { amount_minor_units: 0, description: 'No cost.' },
+        exact_parameters: { reference: `case-${sequence}`, notification_volume: declared, recipients: sixRecipients },
+      });
+      const denied = await h.core.ruleProposal(ruleInput(frozen, notificationInput));
+      expect(denied.ruling, `declared volume ${declared}`).toMatchObject({
+        verdict: 'deny',
+        matched_rule_id: 'authority:broadened-request',
+        counter_reservations: [],
+      });
+      await expect(
+        h.core.commitVerify({
+          rulingId: denied.ruling.ruling_id,
+          intent: intentFor(frozen, denied.ruling.ruling_id, 'notification', 'notification'),
+          servicesHostBootId: 'services_boot_notification',
+          servicesLedgerId: SERVICES_LEDGER_ID,
+          actor: SERVICES_HOST,
+        }),
+      ).resolves.toMatchObject({ ok: false, defect: 'not-allowed' });
+    }
+    expect(counterValue(h.store.snapshot(), 'mdt_demo', 'notification_volume')).toBe(0);
+
+    const consistentSix = proposal(442, {
+      cost_obligation: { amount_minor_units: 0, description: 'No cost.' },
+      exact_parameters: { reference: 'case-442', notification_volume: 6, recipients: sixRecipients },
+    });
+    const escalated = await h.core.ruleProposal(ruleInput(consistentSix, notificationInput));
+    expect(escalated.ruling).toMatchObject({ verdict: 'escalate', matched_rule_id: 'escalate-notification-volume' });
+
+    const fallback = proposal(443, {
+      cost_obligation: { amount_minor_units: 0, description: 'No cost.' },
+      exact_parameters: { reference: 'case-443', recipients: ['r1', 'r2', 'r3'] },
+    });
+    const counted = await h.core.ruleProposal(ruleInput(fallback, notificationInput));
+    expect(counted.ruling).toMatchObject({ verdict: 'allow', matched_rule_id: 'allow-notification' });
+    expect(counted.ruling.counter_reservations).toEqual(
+      expect.arrayContaining([expect.objectContaining({ counter: 'notification_volume', delta: 3 })]),
+    );
+
+    const consistentTwo = proposal(444, {
+      cost_obligation: { amount_minor_units: 0, description: 'No cost.' },
+      exact_parameters: { reference: 'case-444', notification_volume: 2, recipients: ['r1', 'r2'] },
+    });
+    const agreed = await h.core.ruleProposal(ruleInput(consistentTwo, notificationInput));
+    expect(agreed.ruling).toMatchObject({ verdict: 'allow', matched_rule_id: 'allow-notification' });
+    expect(counterValue(h.store.snapshot(), 'mdt_demo', 'notification_volume')).toBe(5);
+    expect(h.store.snapshot().effects.size).toBe(0);
   });
 
   it('sweeps ruling expiry and escalation timeout and repairs a torn WAL tail on restart', async () => {

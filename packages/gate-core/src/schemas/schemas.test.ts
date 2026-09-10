@@ -999,6 +999,11 @@ describe('schemas — reject what fails closed', () => {
       ).success,
     ).toBe(false);
     expect(
+      frozenProposal.safeParse(
+        validProposal({ exact_parameters: { amount_minor_units: 25_000.5, reference: 'CH-0042' } }),
+      ).success,
+    ).toBe(false);
+    expect(
       gateRuling.safeParse(validRuling({ counter_reservations: [{ id: 'rsv_1', counter: 'amount', delta: 1.5 }] }))
         .success,
     ).toBe(false);
