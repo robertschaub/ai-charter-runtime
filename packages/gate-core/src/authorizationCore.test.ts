@@ -1187,13 +1187,18 @@ describe('M2 authorization transactions', () => {
         exact_parameters: { amount_minor_units: 0.5, reference: 'case-400' },
         cost_obligation: { amount_minor_units: 0, description: 'No declared cost.' },
       }),
-    ).toThrow();
+    ).toThrow(/integer/i);
 
-    // Schema-valid contradictions: above the 100 ceiling, inside it, and a string amount.
-    const contradictions: ReadonlyArray<readonly [number, number | string]> = [
+    // Schema-valid contradictions: above the 100 ceiling, inside it, and every other scalar-or-list
+    // shape the exact-parameter regime admits (string, null, negative integer, boolean, list).
+    const contradictions: ReadonlyArray<readonly [number, FrozenProposal['exact_parameters'][string]]> = [
       [401, 101],
       [402, 1],
       [403, '50'],
+      [404, null],
+      [405, -5],
+      [406, true],
+      [407, [50]],
     ];
     for (const [sequence, exactAmount] of contradictions) {
       const frozen = proposal(sequence, {
@@ -2346,6 +2351,21 @@ describe('M2 authorization transactions', () => {
     });
     const agreed = await h.core.ruleProposal(ruleInput(consistentTwo, notificationInput));
     expect(agreed.ruling).toMatchObject({ verdict: 'allow', matched_rule_id: 'allow-notification' });
+    expect(counterValue(h.store.snapshot(), 'mdt_demo', 'notification_volume')).toBe(5);
+
+    // A malformed declared volume is refused before any ruling is built, as before this change.
+    const malformed = proposal(445, {
+      cost_obligation: { amount_minor_units: 0, description: 'No cost.' },
+      exact_parameters: { reference: 'case-445', notification_volume: '6', recipients: sixRecipients },
+    });
+    await expect(h.core.ruleProposal(ruleInput(malformed, notificationInput))).rejects.toMatchObject({
+      code: 'invalid-counter-delta',
+    });
+    expect(
+      [...h.store.snapshot().rulings.values()].some(
+        (ruling) => ruling.binding.frozen_proposal_hash === malformed.proposal_hash,
+      ),
+    ).toBe(false);
     expect(counterValue(h.store.snapshot(), 'mdt_demo', 'notification_volume')).toBe(5);
     expect(h.store.snapshot().effects.size).toBe(0);
   });
