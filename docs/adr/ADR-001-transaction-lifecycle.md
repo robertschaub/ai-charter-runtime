@@ -50,6 +50,12 @@ Policy, transport, state, record, and console inputs carrying the unsupported to
 they are never coerced to a terminal deny. ADR-017's definition received GO at `2eb14ba`; its bounded implementation
 received GO with no findings at `36126fa`.
 
+**Amendment (declaration consistency, reviewed at `4296e1e`, 2026-09-10):** fresh ruling issuance refuses a
+declared cost that contradicts an exact execution amount, and a declared notification volume that contradicts an
+enumerated recipients list. [§5's declaration-consistency paragraphs](#5-ceiling-arithmetic) carry the exact field
+scope, the malformed-volume refusal, the existing-ruling invalidation limits, and the distinction from the closed
+M6.3 beat-7 executor.
+
 **Proposed amendment (M6.2 native commitment continuation, definition reviewed at `d0b8cc6`):** ADR-018 freezes a
 native execution preparation that lets `proc:services_host` compose one Commit ruling and, on allow only, perform this
 ADR's existing `commit-verify` transition in the same world-lock/WAL transaction. The preparation binds the exact
