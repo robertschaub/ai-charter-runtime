@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: CC-BY-4.0 -->
 # Runtime implementation plan
 
-**Status date:** 2026-09-04
+**Status date:** 2026-09-10
 
 **Current milestone:** M4 and bounded M5 complete; the ADR-016 M6 definition received GO at `582eaeb`, and the
 separate M6.0a anchoring-flow prerequisite received GO at `be7f2ef`. The M6.0b unsupported-`reverse` implementation
@@ -10,7 +10,8 @@ implementation received GO at `5f51caa` with synthetic loopback providers only. 
 definition received GO at `d0b8cc6`; its implementation received GO at `b3a4992` with no blocking findings.
 ADR-019's corrected M6.3 definition received GO at `5952066` with no findings. Its bounded offline implementation
 received GO at `d24fe33` after exact-SHA corrections, with no remaining findings. M6.4 live capture has not started
-and remains separately approval- and review-gated.
+and remains separately approval- and review-gated. The separate amount and notification declaration-consistency
+correction received cross-model **GO — no blocking findings** at `4296e1e`; its bounded review is recorded below.
 
 This file tracks implementation status and sequencing in `ai-charter-runtime`. It does not replace or
 reinterpret the authoritative specification. On divergence, the specification and its linked Charter
@@ -42,7 +43,36 @@ URLs, commit, paths, and digests above. A later upstream change does not silentl
 
 ## Reviewed implementation baseline
 
-The latest cross-model adversarially reviewed implementation is
+The latest bounded cross-model source review covers
+`dc40d7ec399a4a20109b44a4352238c2a633b5ca` through `4296e1e5b6601012713e9bd74c1f6725f7988196`:
+fix `fc7efbc1598b038328e5e8dffb0a8a00e1e31cb6` and its test-only follow-up `4296e1e`. Review on 2026-09-10
+returned **HOLDS WITH CAVEATS; GO — no blocking findings**. Published merge
+`cd39033c9e0bcf19af572ffe76c422229bfe92a0` has the same tree as `4296e1e`.
+
+The correction closes the declared-cost/exact-amount contradiction and declared notification volumes that
+disagree with an enumerated recipients list. Fresh ruling paths share the consistency check, including native
+precommit, native Commit, dialogue successors and revisions. The precise field scope, malformed-volume refusal
+and existing-ruling invalidation limits are recorded in [ADR-001 §5](adr/ADR-001-transaction-lifecycle.md#5-ceiling-arithmetic).
+This establishes neither general validation of action parameters nor live-provider readiness.
+
+Regression coverage includes all four core gates and amount-shape controls, native model intake/precommit with a
+loopback provider, and the three-process headless action seam. Notification coverage proves core Commit refusal;
+it does not independently attempt service execution. Under the current default policy, notification has no native
+precommit allow path. The existing frequency-ceiling test's contradictory fixture was corrected without changing
+its purpose. Production schemas, canonical encoding rules and digest domains, policy, signed artifacts, routes,
+the orchestrator boundary and the M6.3 catalog are unchanged; source edits intentionally change evaluator identity.
+The Charter provenance pins are unchanged.
+
+The source-only cross-model review did not rerun tests, builds or card verification. Separate local checks during
+documentation closure on 2026-09-10, against the implementation at `cd39033`, passed `npm run typecheck`,
+`npm test` (4/4 Git-safety tests and 430/430 Vitest tests across 45 files), `npm run m6:schemas` and
+`git diff --check`. These are maintainer-run synthetic conformance results. Signed-card verification remains
+author-reported at `fc7efbc`; this documentation closure changes no card or runtime source.
+
+Remaining follow-ups are reconciliation of the generated beat-7 wording at M6 closure and amount-equality guidance
+in the model-facing draft instruction during M6.4 preparation. M6.4 remains separately approval- and review-gated.
+
+The preceding reviewed M6.3 implementation is
 `d24fe33b3e09b5183efceb96c80413117e4fd6fe` (`d24fe33`). Exact-SHA re-review returned **GO — both findings
 closed, no new findings**, making the bounded M6.3 implementation GO overall. The review confirmed the closed
 22-beat, 35-adversarial-case, and nine-infrastructure-case catalog executes under both exact initial lane bindings;
@@ -142,15 +172,6 @@ escalate result. The focused correction at `5b27b0e` preserves every deny while 
 aggregate-ceiling escalation behaviour. Its regression proves the legacy Verify seam records the signal without
 opening an escalation or dialogue item. Focused exact-SHA re-review returned **GO — finding closed; no new
 findings** and independently reproduced the red state against the parent.
-
-Latest verified validation at the current published head is `npm run typecheck` clean, 4 Git-safety hook tests,
-426 Vitest tests across 45 files, and `git diff --check` clean. The M6.2 review separately confirmed synthetic
-adapters and one local mock effect only, with no live provider call. Neither implementation nor review moved the
-Charter provenance baseline.
-
-The latest runtime code head covered by this validation is
-`21ea679bf76e3b71f6ac29b170a344920b1950d7` (`21ea679`). It includes the reviewed M6.3 implementation and
-documentation closure. M6.4 remains separately approval- and review-gated.
 
 The M5.9 definition at `2a508ba7500d6f0775e4cb52b63a7ac222066f64` received one focused browser-redaction
 finding. Commit `be01667d169beb918ec4ceffb384edb8a526020e` bound field-by-field construction and exact-key

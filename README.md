@@ -22,7 +22,10 @@ matrix, strict artifact schemas, gitignored staging, and sanitization boundary; 
 reviewed at `5952066`, GO — no findings. Its bounded implementation was reviewed at `d24fe33`, GO — no findings,
 after exact-SHA corrections. It executes only deterministic synthetic fixtures and nine dedicated loopback
 transport assertions; it creates no public capture. Beat 15 may write and verify only its disposable staging
-checkpoint fixture. M6.4 has not started; no live run, provider call, repository checkpoint/Git operation,
+checkpoint fixture. A bounded correction reviewed at `4296e1e`, GO — no blocking findings, rejects contradictory
+declared cost/exact amount and notification count/recipient-list fields during fresh ruling issuance; see
+[ADR-001's field scope and limits](docs/adr/ADR-001-transaction-lifecycle.md#5-ceiling-arithmetic).
+M6.4 has not started; no live run, provider call, repository checkpoint/Git operation,
 publication, or push is authorized by the M6.3 review.
 
 The authoritative build specification lives in the documentation repository:

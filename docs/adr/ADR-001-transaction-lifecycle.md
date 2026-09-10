@@ -216,9 +216,33 @@ Positive deltas count from **reservation** (in-flight attempts count); negative 
 - **Compensation is a new gated action, not a counter edit.** The WAL is append-only and the machine has
   no un-settle arc; the recovery owner's compensating action runs the gates itself and carries a
   negative-delta reservation that only counts once it settles at its own `commit-verify`.
-- **Two different failures, two different verdicts:** a per-action mandate limit exceeded (beat 7) is
+- **Two different failures, two different verdicts:** a per-action mandate limit exceeded is
   *defective authority* → **deny**; a cumulative ceiling that would be crossed (beat 12) is an *aggregate
   trigger* → **escalate**. Only ruling issuance can escalate.
+
+**Declaration consistency (reviewed at `4296e1e`, 2026-09-10):** the per-action amount ceiling and `amount`
+counter use `cost_obligation.amount_minor_units`. At fresh ruling issuance, `exact_parameters.amount_minor_units`
+must equal that declared cost when the exact amount is present or the declared cost is positive. Zero cost with
+an absent exact amount or exact amount zero remains valid. For `notification`, an explicit non-negative
+safe-integer `exact_parameters.notification_volume` must equal `exact_parameters.recipients.length` when
+recipients are enumerated. Without an explicit volume, the counter uses the array length, or one if no array exists.
+
+Contradictions add `broadened-request` and cannot produce an allow ruling. The recorded denial names the first
+authority defect in lexical order, so another defect may be reported. Malformed notification volumes fail before
+a ruling is recorded, either at proposal-schema validation or with `invalid-counter-delta`. These checks bind
+the named fields only: `exact_parameters` remains an open record, monetary aliases are not interpreted, and the
+mock service handlers do not interpret execution parameters.
+
+All fresh ruling paths share these checks. Section 6's `commit-verify` refuses a denied ruling with `not-allowed`
+but does not rerun `authorityDefects`. On normal production startup with matching deployed source, the changed
+[ADR-007 evaluator identity](ADR-007-canonicalization-and-keys.md#policy-content-digest-and-evaluator-build-id)
+and policy activation invalidate old issued rulings and release their reservations. A custom embedding that
+preserves an old evaluator identity is outside that upgrade protection; source identity is not binary attestation,
+and invalidation does not reverse already bound effects.
+
+The closed M6.3 beat-7 executor checks a distinct mechanism: it first obtains an allow for a consistent proposal,
+then changes the execution intent's amount; `commit-verify` refuses `proposal-mismatch`. Its generated ledger
+wording does not establish execution of the new ruling-time consistency checks.
 
 ### 6. `commit-verify` and the executing service's one local transaction
 
