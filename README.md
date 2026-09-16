@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: CC-BY-4.0 -->
 # ai-charter-runtime
 
-This unfinished control software checks a proposed AI action against recorded authority and rules outside the acting model; its demonstrations use simulated scenarios and a local test action. [Evidence-Gated Agents](https://github.com/robertschaub/our-ai-charter/blob/main/docs/Assurance/Concepts/evidence-gated-agents.md) proposes to combine it with FactHarbor for a bounded answer-delivery prototype, subject to funding and agreed scope.
+This unfinished control software checks a proposed AI action against recorded authority and rules outside the acting model; its demonstrations use simulated scenarios and a local test action. The selected [Evidence-Gated Agents](https://github.com/robertschaub/our-ai-charter/blob/main/docs/Assurance/Concepts/evidence-gated-agents.md) prototype design would reuse compatible Runtime gates and receipts around a normal AI agent's exact proposed decision while FactHarbor supplies a separate live evidence examination. That integration is not implemented and remains subject to funding.
 
 A runnable proof of concept of the [Our AI Charter runtime reference model](https://robertschaub.github.io/our-ai-charter/wip/runtime-gates-poc-spec/):
 at an AI prompt, the action path **plan → prepare → check → decide → review** executes with five gates
