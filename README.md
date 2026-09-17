@@ -103,7 +103,7 @@ The exact upstream revision, digest, reviewed runtime baseline, and remaining mi
 | `packages/consoles/` | M3 deterministic loop, M4 process/consoles, and M5 selected-lane ingress into sealed quarantine (MIT) | M3–M5 |
 | `fixtures/` | Synthetic grant-scenario data and pinned test fixtures (MIT) | M3+ |
 
-Licensing is per-directory — see [LICENSE.md](LICENSE.md).
+Licensing is per-directory — see [LICENSE.md](LICENSE.md). The repository-specific [privacy notice](PRIVACY.md) is a draft prepared for review; it distinguishes public repository interactions from data controlled by an independent local operator.
 
 ## M0 probe
 
