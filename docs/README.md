@@ -5,8 +5,9 @@ Documentation is CC BY 4.0 (see [LICENSE.md](../LICENSE.md)). Text derived from
 [Our AI Charter](https://github.com/robertschaub/our-ai-charter) documents keeps CC BY 4.0
 attribution to Robert Schaub / Our AI Charter.
 
+- `spec/` — the current implementation specification and its system-use companion.
 - `adr/` — architecture decision records: the protocol detail the
-  [spec](https://robertschaub.github.io/our-ai-charter/wip/runtime-gates-poc-spec/) delegates here, including the
+  [spec](spec/runtime-gates-poc-spec.md) delegates here, including the
   M6 evidence/capture boundary in [ADR-016](adr/ADR-016-m6-evidence-capture.md), the reviewed M6.2 native
   commitment continuation in [ADR-018](adr/ADR-018-native-commitment-continuation.md), and the reviewed M6.3
   offline conformance/artifact definition in

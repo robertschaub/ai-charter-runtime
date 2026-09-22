@@ -1,7 +1,7 @@
 # Licensing
 
 This repository uses a multi-license model aligned with FactHarbor's, decided 2026-07-31 and recorded in the
-[POC specification §1](https://robertschaub.github.io/our-ai-charter/wip/runtime-gates-poc-spec/).
+[POC specification §1](docs/spec/runtime-gates-poc-spec.md).
 Full license texts are in [`LICENSES/`](LICENSES/). Strategic choice, not legal advice.
 
 ## Per-directory license map

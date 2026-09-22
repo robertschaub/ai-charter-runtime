@@ -10,8 +10,8 @@ project or its name to imply that a system is "Charter-certified", assured,
 or endorsed. There is no green light, no trust API, and no "queryable
 certification" here — only per-action authorization records.
 
-Specification and normative sources:
-https://robertschaub.github.io/our-ai-charter/wip/runtime-gates-poc-spec/
+Implementation specification:
+https://github.com/robertschaub/ai-charter-runtime/blob/main/docs/spec/runtime-gates-poc-spec.md
 
 Text derived from Our AI Charter documents is used under CC BY 4.0 with
 attribution to Robert Schaub / Our AI Charter.

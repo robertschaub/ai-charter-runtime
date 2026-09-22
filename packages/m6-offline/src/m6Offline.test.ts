@@ -47,8 +47,8 @@ function plan(captureId: string, classification: 'offline-fixture' | 'live' = 'o
     screening_role: cardBinding('publicai-apertus-v1.5-70b'),
     provenance: {
       runtime_commit: '1'.repeat(64), charter_commit: '2'.repeat(64),
-      runtime_specification: { path: 'docs/wip/runtime-gates-poc-spec.md', digest: '3'.repeat(64) },
-      system_use_decision: { decision_id: 'system-use-poc', decision_version: 1, decision_digest: '4'.repeat(64), source_path: 'docs/wip/system-use-decision.md', source_digest: '5'.repeat(64) },
+      runtime_specification: { path: 'docs/spec/runtime-gates-poc-spec.md', digest: '3'.repeat(64) },
+      system_use_decision: { decision_id: 'system-use-poc', decision_version: 1, decision_digest: '4'.repeat(64), source_path: 'docs/spec/system-use-decision-record.md', source_digest: '5'.repeat(64) },
       policy: { version: 1, content_digest: '6'.repeat(64) }, evaluator: { build_id: 'm6-offline', build_digest: '7'.repeat(64) }, fixture_file_set_digest: '8'.repeat(64),
     },
     synthetic_inputs: [{ id: 'grant-fixtures', digest: '9'.repeat(64) }],

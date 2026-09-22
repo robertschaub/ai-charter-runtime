@@ -3,7 +3,7 @@
 
 This unfinished control software checks a proposed AI action against recorded authority and rules outside the acting model; its demonstrations use simulated scenarios and a local test action. The selected [Evidence-Gated Agents](https://github.com/robertschaub/our-ai-charter/blob/main/docs/Assurance/Concepts/evidence-gated-agents.md) prototype design would reuse compatible Runtime gates and receipts around a normal AI agent's exact proposed decision while FactHarbor supplies a separate live evidence examination. That integration is not implemented and remains subject to funding.
 
-A runnable proof of concept of the [Our AI Charter runtime reference model](https://robertschaub.github.io/our-ai-charter/wip/runtime-gates-poc-spec/):
+A runnable proof of concept of the [Our AI Charter runtime reference model](docs/spec/runtime-gates-poc-spec.md):
 at an AI prompt, the action path **plan → prepare → check → decide → review** executes with five gates
 (**Authorize → Submit → Verify → Commit → Rely**) enforced *outside* the acting model — machine verdicts
 **allow / deny / escalate**, automatic escalation to a human console carrying a six-field intervention
@@ -30,8 +30,8 @@ declared cost/exact amount and notification count/recipient-list fields during f
 M6.4 has not started; no live run, provider call, repository checkpoint/Git operation,
 publication, or push is authorized by the M6.3 review.
 
-The authoritative build specification lives in the documentation repository:
-[runtime-gates-poc-spec.md](https://github.com/robertschaub/our-ai-charter/blob/main/docs/wip/runtime-gates-poc-spec.md).
+The authoritative build specification lives beside the implementation:
+[runtime-gates-poc-spec.md](docs/spec/runtime-gates-poc-spec.md).
 On any divergence, the specification and its linked Charter source documents prevail.
 The exact upstream revision, digest, reviewed runtime baseline, and remaining milestone work are tracked in
 [docs/implementation-plan.md](docs/implementation-plan.md); the offline M4 beat and adversarial mapping is in

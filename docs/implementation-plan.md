@@ -14,22 +14,26 @@ and remains separately approval- and review-gated. The separate amount and notif
 correction received cross-model **GO — no blocking findings** at `4296e1e`; its bounded review is recorded below.
 
 This file tracks implementation status and sequencing in `ai-charter-runtime`. It does not replace or
-reinterpret the authoritative specification. On divergence, the specification and its linked Charter
-sources prevail. Specification changes are made in `our-ai-charter`, under separate maintainer approval;
-the source document is linked here and is never copied into this repository.
+reinterpret the authoritative [runtime specification](spec/runtime-gates-poc-spec.md) or its
+[system-use companion](spec/system-use-decision-record.md). On divergence, those specifications and their
+linked Charter sources prevail. The specifications moved here from the public Charter repository on
+2026-09-22 so implementation authority lives beside the code it governs.
 
 ## Specification authority and provenance
 
-Both governing sources are pinned to the same reviewed Charter commit. A cross-link from one source to the
-other is not a provenance pin; both paths and byte digests are verified independently.
+The reviewed implementation baseline remains pinned to the same historical Charter commit. These rows record
+the exact source revision used for the implementation review; they are provenance, not the current file location.
+A cross-link from one source to the other is not a provenance pin; both historical paths and byte digests were
+verified independently.
 
 | Source | Path | SHA-256 | Immutable URL |
 |---|---|---|---|
 | Runtime-gates POC specification | `docs/wip/runtime-gates-poc-spec.md` | `4e52e02115dacbaaf782a999ecc1aeb05c9a3d99ba5f53cdd76998b0c205e5f5` | `https://github.com/robertschaub/our-ai-charter/blob/51b408c5f1bad929fbf0a27599689857130817a3/docs/wip/runtime-gates-poc-spec.md` |
 | System-use decision record | `docs/wip/system-use-decision-record.md` | `ea4342c16221687c33bffb6ca3a4d94f267ce98e3d18880bacc08316278e0a84` | `https://github.com/robertschaub/our-ai-charter/blob/51b408c5f1bad929fbf0a27599689857130817a3/docs/wip/system-use-decision-record.md` |
 
-Shared Charter commit: `51b408c5f1bad929fbf0a27599689857130817a3`. Publication status: both immutable
-URLs resolve to the named path and independently verified digest.
+Shared Charter commit: `51b408c5f1bad929fbf0a27599689857130817a3`. Both immutable URLs resolve to the
+historical path and independently verified digest. Current edits belong in `docs/spec/`; the historical pins
+change only when a later implementation baseline deliberately adopts a reviewed specification revision.
 
 This pin moves from `6a52bd9` because the published runtime specification added two explicit honest-limit
 paragraphs: effect-specific terminal enforcement and the representation-error ambiguity in the pattern counter.

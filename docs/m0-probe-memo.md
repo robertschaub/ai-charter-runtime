@@ -3,7 +3,7 @@
 
 **Status:** closed 2026-08-01 — all eight questions answered (wallet metering noted; latency numbers for identical bodies remain cache-suspect). Remaining M0 items are repository-side: GitHub remote + posture.
 
-The spec ([§8](https://robertschaub.github.io/our-ai-charter/wip/runtime-gates-poc-spec/)) flags these discrepancies and unknowns for M0 to settle. Record the observed answer and the decision; the spec's evidence note documented `api.publicai.co` + portal keys + Free 100 req/min (2026-07-27), while LiteLLM's provider doc gave `platform.publicai.co/v1` and the older HF launch route was described at 20 req/min.
+The spec ([§8](spec/runtime-gates-poc-spec.md#8-technology-choices-grounded-2026-07-31)) flags these discrepancies and unknowns for M0 to settle. Record the observed answer and the decision; the source review documented `api.publicai.co` plus portal keys, while LiteLLM's provider documentation gave `platform.publicai.co/v1` and the older Hugging Face launch route described a different limit.
 
 | # | Question | Observed (date) | Decision |
 |---|---|---|---|
