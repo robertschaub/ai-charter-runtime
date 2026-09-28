@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: AGPL-3.0-only
 import { SchemaRegistry, type SchemaName } from './schemas.js';
 import type { AttemptEvent } from './types.js';
 

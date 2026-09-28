@@ -1,4 +1,4 @@
-<!-- SPDX-License-Identifier: CC-BY-4.0 -->
+<!-- SPDX-License-Identifier: CC-BY-SA-4.0 -->
 # ADR-014 — Native dialogue trigger and proposal-revision continuation
 
 **Status:** accepted definition at `0c3cac9` (GO — no findings); implementation reviewed at `5b27b0e`

@@ -20,5 +20,5 @@
     "runtime-consoles": "0.0.1",
     "services-mock": "0.0.1"
   },
-  "license": "MIT"
+  "license": "AGPL-3.0-only"
 }

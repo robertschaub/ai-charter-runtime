@@ -1,4 +1,4 @@
-<!-- SPDX-License-Identifier: CC-BY-4.0 -->
+<!-- SPDX-License-Identifier: CC-BY-SA-4.0 -->
 # ADR-016 — M6 full-pass evidence and dual-model capture
 
 **Status:** definition reviewed at `582eaeb`, GO — no findings; M6.1 implementation reviewed at `5f51caa`, GO —

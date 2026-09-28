@@ -1,4 +1,4 @@
-<!-- SPDX-License-Identifier: CC-BY-4.0 -->
+<!-- SPDX-License-Identifier: CC-BY-SA-4.0 -->
 # M5 acceptance — bounded screening, empathy, and model switching
 
 **Status:** bounded implementation reviewed **GO — no findings** at `5251500`; M5 is complete only within this POC's

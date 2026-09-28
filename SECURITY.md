@@ -1,4 +1,4 @@
-<!-- SPDX-License-Identifier: CC-BY-4.0 -->
+<!-- SPDX-License-Identifier: CC-BY-SA-4.0 -->
 # Security and public-repo safety
 
 ai-charter-runtime is a public proof-of-concept repository. It runs **locally only** — no hosted

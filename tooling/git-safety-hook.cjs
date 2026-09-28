@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: AGPL-3.0-only
 // Shared PreToolUse safety policy for Claude Code and Codex.
 
 'use strict';

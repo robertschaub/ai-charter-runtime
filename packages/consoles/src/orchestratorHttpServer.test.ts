@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: AGPL-3.0-only
 import { digestFor, digestModelOutput } from 'gate-core';
 import { ModelAdapterError } from 'model-adapters';
 import { describe, expect, it, vi } from 'vitest';

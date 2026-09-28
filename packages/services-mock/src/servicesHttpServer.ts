@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: AGPL-3.0-only
 /** Native HTTP host for the mock executing-services process. */
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 

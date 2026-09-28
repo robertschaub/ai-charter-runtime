@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: AGPL-3.0-only
 import type { CaseCatalog } from './types.js';
 
 const BASELINE = [
@@ -35,7 +35,7 @@ export function generateAcceptanceMarkdown(catalog: CaseCatalog): string {
   const beats = catalog.rows.filter((row) => row.class === 'beat').map((row) => [row.id, row.coverage, row.required_terminal_evidence]);
   const adversarial = catalog.rows.filter((row) => row.class === 'adversarial').map((row) => [row.id, row.coverage, row.required_terminal_evidence]);
   const infrastructure = catalog.rows.filter((row) => row.class === 'infrastructure').map((row) => [row.id, row.coverage, row.required_terminal_evidence]);
-  return `<!-- SPDX-License-Identifier: CC-BY-4.0 -->
+  return `<!-- SPDX-License-Identifier: CC-BY-SA-4.0 -->
 # M6.3 offline conformance acceptance ledger
 
 **Status:** case tables are generated from the closed M6.3 catalog; the seven criteria and thirteen family assessments are explicit maintained summaries in this generator. Execution evidence remains maintainer-run synthetic conformance, not independent evaluation, assurance, certification, live-provider evidence, or M6 completion.

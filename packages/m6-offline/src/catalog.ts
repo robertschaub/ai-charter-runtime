@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: AGPL-3.0-only
 import { sha256Hex } from 'gate-core/offline-safe';
 
 import { readSafeRepositoryFile } from './repository.js';

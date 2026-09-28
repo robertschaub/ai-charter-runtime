@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: AGPL-3.0-only
 // M0 capability probe — settles the endpoint/model/feature unknowns listed in docs/m0-probe-memo.md.
 // Zero dependencies (Node >= 20). Keys load from .env.local and are never printed or written.
 //

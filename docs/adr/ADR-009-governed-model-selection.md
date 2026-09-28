@@ -1,4 +1,4 @@
-<!-- SPDX-License-Identifier: CC-BY-4.0 -->
+<!-- SPDX-License-Identifier: CC-BY-SA-4.0 -->
 # ADR-009 — Governed model selection and switching
 
 **Status:** accepted; implementation reviewed at `442397a` with GO — no findings (2026-08-05).

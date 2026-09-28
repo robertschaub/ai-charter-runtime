@@ -1,4 +1,4 @@
-<!-- SPDX-License-Identifier: CC-BY-4.0 -->
+<!-- SPDX-License-Identifier: CC-BY-SA-4.0 -->
 
 > **Status: CURRENT SPECIFICATION** — implementation specification for this proof of concept; the linked Charter source documents prevail on any divergence.
 
@@ -7,6 +7,8 @@
 A runnable proof of concept of the Charter's runtime reference model: at an AI prompt, the action path **plan → prepare → check → decide → review** executes with the five gates (**Authorize → Submit → Verify → Commit → Rely**) enforced outside the acting model, including **automatic Escalate** to a human approval surface with the full intervention contract, and an action-scoped, tamper-evident record sealed before effect.
 
 The POC code will live in a separate public repository, **`ai-charter-runtime`** (decided 2026-07-31); this repo stays documentation-only per [AGENTS.md](https://github.com/robertschaub/our-ai-charter/blob/main/AGENTS.md). This note is the build specification and traces every requirement to its source document.
+
+Licensing scope is defined in [LICENSE.md](../../LICENSE.md).
 
 ## 1. Decisions of record (maintainer, 2026-07-31)
 
@@ -20,7 +22,6 @@ The POC code will live in a separate public repository, **`ai-charter-runtime`**
 | Acting model | Apertus-first via the Public AI Inference Utility, pluggable OpenAI-compatible adapter (Claude/GPT swappable) — superseded the same day by the model-navigation row below |
 | Model navigation & selection (added later, 2026-07-31) | **Two acting models wired from v1, user-selectable in the case console** (Apertus via PublicAI + GPT assumed — an OpenAI key the maintainer already holds locally, gitignored, never committed; §11); model switching is a governed, recorded transition, the mandate pins the approved model set, and selection follows the published **find → check → use** path over signed, version-pinned model cards |
 | Repository name (decided later, 2026-07-31) | `ai-charter-runtime` |
-| Licensing (revised later on 2026-07-31, FactHarbor-aligned) | Multi-license split aligned with FactHarbor's model, stated SPDX-precise: **AGPL-3.0-only** for the governance core (authorization service — policy evaluator, mandate store, counters/nonces, commit-verify, escalation state machine — and the record-integrity chain), intended to require an operator who modifies the gate and offers it as a network service to publish the modified source; **MIT** for the edges (model adapters, consoles, mock services, tooling, synthetic fixtures); **documentation CC BY 4.0** — a deliberate deviation from FactHarbor's CC BY-SA docs rule so text can move freely in both directions between the POC repo and the CC BY 4.0 Charter repository; Charter-derived text keeps CC BY 4.0 attribution per this repository's [NOTICE](../../NOTICE); no ODbL unless a genuine curated database ever emerges. SPDX identifiers, a per-directory license map, and full license texts from day one; the map also states what governs combined artifacts (e.g. MIT console assets served by the AGPL service). Supersedes the same-day Apache-2.0 decision; strategic choice, not legal advice |
 | Gate engine | Deterministic versioned rules + LLM screening signals that can only Flag or force Escalate, never allow |
 | Scope | Full consequential-action baseline in one push: all 7 evidence points, test families as mapped in §7, demo when complete |
 | System-use decision (added 2026-08-04) | After M5.5 review and before any native provider/browser/output-release path, add the authorization-owned [system-use decision record](system-use-decision-record.md): a current, exact-scope, evidence-referenced prerequisite that can only narrow or stop. It is not legal approval, certification, a Charter assurance claim, or action authority. |
@@ -235,4 +236,4 @@ Phase dates are indicative; order is not.
 
 1. Second wired model: **GPT is assumed** (an OpenAI key the maintainer already holds locally — gitignored, never committed; the OpenAI API is the adapter's native shape). Switching to Claude or another endpoint is a configuration change but requires its own API key — confirm or override at M0.
 
-Resolved 2026-07-31 (recorded in §1): repository name `ai-charter-runtime`; licensing (revised the same day from Apache-2.0 to the FactHarbor-aligned model — AGPL-3.0-only governance core, MIT edges, CC BY 4.0 documentation); dual-model handling — the two-model *capability* (navigation, selection, governed switching) ships in v1, while the systematic side-by-side *comparison run* of all 22 beats on both models, captured as an artifact, lands in M6 with the rest of the test-pass and capture work.
+Resolved 2026-07-31 (recorded in §1): repository name `ai-charter-runtime`; dual-model handling — the two-model *capability* (navigation, selection, governed switching) ships in v1, while the systematic side-by-side *comparison run* of all 22 beats on both models, captured as an artifact, lands in M6 with the rest of the test-pass and capture work.

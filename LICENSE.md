@@ -1,27 +1,29 @@
-# Licensing
+# ai-charter-runtime licensing
 
-This repository uses a multi-license model aligned with FactHarbor's, decided 2026-07-31 and recorded in the
-[POC specification §1](docs/spec/runtime-gates-poc-spec.md).
-Full license texts are in [`LICENSES/`](LICENSES/). Strategic choice, not legal advice.
+Full unchanged texts: [GNU AGPL version 3](LICENSES/AGPL-3.0-only.txt) and [CC BY-SA 4.0](LICENSES/CC-BY-SA-4.0.txt). The root [LICENSE](LICENSE) repeats AGPL v3; the material assignments below determine which licence applies. AGPL assignments are version 3 only.
 
-## Per-directory license map
+| Original material | Licence |
+|---|---|
+| Original software in `packages/` and `tooling/`; executable examples, tests, operative policy/configuration, build files, workflows and hooks | AGPL-3.0-only |
+| Original synthetic fixtures in `fixtures/` | AGPL-3.0-only, to the extent protectable |
+| Documentary specifications in `docs/`, README files, original graphics and agent/contributor guidance | CC BY-SA 4.0 |
 
-| Path | License | SPDX identifier | Why |
-|---|---|---|---|
-| `packages/gate-core/` | GNU AGPL v3.0 **only** | `AGPL-3.0-only` | The governance core (authorization service: policy evaluator, mandate store, counters/nonces, commit-verify, escalation state machine, record-integrity chains). Intended to require an operator who modifies the gate and offers it as a network service to publish the modified source — no black-box gates |
-| `packages/adapters/` | MIT | `MIT` | Model adapters (OpenAI-compatible clients) — maximum reuse |
-| `packages/consoles/` | MIT | `MIT` | Case console + governance console assets |
-| `packages/services-mock/` | MIT | `MIT` | Mock connected services (registry, filing, notification) |
-| `packages/m6-offline/` | MIT | `MIT` | Deterministic M6 offline conformance, artifact validation, staging, and sanitization tooling |
-| `tooling/` | MIT | `MIT` | Probes, scripts, test harness |
-| `fixtures/` | MIT | `MIT` | Synthetic demo data (no ODbL: not a curated database) |
-| Root build/config files (`package.json`, `tsconfig*.json`, `vitest.config.ts`, lockfile) | MIT | `MIT` | Build scaffolding (JSON files carry no header; the map governs) |
-| `docs/`, `README.md`, repo-meta guidance (`AGENTS.md`, `CLAUDE.md`, `SECURITY.md`, `.github/`, `.codex/agents/`, `.claude/agents/`) | CC BY 4.0 | `CC-BY-4.0` | Documentation and agent/contributor guidance. Deliberate deviation from FactHarbor's CC BY-SA so text moves freely in both directions between this repo and the CC BY 4.0 [our-ai-charter](https://github.com/robertschaub/our-ai-charter) repository |
+Synthetic fixtures are not designated as an ODbL database.
 
-## Rules
+## Rights and alternative licences
 
-- **SPDX headers.** Every source file carries `SPDX-License-Identifier: <id>` matching this map. The map, not the header, is authoritative on conflict.
-- **Where a header would not work.** JSON config (`package.json`, `.claude/settings.json`, `.codex/hooks.json`) has no comment syntax, and a comment in the GitHub templates (`.github/pull_request_template.md`, `.github/ISSUE_TEMPLATE/`) would be copied into every issue and pull-request body. Those files carry no header and are governed by the map alone.
-- **Combined artifacts.** MIT-licensed console assets served *by* the AGPL authorization service remain separate MIT works; the service itself stays AGPL-3.0-only. Linking MIT code *into* `gate-core` is fine (MIT is AGPL-compatible); the combined work is distributed under AGPL-3.0-only.
-- **Charter-derived text** (policy-file wording, field lists, quotations from Our AI Charter documents) keeps CC BY 4.0 attribution: *"Derived from [Our AI Charter](https://github.com/robertschaub/our-ai-charter) by Robert Schaub, CC BY 4.0."*
-- **No ODbL** unless a genuine curated database ever emerges here.
+Robert Schaub remains the sole copyright holder of his own protectable original contributions. Other contributors retain copyright in theirs. These grants cover only rights controlled by the relevant rights holder; acting for FactHarbor Verein does not itself transfer copyright.
+
+Commercial use is permitted when it complies with the applicable public licence. Robert may separately grant alternative permissions, including closed-use permissions, for rights he owns or is authorised to license. Their scope, duration and compensation are negotiated individually in writing. No alternative licence is promised or granted by this notice.
+
+Contributions by people other than Robert Schaub require explicit acceptance of the [contributor copyright agreement](CONTRIBUTOR-AGREEMENT.md) for the identified material. It provides nonexclusive public- and alternative-licensing authority without transferring ownership. Third-party rights must be cleared separately.
+
+## Scope
+
+The standard licence texts are unchanged. AGPL source obligations arise under its distribution and modified-network-interaction provisions. CC BY-SA governs protected documentary expression and shared adaptations. Neither licence requires every private productive use or independent implementation of ideas to be published. No additional approval or publication condition is imposed by this map.
+
+Material type governs over a directory default: documentary README files in software directories use CC BY-SA; executable code and operative configuration in documentation directories use AGPL. Explicit third-party notices take precedence. Dependencies, quotations, licence texts and other third-party material retain their applicable terms. Generated material is covered only to the extent protectable rights are held.
+
+Robert's original documentary expression incorporated into original project software is also offered under AGPL-3.0-only. Incorporating another author's expression needs compatible permission; CC BY-SA alone is not a direct permission to relicense it under AGPL.
+
+These copyright licences grant no branding or endorsement right in project names, logos or trust marks. Uses permitted independently by law remain unaffected. Preserve required copyright, attribution and third-party notices, including [NOTICE](NOTICE).

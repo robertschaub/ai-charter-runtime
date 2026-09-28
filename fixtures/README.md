@@ -1,7 +1,7 @@
-<!-- SPDX-License-Identifier: MIT -->
+<!-- SPDX-License-Identifier: CC-BY-SA-4.0 -->
 # fixtures
 
-Synthetic grant-scenario data and pinned test fixtures (MIT). Never real personal data.
+Synthetic grant-scenario data and pinned test fixtures (AGPL-3.0-only, to the extent protectable). Never real personal data.
 
 `demo/conversation.json` is the synthetic authorization-owned, case-scoped four-store seed used by the
 native-process M5 tests. It is input data, not a generated or append-only runtime record.

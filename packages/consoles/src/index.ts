@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: AGPL-3.0-only
 export * from './verticalSlice.js';
 export * from './runtimeHttpClients.js';
 export * from './modelTurnCoordinator.js';

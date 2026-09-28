@@ -1,4 +1,4 @@
-<!-- SPDX-License-Identifier: CC-BY-4.0 -->
+<!-- SPDX-License-Identifier: CC-BY-SA-4.0 -->
 # M6.3 offline conformance acceptance ledger
 
 **Status:** case tables are generated from the closed M6.3 catalog; the seven criteria and thirteen family assessments are explicit maintained summaries in this generator. Execution evidence remains maintainer-run synthetic conformance, not independent evaluation, assurance, certification, live-provider evidence, or M6 completion.

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: AGPL-3.0-only
 import { ADVERSARIAL_IDS, BEAT_IDS, EXPECTED_CASE_IDS, INFRASTRUCTURE_IDS } from './catalog.js';
 import { executeAdversarial } from './adversarialExecutors.js';
 import { executeBeat } from './beatExecutors.js';

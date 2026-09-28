@@ -1,4 +1,4 @@
-<!-- SPDX-License-Identifier: CC-BY-4.0 -->
+<!-- SPDX-License-Identifier: CC-BY-SA-4.0 -->
 # ADR-006 — Model-card lifecycle
 
 **Status:** accepted (M1, 2026-08-01; cards authored at M3). **Spec:** §4 Model card, §5 find → check → use, §9 (cryptography limits; provider-side substitution), §7 beats 19–21.

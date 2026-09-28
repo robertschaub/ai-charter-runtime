@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: AGPL-3.0-only
 /** The sole M6.3 socket harness. It binds only an ephemeral IPv4 loopback listener. */
 import { CaseExecutionStore, CaseSessionStore, OrchestratorHttpServer } from 'runtime-consoles/m6-infrastructure';
 import { ServicesHttpServer } from 'services-mock/m6-infrastructure';

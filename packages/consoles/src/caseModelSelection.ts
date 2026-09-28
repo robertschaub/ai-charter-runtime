@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: AGPL-3.0-only
 /** ADR-010 browser-safe selection projections and process-private preparation state. */
 import { randomBytes } from 'node:crypto';
 

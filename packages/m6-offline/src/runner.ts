@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: AGPL-3.0-only
 import { arch, platform, release } from 'node:os';
 
 import { sha256Hex } from 'gate-core/offline-safe';

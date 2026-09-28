@@ -1,4 +1,4 @@
-<!-- SPDX-License-Identifier: CC-BY-4.0 -->
+<!-- SPDX-License-Identifier: CC-BY-SA-4.0 -->
 # ai-charter-runtime
 
 This unfinished control software checks a proposed AI action against recorded authority and rules outside the acting model; its demonstrations use simulated scenarios and a local test action. The selected [Evidence-Gated Agents](https://github.com/robertschaub/our-ai-charter/blob/main/docs/Assurance/Concepts/evidence-gated-agents.md) prototype design would reuse compatible Runtime gates and receipts around a normal AI agent's exact proposed decision while FactHarbor supplies a separate live evidence examination. That integration is not implemented and remains subject to funding.
@@ -98,12 +98,12 @@ The exact upstream revision, digest, reviewed runtime baseline, and remaining mi
 | `docs/cards/` | Signed model cards (version-pinned evidence-registry artifacts) | M3 |
 | `tooling/probe.mjs` | M0 capability probe (endpoints, model ids, `tools`, `response_format`, latency, limits) | M0 |
 | `packages/gate-core/` | Authorization service — the independent gate (AGPL-3.0-only) | M2 |
-| `packages/adapters/` | OpenAI-compatible model adapters (MIT) | M3–M5 |
-| `packages/services-mock/` | Executing services with commitment verification (MIT) | M3 |
-| `packages/consoles/` | M3 deterministic loop, M4 process/consoles, and M5 selected-lane ingress into sealed quarantine (MIT) | M3–M5 |
-| `fixtures/` | Synthetic grant-scenario data and pinned test fixtures (MIT) | M3+ |
+| `packages/adapters/` | OpenAI-compatible model adapters (AGPL-3.0-only) | M3–M5 |
+| `packages/services-mock/` | Executing services with commitment verification (AGPL-3.0-only) | M3 |
+| `packages/consoles/` | M3 deterministic loop, M4 process/consoles, and M5 selected-lane ingress into sealed quarantine (AGPL-3.0-only) | M3–M5 |
+| `fixtures/` | Synthetic grant-scenario data and pinned test fixtures (AGPL-3.0-only) | M3+ |
 
-Licensing is per-directory — see [LICENSE.md](LICENSE.md). The repository-specific [privacy notice](PRIVACY.md) is a draft prepared for review; it distinguishes public repository interactions from data controlled by an independent local operator.
+Original software is licensed under GNU AGPL version 3 only; original documentation and graphics use CC BY-SA 4.0. See [LICENSE.md](LICENSE.md) for the scope and third-party exceptions. Robert Schaub may separately agree alternative licences for rights he controls. The repository-specific [privacy notice](PRIVACY.md) is a draft prepared for review; it distinguishes public repository interactions from data controlled by an independent local operator.
 
 ## M0 probe
 

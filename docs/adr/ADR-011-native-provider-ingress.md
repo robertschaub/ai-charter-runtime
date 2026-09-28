@@ -1,4 +1,4 @@
-<!-- SPDX-License-Identifier: CC-BY-4.0 -->
+<!-- SPDX-License-Identifier: CC-BY-SA-4.0 -->
 # ADR-011 — Native provider ingress to sealed quarantine
 
 **Status:** definition reviewed at `2a508ba`; focused correction `be01667` reviewed GO with no open finding;

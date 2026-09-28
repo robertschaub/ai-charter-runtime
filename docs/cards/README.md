@@ -1,4 +1,4 @@
-<!-- SPDX-License-Identifier: CC-BY-4.0 -->
+<!-- SPDX-License-Identifier: CC-BY-SA-4.0 -->
 # cards
 
 M3's two version-pinned model cards and their Ed25519 public trust root live here (schema and lifecycle

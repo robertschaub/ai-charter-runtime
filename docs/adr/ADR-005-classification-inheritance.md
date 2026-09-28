@@ -1,4 +1,4 @@
-<!-- SPDX-License-Identifier: CC-BY-4.0 -->
+<!-- SPDX-License-Identifier: CC-BY-SA-4.0 -->
 # ADR-005 — Classification inheritance (restriction tags)
 
 **Status:** accepted (M1, 2026-08-01). **Spec:** §5 (model navigation; per-provider projections), §4 (structured proposal; screening signal; model card), §7 beats 19–21.

@@ -1,4 +1,4 @@
-<!-- SPDX-License-Identifier: CC-BY-4.0 -->
+<!-- SPDX-License-Identifier: CC-BY-SA-4.0 -->
 # ADR-012 — Authorization-owned conversation ingestion and single-use output release
 
 **Status:** accepted M5.10 definition at `a38d1ed`; implementation reviewed GO at `8a904f3`.

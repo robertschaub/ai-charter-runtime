@@ -1,4 +1,4 @@
-<!-- SPDX-License-Identifier: CC-BY-4.0 -->
+<!-- SPDX-License-Identifier: CC-BY-SA-4.0 -->
 # ADR-019 — M6 offline conformance and capture-artifact contract
 
 **Status:** definition reviewed (initial `f5583a1` NO-GO; corrected `5952066` GO — no findings).
@@ -290,7 +290,7 @@ After exact-SHA GO and separate maintainer approval, M6.3 implementation may add
 1. the public schemas, closed case catalog, generated acceptance ledger, and documentation under `docs/m6/`;
 2. the `m6-capture-plan` and `m6-offline-outcome` domain tags and ADR-007 amendment, without changing any existing
    digest;
-3. MIT-licensed offline catalog/executor, validator, staging, projection, and sanitization tooling plus deterministic
+3. offline catalog/executor, validator, staging, projection, and sanitization tooling plus deterministic
    tests;
 4. root scripts for schema validation, offline execution, and dry-run only;
 5. `/.m6-staging/` ignore coverage; and

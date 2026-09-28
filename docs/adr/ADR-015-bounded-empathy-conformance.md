@@ -1,4 +1,4 @@
-<!-- SPDX-License-Identifier: CC-BY-4.0 -->
+<!-- SPDX-License-Identifier: CC-BY-SA-4.0 -->
 # ADR-015 — Bounded empathy conformance and M5 acceptance
 
 **Status:** definition reviewed GO at `a08fa98`; bounded implementation reviewed GO at `5251500`; M5 acceptance

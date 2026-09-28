@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: AGPL-3.0-only
 /** Authorization-origin governance console. No authority decision is made in this client. */
 
 export const CONSOLE_ROLES = ['principal', 'case_officer', 'applicant'] as const;

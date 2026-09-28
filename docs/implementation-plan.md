@@ -1,4 +1,4 @@
-<!-- SPDX-License-Identifier: CC-BY-4.0 -->
+<!-- SPDX-License-Identifier: CC-BY-SA-4.0 -->
 # Runtime implementation plan
 
 **Status date:** 2026-09-10
@@ -257,7 +257,7 @@ review. Test-family coverage continues to be reported as exercised, partial, or 
 - Defence-in-depth role filters, orchestrator-minimal escalation status, fixed leakage allowlists, durable
   record-family access evidence, in-line-tamper and same-boot valid-prefix rollback refusal against the live
   writer heads, and real-listener integration coverage.
-- Authorization-origin governance-console shell with separately licensed, dependency-free static assets,
+- Authorization-origin governance-console shell with dependency-free static assets,
   strict self-only CSP including `frame-ancestors 'none'`, zero CORS, no cookies, token-free deep-link paths,
   and role tokens held only in that origin's `localStorage` and bearer headers.
 - Principal mandate grant/amend/revoke, routed escalation inbox/detail with only open contract-permitted

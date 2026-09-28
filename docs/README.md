@@ -1,8 +1,8 @@
-<!-- SPDX-License-Identifier: CC-BY-4.0 -->
+<!-- SPDX-License-Identifier: CC-BY-SA-4.0 -->
 # docs
 
-Documentation is CC BY 4.0 (see [LICENSE.md](../LICENSE.md)). Text derived from
-[Our AI Charter](https://github.com/robertschaub/our-ai-charter) documents keeps CC BY 4.0
+Documentation is CC BY-SA 4.0 (see [LICENSE.md](../LICENSE.md)). Text derived from
+[Our AI Charter](https://github.com/robertschaub/our-ai-charter) documents keeps CC BY-SA 4.0
 attribution to Robert Schaub / Our AI Charter.
 
 - `spec/` — the current implementation specification and its system-use companion.

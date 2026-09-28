@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: AGPL-3.0-only
 export * from './catalog.js';
 export * from './acceptance.js';
 export * from './comparison.js';

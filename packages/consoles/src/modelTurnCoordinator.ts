@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: AGPL-3.0-only
 /** M5.4 containment plus M5.5 durable model-call lifecycle coordinator. */
 import {
   MAX_MODEL_OUTPUT_CHARS,

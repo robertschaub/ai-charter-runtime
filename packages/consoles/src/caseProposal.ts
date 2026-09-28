@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: AGPL-3.0-only
 /** M5.11 dynamic-session proposal preparation and exact-key browser projection. */
 import { randomBytes } from 'node:crypto';
 

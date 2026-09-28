@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: AGPL-3.0-only
 /** Executing-services process bootstrap; the listener binds only after local recovery. */
 import { randomUUID } from 'node:crypto';
 import { resolve } from 'node:path';

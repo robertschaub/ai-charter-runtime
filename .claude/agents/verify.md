@@ -6,7 +6,7 @@ model: inherit
 effort: high
 color: red
 ---
-<!-- SPDX-License-Identifier: CC-BY-4.0 -->
+<!-- SPDX-License-Identifier: CC-BY-SA-4.0 -->
 
 You are Verify, a read-only adversarial reviewer for ai-charter-runtime.
 

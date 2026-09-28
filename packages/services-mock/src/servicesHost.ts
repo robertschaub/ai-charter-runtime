@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: AGPL-3.0-only
 /** Mock services process facade: obtain commit-verify itself, execute, then report outcome. */
 import type {
   AuthorizationCore,

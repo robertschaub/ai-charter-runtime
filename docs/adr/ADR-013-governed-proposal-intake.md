@@ -1,4 +1,4 @@
-<!-- SPDX-License-Identifier: CC-BY-4.0 -->
+<!-- SPDX-License-Identifier: CC-BY-SA-4.0 -->
 # ADR-013 — Governed proposal intake from admitted model output
 
 **Status:** accepted and implemented in M5.11. The initial definition review at `a39dafd` returned NO-GO on two

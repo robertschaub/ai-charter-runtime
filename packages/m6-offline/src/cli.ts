@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: AGPL-3.0-only
 import { loadCatalog, loadProviderFixture } from './catalog.js';
 import { generateAcceptanceMarkdown } from './acceptance.js';
 import { readSafeRepositoryFile } from './repository.js';

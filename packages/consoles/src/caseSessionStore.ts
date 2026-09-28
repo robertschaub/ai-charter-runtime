@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: AGPL-3.0-only
 /** Orchestrator-local browser sessions. Raw bearers are returned once and never stored. */
 import { randomBytes, randomUUID } from 'node:crypto';
 

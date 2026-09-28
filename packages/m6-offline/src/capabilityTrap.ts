@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: AGPL-3.0-only
 /** Explicit capability trap: ordinary M6.3 executors get none; infrastructure gets loopback sockets only. */
 export class M6CapabilityTrap {
   constructor(private readonly infrastructure = false) {}

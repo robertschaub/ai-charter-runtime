@@ -1,4 +1,4 @@
-<!-- SPDX-License-Identifier: CC-BY-4.0 -->
+<!-- SPDX-License-Identifier: CC-BY-SA-4.0 -->
 # ADR-018 — Native commitment continuation
 
 **Status:** definition reviewed at `d0b8cc6`, GO — both contract-accuracy findings from the initial `46b40eb`

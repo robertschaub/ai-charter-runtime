@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: AGPL-3.0-only
 /** Minimal fail-closed adapter shared by the two M0-probed OpenAI-compatible lanes. */
 import { z } from 'zod';
 import {

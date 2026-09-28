@@ -1,4 +1,4 @@
-<!-- SPDX-License-Identifier: CC-BY-4.0 -->
+<!-- SPDX-License-Identifier: CC-BY-SA-4.0 -->
 # ADR-008 — Pre-ingress system-use decision
 
 **Status:** accepted (M5.6, 2026-08-04). **Spec:** system-use decision record §§ Record shape,

@@ -1,4 +1,4 @@
-<!-- SPDX-License-Identifier: CC-BY-4.0 -->
+<!-- SPDX-License-Identifier: CC-BY-SA-4.0 -->
 # ADR-017 — Unsupported `reverse` disposition
 
 **Status:** M6.0b definition reviewed at `2eb14ba` (2026-08-12), GO — no findings; bounded implementation reviewed

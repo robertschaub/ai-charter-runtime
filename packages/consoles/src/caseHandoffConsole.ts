@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: AGPL-3.0-only
 /** Orchestrator-origin receiver for ADR-002's exact-window handoff. */
 
 const WORLD_ID = /^[a-z0-9][a-z0-9-]{0,31}$/;

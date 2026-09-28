@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: AGPL-3.0-only
 
 export type LaneSlot = 'lane-0' | 'lane-1';
 export type CaseClass = 'beat' | 'adversarial' | 'infrastructure';

@@ -1,4 +1,4 @@
-<!-- SPDX-License-Identifier: CC-BY-4.0 -->
+<!-- SPDX-License-Identifier: CC-BY-SA-4.0 -->
 # ADR-002 — Authenticated inter-process interfaces
 
 **Status:** accepted (M1, 2026-08-01). **Spec:** §3 (three processes, demo authentication), §5 (dialogue boundary rules), §6 criterion 4, §10 M1 (world-id seams, config-driven endpoints).
@@ -22,7 +22,7 @@ an assurance signal. The orchestrator's escalation read is a status mirror only;
 remain confined to the authoritative origin and the role to which they are routed.
 
 **Amendment (M4 governance-console slice, 2026-08-03):** the authorization process preloads the separate
-MIT console assets before binding and serves their shell, script, and stylesheet through fixed open route
+console assets before binding and serves their shell, script, and stylesheet through fixed open route
 ids. Every console response carries a strict self-only CSP including `frame-ancestors 'none'`, and no CORS
 or cookie header. The principal may read the existing fixed approved-model projection so the mandate
 surface can show the signed-card evidence it governs; this adds no mutation permission and exposes no

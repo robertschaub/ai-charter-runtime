@@ -1,4 +1,4 @@
-<!-- SPDX-License-Identifier: CC-BY-4.0 -->
+<!-- SPDX-License-Identifier: CC-BY-SA-4.0 -->
 # M0 probe — decision memo
 
 **Status:** closed 2026-08-01 — all eight questions answered (wallet metering noted; latency numbers for identical bodies remain cache-suspect). Remaining M0 items are repository-side: GitHub remote + posture.

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: AGPL-3.0-only
 /** Narrow, non-credential runtime environment observation for an exact capture-plan binding. */
 export function currentNpmVersion(): string {
   const userAgent = process.env.npm_config_user_agent;

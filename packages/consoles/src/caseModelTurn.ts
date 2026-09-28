@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: AGPL-3.0-only
 /** M5.9 browser-safe native model-turn preparation and metadata-only status. */
 import { randomBytes, randomUUID } from 'node:crypto';
 

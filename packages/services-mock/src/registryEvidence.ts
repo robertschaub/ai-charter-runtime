@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: AGPL-3.0-only
 /** Immutable synthetic registry evidence for ADR-004's third-party-confirmation path. */
 import { canonicalize, registryRecordRef, sha256Hex, timestamp, type RegistryEvidence } from 'gate-core/offline-safe';
 

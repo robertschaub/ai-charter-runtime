@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: AGPL-3.0-only
 /** Transport-neutral dependency refusal type shared with offline coordination. */
 export class RuntimeDependencyError extends Error {
   constructor(

@@ -1,4 +1,4 @@
-<!-- SPDX-License-Identifier: CC-BY-4.0 -->
+<!-- SPDX-License-Identifier: CC-BY-SA-4.0 -->
 
 > **Status: CURRENT SPECIFICATION** — pre-ingress companion to the runtime-gates POC; not a certification, legal approval, or operating service.
 

@@ -1,4 +1,4 @@
-<!-- SPDX-License-Identifier: CC-BY-4.0 -->
+<!-- SPDX-License-Identifier: CC-BY-SA-4.0 -->
 # ADR-004 — Dialogue-response channel (browser → authorization service)
 
 **Status:** accepted (M1, 2026-08-01). **Spec:** §5 (empathy layer; dialogue triggers), §4 (intervention contract), §3 (consoles, demo authentication), §7 beat 4.

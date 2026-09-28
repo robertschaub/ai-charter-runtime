@@ -30,5 +30,5 @@
     "typescript": "^5.9.0",
     "vitest": "^4.1.11"
   },
-  "license": "SEE LICENSE IN LICENSE.md"
+  "license": "AGPL-3.0-only"
 }

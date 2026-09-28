@@ -1,4 +1,4 @@
-<!-- SPDX-License-Identifier: CC-BY-4.0 -->
+<!-- SPDX-License-Identifier: CC-BY-SA-4.0 -->
 # Privacy notice
 
 > **Status: DRAFT FOR REVIEW — not yet effective.** This notice was checked against the repository on 17 September 2026. It is not legal advice or retained-counsel sign-off. Complete the provider-contract and retention review gates before adopting it.

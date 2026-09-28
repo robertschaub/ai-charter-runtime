@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: AGPL-3.0-only
 /** M5.10 browser message preparation, turn status, and transcript redaction boundary. */
 import { randomBytes, randomUUID } from 'node:crypto';
 

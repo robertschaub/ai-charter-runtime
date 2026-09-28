@@ -1,7 +1,7 @@
-<!-- SPDX-License-Identifier: MIT -->
+<!-- SPDX-License-Identifier: CC-BY-SA-4.0 -->
 # consoles
 
-License: MIT (see ../../LICENSE.md).
+Software: AGPL-3.0-only. This documentation: CC BY-SA 4.0. See ../../LICENSE.md.
 
 M3 contains the deterministic orchestrator loop used by the dual-model vertical-slice tests. It parses
 the acting model's proposal, supplies server-owned model identity fields, submits the frozen proposal,
@@ -22,7 +22,7 @@ replay/sweep/reconciliation second, and the orchestrator last. The derived case 
 headless synthetic-test seam and is never a browser credential. The approved browser path uses ADR-002's
 one-time handoff and independent dynamic session.
 
-The M4 authorization-origin governance console is now a dependency-free MIT asset set served by `gate-core`.
+The M4 authorization-origin governance console is now a dependency-free asset set served by `gate-core`.
 Its principal surface covers mandate grant/amend/revoke, routed escalation contracts and permitted general
 dispositions, signed-card evidence, and action/access records; its applicant surface requests only the
 server-side scoped extract. The shell has no inline or third-party executable content, keeps role tokens in

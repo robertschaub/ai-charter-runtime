@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: AGPL-3.0-only
 /** M5.9 native adapter custody and exact signed-card configuration binding. */
 import {
   type CardRegistry,

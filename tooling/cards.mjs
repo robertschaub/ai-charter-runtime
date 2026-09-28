@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: AGPL-3.0-only
 // Sign, verify, and digest ADR-006 model cards. Private key material is never printed.
 import {
   createPrivateKey,

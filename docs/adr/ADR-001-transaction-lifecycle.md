@@ -1,4 +1,4 @@
-<!-- SPDX-License-Identifier: CC-BY-4.0 -->
+<!-- SPDX-License-Identifier: CC-BY-SA-4.0 -->
 # ADR-001 — Transaction lifecycle (nonces, reservations, rulings, idempotency keys)
 
 **Status:** accepted (M1, 2026-08-01). **Spec:** §4 Gate ruling / Record entry, §5 Transactional core + Escalations-are-single-use, §6 criterion 6, §10 M1 (world-id seams).

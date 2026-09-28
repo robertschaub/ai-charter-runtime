@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: AGPL-3.0-only
 /** ADR-003 record verifier. Local mode skips only the remote-presence step. */
 import { randomUUID } from 'node:crypto';
 import { resolve } from 'node:path';

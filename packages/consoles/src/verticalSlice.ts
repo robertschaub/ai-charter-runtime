@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: AGPL-3.0-only
 /** Deterministic M3 orchestrator loop; HTTP process wrappers remain an M4 concern. */
 import { readFileSync } from 'node:fs';
 

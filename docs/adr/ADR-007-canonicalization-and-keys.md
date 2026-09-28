@@ -1,4 +1,4 @@
-<!-- SPDX-License-Identifier: CC-BY-4.0 -->
+<!-- SPDX-License-Identifier: CC-BY-SA-4.0 -->
 # ADR-007 — Canonical JSON and key handling
 
 **Status:** accepted (M1, 2026-08-01). **Spec:** §4 (frozen proposals, HMAC binding), §9 (minimal cryptography).

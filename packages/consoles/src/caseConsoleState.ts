@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: AGPL-3.0-only
 /** Orchestrator-owned, non-authoritative case mirror for ADR-004's two-hop polling. */
 import { browserOrigin, id, rulingProjection, type ProposalRulingProjection, type RulingProjection } from 'gate-core';
 import { z } from 'zod';

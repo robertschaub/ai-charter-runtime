@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: AGPL-3.0-only
-# Derived from Our AI Charter by Robert Schaub, CC BY 4.0.
+# Derived from Our AI Charter by Robert Schaub. Robert separately licenses his original expression incorporated here under AGPL-3.0-only; see NOTICE.
 policy_version: 2026-08-02.1
 ordering: deny-escalate-allow-then-priority
 

@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: AGPL-3.0-only
 /** Local supervisor: derives audience credentials, then boots the three data-path processes in order. */
 import { spawn, type ChildProcess } from 'node:child_process';
 import { resolve } from 'node:path';

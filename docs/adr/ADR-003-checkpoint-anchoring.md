@@ -1,4 +1,4 @@
-<!-- SPDX-License-Identifier: CC-BY-4.0 -->
+<!-- SPDX-License-Identifier: CC-BY-SA-4.0 -->
 # ADR-003 — Composite-head checkpoint anchoring
 
 **Status:** accepted (M1, 2026-08-01); M6.0a acknowledgment-classification implementation reviewed at

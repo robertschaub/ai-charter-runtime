@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: AGPL-3.0-only
 /** Services-host client for the two authorization endpoints it alone may call. */
 import {
   AUTHORITY_DEFECTS,

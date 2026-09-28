@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: AGPL-3.0-only
 // Key and credential generation for the runtime POC (ADR-002 §2, ADR-007).
 // Zero dependencies (Node >= 20).
 //

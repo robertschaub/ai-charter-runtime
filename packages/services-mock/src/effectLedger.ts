@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: AGPL-3.0-only
 /** Executing-service boundary: verify again, then atomically record exactly one mock effect. */
 import {
   closeSync,

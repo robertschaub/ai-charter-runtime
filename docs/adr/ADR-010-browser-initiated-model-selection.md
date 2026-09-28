@@ -1,4 +1,4 @@
-<!-- SPDX-License-Identifier: CC-BY-4.0 -->
+<!-- SPDX-License-Identifier: CC-BY-SA-4.0 -->
 # ADR-010 — Browser-initiated governed model selection
 
 **Status:** definition accepted at `85fef1f`; bounded implementation `ff9e438` passed exact-SHA adversarial review

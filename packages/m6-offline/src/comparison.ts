@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: AGPL-3.0-only
 import { digestFor } from 'gate-core/offline-safe';
 
 import { loadProviderFixture } from './catalog.js';
