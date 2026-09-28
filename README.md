@@ -103,7 +103,7 @@ The exact upstream revision, digest, reviewed runtime baseline, and remaining mi
 | `packages/consoles/` | M3 deterministic loop, M4 process/consoles, and M5 selected-lane ingress into sealed quarantine (AGPL-3.0-only) | M3–M5 |
 | `fixtures/` | Synthetic grant-scenario data and pinned test fixtures (AGPL-3.0-only) | M3+ |
 
-Original software is licensed under GNU AGPL version 3 only; original documentation and graphics use CC BY-SA 4.0. See [LICENSE.md](LICENSE.md) for the scope and third-party exceptions. Robert Schaub may separately agree alternative licences for rights he controls. The repository-specific [privacy notice](PRIVACY.md) is a draft prepared for review; it distinguishes public repository interactions from data controlled by an independent local operator.
+Original software is licensed under GNU AGPL version 3 only; original documentation and graphics use CC BY-SA 4.0. See [Licensing guide](LICENSING.md) for the scope and third-party exceptions. Robert Schaub may separately agree alternative licences for rights he controls. The repository-specific [privacy notice](PRIVACY.md) is a draft prepared for review; it distinguishes public repository interactions from data controlled by an independent local operator.
 
 ## M0 probe
 

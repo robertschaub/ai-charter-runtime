@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: CC-BY-SA-4.0 -->
 # services-mock
 
-Software: AGPL-3.0-only. This documentation: CC BY-SA 4.0. See ../../LICENSE.md.
+Software: AGPL-3.0-only. This documentation: CC BY-SA 4.0. See ../../LICENSING.md.
 
 The M3 services host obtains commit-verify itself, verifies the token and exact effect intent again,
 and atomically commits a local idempotency ledger entry that is the mock effect. A same-process retry is

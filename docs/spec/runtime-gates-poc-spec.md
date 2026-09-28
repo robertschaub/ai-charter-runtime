@@ -8,7 +8,7 @@ A runnable proof of concept of the Charter's runtime reference model: at an AI p
 
 The POC code will live in a separate public repository, **`ai-charter-runtime`** (decided 2026-07-31); this repo stays documentation-only per [AGENTS.md](https://github.com/robertschaub/our-ai-charter/blob/main/AGENTS.md). This note is the build specification and traces every requirement to its source document.
 
-Licensing scope is defined in [LICENSE.md](../../LICENSE.md).
+Licensing scope is defined in [Licensing guide](../../LICENSING.md).
 
 ## 1. Decisions of record (maintainer, 2026-07-31)
 

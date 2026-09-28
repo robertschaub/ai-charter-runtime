@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: CC-BY-SA-4.0 -->
 # adapters
 
-Software: AGPL-3.0-only. This documentation: CC BY-SA 4.0. See ../../LICENSE.md.
+Software: AGPL-3.0-only. This documentation: CC BY-SA 4.0. See ../../LICENSING.md.
 
 One fail-closed OpenAI-compatible adapter drives the PublicAI/Apertus and OpenAI lanes. Lane config
 selects the M0-probed output-token parameter; every response keeps requested and provider-served model

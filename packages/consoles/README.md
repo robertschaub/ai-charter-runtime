@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: CC-BY-SA-4.0 -->
 # consoles
 
-Software: AGPL-3.0-only. This documentation: CC BY-SA 4.0. See ../../LICENSE.md.
+Software: AGPL-3.0-only. This documentation: CC BY-SA 4.0. See ../../LICENSING.md.
 
 M3 contains the deterministic orchestrator loop used by the dual-model vertical-slice tests. It parses
 the acting model's proposal, supplies server-owned model identity fields, submits the frozen proposal,

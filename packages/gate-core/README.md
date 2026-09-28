@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: CC-BY-SA-4.0 -->
 # gate-core
 
-Software: AGPL-3.0-only. This documentation: CC BY-SA 4.0. See ../../LICENSE.md.
+Software: AGPL-3.0-only. This documentation: CC BY-SA 4.0. See ../../LICENSING.md.
 
 M1 provides the frozen ADRs and protocol primitives: fail-closed canonicalization, domain-tagged
 hashing, durable hash chains, the three-state HMAC keyring, strict integer-only schemas, and the

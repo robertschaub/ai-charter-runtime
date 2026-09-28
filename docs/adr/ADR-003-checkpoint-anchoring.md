@@ -17,7 +17,7 @@ A **head** is `{world, stream, length, head_hash}`. The entry count matters as m
 The **composite digest** is SHA-256 (domain `checkpoint-composite`) over the canonicalized array of all heads, sorted by `world` then `stream` under ADR-007's single sort rule — no hand-declared stream order to remember. **One composite over all worlds, with the per-world heads listed inside the artifact**, so a single world's chain can still be verified in isolation from its own row. The composite is a whole-system state commitment, never a per-world identifier: it moves whenever any world appends.
 
 ### Checkpoint artifact
-`docs/checkpoints/<seq>-<compact UTC>.json`, e.g. `0007-20260801T093214Z.json` — no colons in the filename (Windows), zero-padded seq for lexical ordering. Files are append-only: never edited, never deleted; superseding means a new file. `docs/checkpoints/latest.json` is a pointer (`{seq, file, checkpoint_id, composite_digest}`) that the verifier reads *and* cross-checks against the highest seq on disk, so a pointer rolled backwards is itself detected. Both are JSON and carry no SPDX header — the `docs/` row of [LICENSE.md](../../LICENSE.md) governs.
+`docs/checkpoints/<seq>-<compact UTC>.json`, e.g. `0007-20260801T093214Z.json` — no colons in the filename (Windows), zero-padded seq for lexical ordering. Files are append-only: never edited, never deleted; superseding means a new file. `docs/checkpoints/latest.json` is a pointer (`{seq, file, checkpoint_id, composite_digest}`) that the verifier reads *and* cross-checks against the highest seq on disk, so a pointer rolled backwards is itself detected. Both are JSON and carry no SPDX header — the `docs/` row of [Licensing guide](../../LICENSING.md) governs.
 
 ```json
 {
@@ -176,7 +176,7 @@ synthetic test harness, or push. Exact-SHA review returned GO with no findings. 
 disposition remains parked for M6.0b.
 
 ### Verification procedure (beat 15)
-`npm run verify:records`, a `tooling/` CLI over the gate-core verifier (combined artifact per LICENSE.md):
+`npm run verify:records`, a `tooling/` CLI over the gate-core verifier (combined artifact per LICENSING.md):
 
 1. Resolve the latest local checkpoint from `latest.json`, cross-checked against the highest seq on disk.
 2. Walk the checkpoint chain — contiguous seq, each `prev_checkpoint_digest` recomputed — and recompute each file's `composite_digest` from its own `streams` rows, so a hand-edited anchor fails here.
