@@ -26,3 +26,7 @@ Before restricted dispatch, record permitted commands/state, control mechanisms/
 Pushes, deployments, live analyses, and provider-spending operations require current authorization covering the specific action and scope. Authorization already given in the task remains valid; preparation or review alone does not grant it. The specific key-generation/rotation, signing and live-probe gates above also persist. Review/skill selection grants none of those actions.
 
 These agent-workflow rules do not change deterministic runtime authorization, fail-closed decisions, single-use tokens, source pins, licensing or the ban on hand-editing records.
+
+## Documentation sources
+
+Keep public setup, implementation contracts and contribution instructions usable from this checkout alone. Before changing document authority or retiring records, read any task-supplied reference brief and preserve current rules, unresolved work and provenance. Use additional material only within the task's explicit access and disclosure scope. Keep local reference locations, confidential records and dependencies on unpublished material out of public files and generated outputs.
