@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: CC-BY-SA-4.0 -->
 # ai-charter-runtime
 
-This unfinished control software checks a proposed AI action against recorded authority and rules outside the acting model; its demonstrations use simulated scenarios and a local test action. The selected [Evidence-Gated Agents](https://github.com/robertschaub/our-ai-charter/blob/main/docs/Assurance/Concepts/evidence-gated-agents.md) prototype design would reuse compatible Runtime gates and receipts around a normal AI agent's exact proposed decision while FactHarbor supplies a separate live evidence examination. That integration is not implemented and remains subject to funding.
+ai-charter-runtime is an unfinished public proof of concept of the Our AI Charter runtime reference model and technical preparation for [Evidence-Gated Agents (EGA)](https://github.com/robertschaub/our-ai-charter/blob/main/docs/Assurance/Concepts/evidence-gated-agents.md). It checks a proposed AI action against recorded authority and rules outside the acting model; its demonstrations use simulated scenarios and a local test action. EGA plans to reuse compatible Runtime gates, proposal bindings, commitment verification and receipts around a normal AI agent's exact proposed decision while FactHarbor supplies a separate live evidence examination. That integration is not implemented and remains subject to funding. Runtime's adopted specification, ADRs and milestone scope remain authoritative for this code; EGA-specific contract changes require their own review and adoption.
 
 A runnable proof of concept of the [Our AI Charter runtime reference model](docs/spec/runtime-gates-poc-spec.md):
 at an AI prompt, the action path **plan → prepare → check → decide → review** executes with five gates

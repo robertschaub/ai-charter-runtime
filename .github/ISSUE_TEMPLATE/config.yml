@@ -3,6 +3,6 @@ contact_links:
   - name: Gate bypass or record-integrity finding
     url: https://github.com/robertschaub/ai-charter-runtime/blob/main/SECURITY.md
     about: Report privately (private vulnerability reporting or email) — never in a public issue.
-  - name: Specification question or change
+  - name: Charter principles or public EGA concepts
     url: https://github.com/robertschaub/our-ai-charter/issues
-    about: The build specification lives in our-ai-charter; it changes there, not here.
+    about: Charter obligations, concept notes and the public EGA overview change in our-ai-charter. Use ordinary issues here for Runtime specification and ADR questions.

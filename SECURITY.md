@@ -21,8 +21,9 @@ GitHub private vulnerability reporting.
 ## Public issues
 
 Public issues are for everything else: build problems, an unclear or unreachable spec beat, a
-challenge to the declared limits, a licensing question. Specification changes belong in
-[our-ai-charter](https://github.com/robertschaub/our-ai-charter/issues), not here.
+challenge to the declared limits, a licensing question, and Runtime specification or ADR changes.
+Charter principles and public EGA-concept changes belong in
+[our-ai-charter](https://github.com/robertschaub/our-ai-charter/issues).
 
 ## Keys
 
