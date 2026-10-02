@@ -30,3 +30,9 @@ These agent-workflow rules do not change deterministic runtime authorization, fa
 ## Documentation sources
 
 Keep public setup, implementation contracts and contribution instructions usable from this checkout alone. Before changing document authority or retiring records, read any task-supplied reference brief and preserve current rules, unresolved work and provenance. Use additional material only within the task's explicit access and disclosure scope. Keep local reference locations, confidential records and dependencies on unpublished material out of public files and generated outputs.
+
+Use the current task or a verified, human-adopted workspace profile for cross-repository scope. Durable working notes, detailed investigations, handoffs and unpublished prototypes use their assigned non-public record home unless clearly authorized as public. Existing public source, tests, operative configuration and contribution contracts stay here. A public cwd or a missing confidentiality marker does not select a public destination. If an assigned record home is unavailable, preserve permitted pending work outside this checkout and report the persistence gap; never recreate a private collection here.
+
+Select the primary checkout for the main deliverable. Explicitly read root and nested instructions for every target repository, run commands with an explicit working directory, and verify each tool's served source/revision. Additional-directory access does not load all instructions, hooks or skills; if required write controls cannot be verified, continue that write in a fresh target-primary session. A code worktree does not isolate a paired documentation checkout. Keep separate revisions and one owner per shared record.
+
+Contributors without an assigned private home may use the public record paths for intentionally public, public-safe work; uncertain or non-public material stays in the authorized task/chat scope.
