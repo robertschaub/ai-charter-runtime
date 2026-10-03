@@ -1,5 +1,22 @@
 <!-- SPDX-License-Identifier: CC-BY-SA-4.0 -->
-# docs
+# Runtime documentation
+
+Start with the [project overview and offline setup](../README.md). Use the paths below to explore the behavior, inspect its evidence, or work on the implementation.
+
+| I want to… | Read |
+|---|---|
+| Understand the worked example | [Scripted grant-scenario beats](m6/acceptance.md#scripted-beats) |
+| See what has and has not been exercised | [M6.3 acceptance ledger](m6/acceptance.md), including the seven criteria and thirteen test families |
+| Understand the implementation contract | [Runtime specification](spec/runtime-gates-poc-spec.md) and [system-use decision record](spec/system-use-decision-record.md) |
+| Follow the architecture and protocols | [Architecture decision records](adr/) |
+| Find current status, reviewed revisions, and remaining work | [Implementation plan](implementation-plan.md) |
+| Inspect earlier milestone evidence | [M4 acceptance](m4-acceptance.md) and [M5 acceptance](m5-acceptance.md) |
+| Understand the browser and process boundaries | [Console documentation](../packages/consoles/README.md) |
+| Inspect model evidence | [Signed model cards](cards/README.md) and the historical [M0 probe memo](m0-probe-memo.md) |
+
+The specification and its linked Charter sources govern on divergence. Acceptance records describe bounded evidence; they do not establish independent assurance or certification. Live M6.4 capture remains pending.
+
+## Reference directories
 
 Documentation is CC BY-SA 4.0 (see [Licensing guide](../LICENSING.md)). Text derived from
 [Our AI Charter](https://github.com/robertschaub/our-ai-charter) documents keeps CC BY-SA 4.0

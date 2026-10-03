@@ -1,215 +1,140 @@
 <!-- SPDX-License-Identifier: CC-BY-SA-4.0 -->
 # ai-charter-runtime
 
-ai-charter-runtime is an unfinished public proof of concept of the Our AI Charter runtime reference model and technical preparation for [Evidence-Gated Agents (EGA)](https://github.com/robertschaub/our-ai-charter/blob/main/docs/Assurance/Concepts/evidence-gated-agents.md). It checks a proposed AI action against recorded authority and rules outside the acting model; its demonstrations use simulated scenarios and a local test action. EGA plans to reuse compatible Runtime gates, proposal bindings, commitment verification and receipts around a normal AI agent's exact proposed decision while FactHarbor supplies a separate live evidence examination. That integration is not implemented and remains subject to funding. Runtime's adopted specification, ADRs and milestone scope remain authoritative for this code; EGA-specific contract changes require their own review and adoption.
+**Check an AI agent's proposed action before it takes effect.**
 
-A runnable proof of concept of the [Our AI Charter runtime reference model](docs/spec/runtime-gates-poc-spec.md):
-at an AI prompt, the action path **plan → prepare → check → decide → review** executes with five gates
-(**Authorize → Submit → Verify → Commit → Rely**) enforced *outside* the acting model — machine verdicts
-**allow / deny / escalate**, automatic escalation to a human console carrying a six-field intervention
-contract, two principal-approved acting-model evidence entries, an authorization-owned browser-initiated
-selection/switch protocol, a reviewed native selected-lane call into sealed quarantine, reviewed M5.10
-authorization-owned message ingestion and single-use output release, and hash-chained action records sealed before
-effect. M5.11, reviewed at `8364745`, adds governed proposal intake and fixed pre-commit evidence. M5.12, reviewed
-at `5b27b0e`, adds an authorization-derived dialogue trigger and response-bound native proposal revision; it still
-cannot reach Commit or effect execution. [ADR-016](docs/adr/ADR-016-m6-evidence-capture.md) defines the M6
-full-pass, authorization-owned live-screening, native commitment-continuation, and dual-model capture contract.
-The separate M6.0a anchoring prerequisite was reviewed at `be7f2ef`, and the M6.0b unsupported-`reverse` removal
-was reviewed at `36126fa`. M6.1's authorization-owned live-screening protocol was reviewed at `5f51caa` with
-synthetic loopback providers only. [ADR-018](docs/adr/ADR-018-native-commitment-continuation.md) freezes the M6.2
-contract, beginning with the complete services-host route set. Its native commitment continuation was implemented
-and reviewed at `b3a4992`, GO — no blocking findings, using synthetic adapters and one local mock effect only.
-[ADR-019](docs/adr/ADR-019-m6-offline-conformance-and-capture-artifacts.md) defines the M6.3 offline two-lane
-matrix, strict artifact schemas, gitignored staging, and sanitization boundary; its corrected definition was
-reviewed at `5952066`, GO — no findings. Its bounded implementation was reviewed at `d24fe33`, GO — no findings,
-after exact-SHA corrections. It executes only deterministic synthetic fixtures and nine dedicated loopback
-transport assertions; it creates no public capture. Beat 15 may write and verify only its disposable staging
-checkpoint fixture. A bounded correction reviewed at `4296e1e`, GO — no blocking findings, rejects contradictory
-declared cost/exact amount and notification count/recipient-list fields during fresh ruling issuance; see
-[ADR-001's field scope and limits](docs/adr/ADR-001-transaction-lifecycle.md#5-ceiling-arithmetic).
-M6.4 has not started; no live run, provider call, repository checkpoint/Git operation,
-publication, or push is authorized by the M6.3 review.
+ai-charter-runtime is a TypeScript proof of concept that puts authorization checks outside the acting AI model. It explores how an agent can work within recorded permissions, stop when a decision needs human input, and leave a record of what was proposed, authorized, and done.
 
-The authoritative build specification lives beside the implementation:
-[runtime-gates-poc-spec.md](docs/spec/runtime-gates-poc-spec.md).
-On any divergence, the specification and its linked Charter source documents prevail.
-The exact upstream revision, digest, reviewed runtime baseline, and remaining milestone work are tracked in
-[docs/implementation-plan.md](docs/implementation-plan.md); the offline M4 beat and adversarial mapping is in
-[docs/m4-acceptance.md](docs/m4-acceptance.md), and the bounded M5 acceptance evidence is in
-[docs/m5-acceptance.md](docs/m5-acceptance.md). The generated M6.3 offline catalog and honest coverage ledger is
-[docs/m6/acceptance.md](docs/m6/acceptance.md); it is not a live or published capture.
+The working example is a **simulated public-grant assessment**. The agent can propose filing an assessment; a separate authorization service checks the proposal against the recorded mandate, and the executing service verifies permission again before producing a local test effect. A model's answer is never permission to act.
 
-## Honest limits — read this first
+**Current stage:** a runnable local prototype with synthetic tests and browser consoles. The reviewed implementation reaches one local mock effect; live end-to-end capture is still pending. This is a maintainer-built demonstrator, not production-ready software or a certification artifact.
 
-- **Not an assurance or certification claim.** This demonstrates a runtime *mechanism*. Nothing here is
-  "Charter-certified"; there is no green light, no trust API, no queryable certification (see [NOTICE](NOTICE)).
-- **Institutions are simulated — two roles are absent.** Rulemaker, operator, and record keeper are surfaces
-  played by one person; independent reviewer and remedy decider do not exist here. M4 now has a native
-  three-process HTTP boundary and an authorization-origin governance console, but same-machine process
-  isolation is separation of duties in miniature, not independence. M5.2 is reviewed at `1973515` with
-  authorization-resolved acting projections and deterministic fixture-pinned screening. The M5.3 boundary was
-  reviewed at `1cc7fb2`; it adds non-authorizing, access-recorded lexical output admission, but an admitted result
-  is not semantic red-line clearance. M5.4 is reviewed at `b247d5b`; it adds a containment-only coordinator
-  exercised against a synthetic loopback provider. M5.5 is reviewed at `1d992fa`; it adds authorization-owned,
-  durable, metadata-only evidence for each attempt before disclosure and for its terminal admission or fixed failure.
-  M5.6 is reviewed at `b57c01e`; it adds an authorization-owned, replayable system-use decision prerequisite and a
-  principal-only read view. Approval is necessary for the synthetic use but never sufficient for an action.
-  The authorization gate and principal read view are wired into `runtime:start`. M5.9, reviewed at `e58d397`,
-  adds a two-step, dynamic-session-only selected-lane call whose admitted bytes remain sealed and unreadable.
-  M5.10, reviewed at `8a904f3`, adds a separate session-bound message preparation/use path, authorization-owned
-  `said`/`inferred` ingestion, and a short-lived single-use release with consume-time currentness checks. The
-  reviewed ADR-013 definition at `fbc72cc` now has a bounded M5.11 implementation reviewed at `8364745`: one explicit
-  proposal preparation, a purpose-bound schema call, authorization-owned freeze, and fixed Authorize → Submit →
-  Verify evidence. The separately reviewed ADR-014 definition at `0c3cac9` now has an M5.12 implementation reviewed
-  at `5b27b0e`:
-  authorization resolves the exact inferred dialogue item, owns a single-use revision preparation, and re-runs the
-  revised proposal through the same three pre-commit gates. Neither path is an assurance, commitment, effect, or
-  completed M5 path. M5.7, reviewed at
-  `442397a`, adds replayable
-  headless selection and switching through orchestrator-authenticated authorization routes. M5.8, reviewed at
-  `ff9e438`, adds a dynamic-session-only browser caller with a two-minute, single-use preparation, redacted
-  recovery, and no model request as part of selection. The M5.12 Verify-stage
-  `unconfirmed_inference_as_fact` trigger is the only active native empathy dialogue path; broader semantic
-  red-line coverage remains partial or not assessed. ADR-015's definition received exact-SHA GO at `a08fa98`.
-  The bounded M5.13 implementation at `5251500` received exact-SHA GO with no findings and completes M5 only for
-  this POC's stated acceptance boundary. It adds only the exact beat-5 fixture/test and acceptance ledger: no route,
-  model capability, Commit, or effect path. Four empathy red-line families remain partial and two not assessed.
-- **A deterministic gate proves declared rules were applied** — not that the rules are lawful, fair, or legitimate.
-- **Commit-token window (interpretive choice).** Commitment binds at `commit-verify`; a revocation landing in the
-  token's short TTL is too late for that action by definition. On the stricter reading of "authority in flight",
-  that is a knowing, TTL-bounded divergence — recorded, not hidden.
-- **A terminal `no-effect` reconciliation is append-only.** If later evidence proves an effect occurred, the
-  terminal record is not overwritten; M4 must append a linked correction and route it for review.
-- **Provider-side model substitution is detectable, not preventable**; the served-model id is itself
-  provider-supplied evidence.
-- **Screening models fail.** Their signals can only Flag or force Escalate — never allow.
-- **Post-commit reversal is not implemented.** The source vocabulary names `reverse`, but this POC currently has no
-  effect-specific reversal or compensation path and no remedy decider. ADR-017's implementation, reviewed at
-  `36126fa`, removes and rejects the empty active token rather than presenting a power the runtime does not have.
-- **Minimal cryptography** (hash chains + HMAC; composite-head checkpoints pushed to this public repo bound —
-  but do not eliminate — the rollback window). Split custody is future work.
-- **Synthetic scenario, demo-grade authentication, free-tier model endpoints without an SLA.**
+[Explore the example](#what-you-can-explore) · [Run the offline checks](#start-here-offline) · [Read the documentation](docs/README.md) · [Contribute](#contribute)
 
-## Layout and status
+## What you can explore
 
-| Path | Content | Milestone |
-|---|---|---|
-| `docs/adr/` | Architecture decision records (protocol state machines, interfaces, anchoring, dialogue channel, classification, card lifecycle, canonicalization) | M1 |
-| `docs/cards/` | Signed model cards (version-pinned evidence-registry artifacts) | M3 |
-| `tooling/probe.mjs` | M0 capability probe (endpoints, model ids, `tools`, `response_format`, latency, limits) | M0 |
-| `packages/gate-core/` | Authorization service — the independent gate (AGPL-3.0-only) | M2 |
-| `packages/adapters/` | OpenAI-compatible model adapters (AGPL-3.0-only) | M3–M5 |
-| `packages/services-mock/` | Executing services with commitment verification (AGPL-3.0-only) | M3 |
-| `packages/consoles/` | M3 deterministic loop, M4 process/consoles, and M5 selected-lane ingress into sealed quarantine (AGPL-3.0-only) | M3–M5 |
-| `fixtures/` | Synthetic grant-scenario data and pinned test fixtures (AGPL-3.0-only) | M3+ |
+| Situation in the synthetic grant scenario | Behavior exercised by the prototype |
+|---|---|
+| File an assessment within the mandate's limits | Verify the exact proposed action at commitment, produce one local filing effect, and record a receipt. |
+| File above the amount ceiling | Refuse the action at the executing service, including when a case officer has approved it. |
+| Submit the same committed filing again | Refuse the replay without producing a second effect. |
+| Treat an unconfirmed inference as a fact | Stop and route a focused question to the case officer; a bare confirmation is insufficient. |
+| Receive a factual correction from the applicant | Append the correction, withdraw or reopen reliance, and record the obligation to route it for review. |
 
-Original software is licensed under GNU AGPL version 3 only; original documentation and graphics use CC BY-SA 4.0. See [Licensing guide](LICENSING.md) for the scope and third-party exceptions. Robert Schaub may separately agree alternative licences for rights he controls. The repository-specific [privacy notice](PRIVACY.md) is a draft prepared for review; it distinguishes public repository interactions from data controlled by an independent local operator.
+These are fixture-based exercises. The [acceptance ledger](docs/m6/acceptance.md) maps the scenarios and adversarial cases to evidence, with coverage marked **exercised**, **partial**, or **not assessed**.
 
-## M0 probe
+## How it works
 
-```bash
-cp .env.local.example .env.local   # add your keys (never committed)
-node tooling/probe.mjs --lane all
+The prototype separates three roles into local processes:
+
+```mermaid
+flowchart LR
+    O[Agent orchestrator] -->|Proposed action| A[Authorization service]
+    A -->|Escalation| H[Human governance console]
+    H -->|Scoped response| A
+    O -->|Execution request| S[Executing service]
+    S -->|Verify commitment| A
+    A -->|Single-use commit token| S
+    S -->|Authorized local effect| E[Mock filing]
 ```
 
-Results land in `docs/m0-probe-results.json` (gitignored); conclusions go into
-[docs/m0-probe-memo.md](docs/m0-probe-memo.md).
+The authorization service owns the rules, mandates, decisions, and records. The orchestrator cannot change standing authority or receive a commit token. Screening-model signals can flag a concern or force escalation; they cannot grant permission.
 
-## M4 native process boundary
+Five gates organize the action lifecycle:
 
-After `.env.local` contains the ADR-002 credentials, ADR-007 HMAC pair, and both model-lane API keys, start the local
-services, authorization, and orchestrator processes in fail-closed recovery order with:
+| Gate | Question it addresses |
+|---|---|
+| **Authorize** | Is this system and proposed use within the recorded authority? |
+| **Submit** | Are the proposed inputs, tools, and disclosures permitted? |
+| **Verify** | Does the proposal meet the required checks, or need human intervention? |
+| **Commit** | Is this exact action still authorized at the point of commitment? |
+| **Rely** | What record can people inspect, rely on, and challenge? |
+
+A gate returns **allow**, **deny**, or **escalate**. Escalation stops the action and routes a bounded decision to the appropriate human role. It does not grant additional authority. Missing or ambiguous authority fails closed.
+
+See the [implementation specification](docs/spec/runtime-gates-poc-spec.md) for the exact contracts and the [architecture decisions](docs/adr/) for protocol details.
+
+## Start here: offline
+
+You need **Node.js 20 or newer**, npm, and Git. Start with the synthetic checks; they require no model API keys or `.env.local` file. Dependency installation needs network access; the checks use synthetic fixtures and local loopback providers.
+
+```powershell
+git clone https://github.com/robertschaub/ai-charter-runtime.git
+cd ai-charter-runtime
+npm ci
+npm run typecheck
+npm run m6:schemas
+npm exec -- vitest run packages/m6-offline/src/m6Offline.test.ts
+```
+
+Already have a checkout? Start at `npm ci` in its root directory.
+
+The schema command validates the M6 artifact schemas, committed fixture sources, and generated acceptance ledger; it prints `M6 schemas and committed sources validate.` on success. The final command runs the focused offline conformance tests, including refusals and recovery paths. These checks do not constitute a live model evaluation.
+
+For a reading-first tour, start with the [scenario table](docs/m6/acceptance.md#scripted-beats), then the [test-family coverage](docs/m6/acceptance.md#thirteen-test-families).
+
+<details>
+<summary><strong>Advanced: browser consoles and provider probes</strong></summary>
+
+<a id="m4-native-process-boundary"></a>
+
+### Local browser runtime
+
+The interactive runtime needs additional configuration. Copy [.env.local.example](.env.local.example) to the gitignored `.env.local` and configure the distinct role/process credentials, HMAC key pair, and both model-lane API keys. [ADR-002](docs/adr/ADR-002-authenticated-interfaces.md) and [ADR-007](docs/adr/ADR-007-canonicalization-and-keys.md) define the credential and integrity contracts. Never put credentials in source files or records.
 
 ```powershell
 npm run runtime:start
 ```
 
-The supervisor passes each child only its scoped credentials and derives narrower audience tokens in
-memory. Services recovers its ledger first so authorization can replay, sweep, and reconcile before its
-own listener binds. Authorization verifies the record layer against the last composite checkpoint before
-appending the new run header; detected tampering or rollback halts startup, while remote unavailability is
-reported without being confused with missing authority. The orchestrator binds last. Shutdown handlers are
-installed before the first spawn, and supervised children close when their IPC parent disconnects. All listeners
-use `127.0.0.1` by default.
-The authorization-origin read-side APIs now serve strict ruling, model-card, mandate, escalation,
-record-verification, chain-view, applicant-extract, and system-use-decision projections. The governance console at
-`http://127.0.0.1:7801/console` now provides the principal mandate/card/escalation/record surfaces and the
-applicant extract, plus the case officer's user-initiated handoff control. It has no third-party content,
-emits no CORS headers, stores a pasted role token only in that origin's `localStorage`, and presents evidence
-rather than an assurance signal. The applicant can append an extract-bound factual correction, which withdraws
-reliance pending a principal-owned routing obligation without rewriting the effect. The handoff opens the fixed orchestrator-origin receiver, consumes a
-maximum-30-second boot-bound code over the authenticated process channel, and creates an independent
-maximum-15-minute session whose raw bearer is kept only in that tab's `sessionStorage`. That case surface now
-shows the mandate's signed-card evidence and current authorization-owned selection. A distinct evidence-review
-gesture asks the orchestrator to derive the current predecessor and obtain a fresh authorization check; only the
-resulting process-private, maximum-two-minute preparation can be selected once. The browser receives neither the
-  check id nor authorization-only bindings, stores no model target/selection preparation, and polls only authorization-owned
-  state. The M5.9 implementation reviewed at `e58d397` adds a separate prepare/run gesture over the current
-  selection. It uses only authorization's current synthetic projection, fixes the output ceiling at 512 tokens,
-  returns metadata-only disclosure status, and leaves admitted bytes in a process-private no-reader quarantine.
-  The M5.10 implementation reviewed at `8a904f3` preserves that projection-only route while adding a distinct
-  two-step message composer. For a
-  message-bound call, authorization ingests the officer text before provider contact, issues a release only with an
-  admitted exact binding, and consumes it into the inferred store before the browser can read the labelled
-  authorization transcript. The browser receives neither raw provider response nor release reference. A safe link opens the routed dialogue on the
-authorization origin, where the responder's own role token reads the question/contract and posts the answer
-directly. Raw clients still face the same ACL, Origin guard, evidence resolution, and single-use state machine.
-This M5.10 path was reviewed at `8a904f3`; it does not complete M5. ADR-013 defines the separately approved bounded
-proposal-intake slice; its initial definition review found two documentation-contract issues and the correction
-received GO at `fbc72cc`. The implementation and its retry-idempotency regression were reviewed at `8364745` with
-no remaining findings; the path remains bounded before Commit and does not complete M5. M4 acceptance
-is complete at reviewed runtime commit `e326562`; the M5.1 conversation-state and pure projection core was
-cross-model adversarially reviewed at `c1b5eb0` with no code findings. M5.2 was reviewed at `1973515`; it adds an
-access-recorded, orchestrator-only acting projection and offline screening fixtures keyed to an exact frozen
-proposal hash and gate. M5.3 was implementation-reviewed at `1cc7fb2`; it recomputes that projection before
-accepting a synthetic model-output claim, checks current mandate/card and requested-versus-served model identity,
-derives turn-level restriction tags inside authorization, and records only decision metadata and digests. Its
-narrow lexical checker can miss paraphrases, so admission is not a semantic safety clearance. It returns no ruling
-  or token, makes no provider call, leaves the browser route at `501`, and does not complete M5. M5.4
-connects an authorization projection to a synthetic loopback adapter and returns the response to authorization;
-an admitted result is held behind a process-private metadata/destroy-only quarantine with no release path. This
-coordinator was not constructed by the runtime process in that reviewed slice. The M5.5
-integration point reviewed at `1d992fa` replaces the raw projection route with a single-use call lifecycle:
-authorization durably records the turn/mandate/card/model/projection binding before returning the projection, then
-records admitted, withheld, or a fixed failure class without raw output, prompts, provider errors, endpoints, or
-credentials. Expired, replayed,
-mismatched, and previous-boot references fail closed; an unfinished attempt remains explicitly indeterminate after
-recovery. This evidence does not release output, call a live provider, or complete M5.
-M5.6, reviewed at `b57c01e` after its evidence-derivation correction, additionally requires one exact, current
-system-use decision at the case, model-call, ruling/commit, and record/receipt boundaries. It binds only decision
-id/version/digest, bounded status/condition
-facts, and current-at-record results; evidence packs and rationale stay out of runtime records. A transition
-invalidates outstanding rulings and blocks post-provider admission without releasing or persisting the output.
-The principal view is read-only evidence, not a trust score, certification, legal approval, or action authority.
-M5.7, reviewed at `442397a`, replaces the legacy proposal-time selection marker with one append-only,
-authorization-owned current selection per configured case. Boot-bound single-use checks precede initial selection
-or switching; selection identity binds calls, admission, proposals, rulings, and commitment verification. A switch
-atomically retires unresolved prior-lane rulings and calls, while served identity is appended only from confirmed
-terminal call evidence. M5.8, reviewed at `ff9e438`, connects that protocol only to the authenticated case console.
-It keeps the authorization check and predecessor server-side, derives case-seat provenance from the session, and
-recovers only through a redacted current-selection read. It adds no native provider ingress, conversation
-ingestion, output release, live probe, or M6 path.
-M5.9, reviewed at `e58d397`, constructs the two signed-card-bound adapters and coordinator before the orchestrator
-listener binds, gives provider configuration only to that child, and exposes single-use preparation/use/status
-routes to the dynamic case session. Startup itself makes no provider request, no live provider invocation was run
-for that tranche. M5.10, reviewed at `8a904f3`, adds the separately defined message-ingress, release, and transcript
-path without proposal construction, empathy completion, a live provider run, or M6 capture. M5.11, reviewed at
-`8364745`, implements only ADR-013's native proposal preparation, schema-bound intake/freeze, replayable origin evidence,
-fixed precommit sequence, and exact-key browser projection. M5.12, reviewed at `5b27b0e`, implements only ADR-014's focused
-Verify dialogue trigger, direct response basis, revision preparation/use, immutable successor lineage, and repeated
-precommit checks. It makes no live provider claim and never reaches Commit or an executing service. The M5.13
-implementation reviewed at `5251500` adds fixture-pinned beat-5 conformance and an honest acceptance map. This
-completes the bounded M5 milestone, not the partial or unassessed areas recorded in that map. ADR-016 remains the
-reviewed M6 definition. Its M6.1 implementation, reviewed at `5f51caa`, adds a paused authorization-owned screening
-lifecycle exercised only with synthetic loopback providers. M6.2, reviewed at `b3a4992`, continues one exact
-verified native proposal through an authorization-owned Commit decision and services-host verification to one
-local synthetic effect. It adds no live-provider or capture claim. M6.3's bounded offline implementation was
-reviewed at `d24fe33`, GO — no findings. It exposes no live runner and creates no public capture. M6.4 and later
-stages remain separately approval- and review-gated; live-provider use, checkpoint pushes, artifact review, and
-publication retain their own action-time approval gates.
+The supervisor starts services, authorization, and the orchestrator in recovery order. The governance console is at `http://127.0.0.1:7801/console` with default settings; the case officer opens the case console through its handoff control. Startup makes no model request, but model-call controls can contact configured providers and incur charges. Use synthetic data only. See the [console documentation](packages/consoles/README.md) for the current interaction boundaries.
 
-Offline and deterministic verification uses synthetic records and skips only the remote-presence step:
+Existing local records can be checked with `npm run verify:records -- --local`; this skips the remote-checkpoint-presence step only. Verification starts a run and appends access evidence, so it is not a read-only inspection.
 
-```powershell
-npm run verify:records -- --local
-```
+<a id="m0-probe"></a>
+
+### Provider capability probe
+
+`npm run probe` contacts the configured model APIs and writes gitignored results to `docs/m0-probe-results.json`. It is an optional maintainer operation, not an onboarding step. Agents need explicit maintainer approval for live probes, key generation/rotation, and card signing; see [AGENTS.md](AGENTS.md). Historical endpoint findings are in the [M0 probe memo](docs/m0-probe-memo.md).
+
+</details>
+
+## Status and limits
+
+M4 and the bounded M5 milestone are complete. M6.1–M6.3 add synthetic screening exercises, native commitment continuation, and offline conformance. **M6.4 live capture has not started.** Exact reviewed revisions and remaining work are in the [implementation plan](docs/implementation-plan.md); [M4](docs/m4-acceptance.md), [M5](docs/m5-acceptance.md), and [M6.3](docs/m6/acceptance.md) have separate acceptance records.
+
+<a id="honest-limits--read-this-first"></a>
+
+- **Mechanism, not institutional independence.** Rulemaker, operator, and record keeper are played by one demo operator. An independent reviewer and remedy decider are absent. Separate local processes do not establish independent oversight.
+- **Bounded evidence.** Tests show how declared rules are applied to synthetic cases; they do not establish that the rules are lawful, fair, or legitimate. Semantic screening remains partial or not assessed, and model signals can be wrong.
+- **Commitment has a defined boundary.** Authority binds at `commit-verify`; revocation during the token's short remaining lifetime is too late for that action under this design. Post-commit reversal or compensation is not implemented. Later corrections append evidence rather than overwrite earlier outcomes, including a terminal `no-effect` reconciliation.
+- **Prototype infrastructure.** Authentication is demo-grade. Hash chains, HMAC, and checkpoints bound but do not eliminate rollback risk; independent record custody remains future work. Provider-reported model identity cannot prevent provider-side substitution.
+
+See the [full specification limits](docs/spec/runtime-gates-poc-spec.md#9-non-goals-and-honest-limits) and [NOTICE](NOTICE). There is no certification, assurance credential, or trust score here.
+
+## Relationship to Our AI Charter and EGA
+
+This repository demonstrates the [Our AI Charter](https://github.com/robertschaub/our-ai-charter) runtime reference model and provides technical preparation for [Evidence-Gated Agents (EGA)](https://github.com/robertschaub/our-ai-charter/blob/main/docs/Assurance/Concepts/evidence-gated-agents.md). EGA plans to reuse compatible gates, proposal bindings, commitment verification, and receipts around an agent's exact proposed decision, with FactHarbor providing a separate live evidence examination. **That integration is not implemented and remains subject to funding.**
+
+The authoritative [Runtime specification](docs/spec/runtime-gates-poc-spec.md), its [system-use companion](docs/spec/system-use-decision-record.md), and ADRs live here beside the code. On divergence, the specification and its linked Charter sources prevail. EGA-specific contract changes require separate review and adoption.
+
+<a id="layout-and-status"></a>
+
+## Find your way around
+
+| Area | Start here |
+|---|---|
+| Documentation and reading paths | [Documentation index](docs/README.md) |
+| Authorization, mandates, and records | [Gate core](packages/gate-core/) |
+| Model connections | [Adapters](packages/adapters/) |
+| Local action execution | [Mock services](packages/services-mock/) |
+| Orchestrator and browser consoles | [Consoles](packages/consoles/) |
+| Offline conformance | [M6 offline runner](packages/m6-offline/) and [acceptance ledger](docs/m6/acceptance.md) |
+| Synthetic inputs and model evidence | [Fixtures](fixtures/) and [model cards](docs/cards/) |
+
+## Contribute
+
+Useful contributions include clearer examples, reproducible build problems, challenges to the stated limits, and proposals for the Runtime specification or ADRs. Open a [public issue](https://github.com/robertschaub/ai-charter-runtime/issues) for these; report gate bypasses, record-integrity findings, and exposed secrets through the [private security route](SECURITY.md).
+
+Before submitting work, read [Contributing](CONTRIBUTING.md) and the [agent and development rules](AGENTS.md). Original software and synthetic fixtures use **AGPL-3.0-only**; original documentation and graphics use **CC BY-SA 4.0**. See the [licensing guide](LICENSING.md) for scope, third-party exceptions, and alternative licensing. The [privacy notice](PRIVACY.md) remains a draft for review.
+
+The full contributor suite is `npm test`. On 3 October 2026, 427 tests passed and three process tests failed at mandate creation (HTTP 422 instead of 201). Source inspection points to the default [demo system-use decision](fixtures/demo/system-use-decision.json), which expired on 30 September, while those tests use the current clock; this explanation has not been isolated by reproduction. The focused offline checks above pass with their fixed synthetic timeline. The process-test failure remains open; this documentation update does not renew an approval or change runtime behavior.
