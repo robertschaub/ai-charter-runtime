@@ -7,7 +7,8 @@ no blocking findings, using synthetic loopback providers only. ADR-018's M6.2 im
 live capture, checkpoint push, and publication have not started and remain separately approval-gated. ADR-019's
 corrected M6.3 definition was reviewed at `5952066`, GO — no findings; its bounded offline implementation was
 reviewed at `d24fe33`, GO — no findings. Post-relocation maintenance and the current-clock process-test correction
-were reviewed at `20fe6e9`, GO — no Critical or High findings; neither authorizes M6.4 live work.
+were reviewed at `20fe6e9`, GO — no Critical or High findings; neither authorizes M6.4 live work. ADR-020 now
+contains the M6.4 definition candidate; its review remains pending.
 The separate M6.0a anchoring prerequisite was reviewed at `be7f2ef`, and the M6.0b unsupported-`reverse` prerequisite
 was reviewed at `36126fa`.
 **Spec:** §§1, 3, 5, 6, 7, 9, and 10 (M6), especially the two-layer comparison rule in §7.
@@ -252,8 +253,10 @@ A live run additionally requires all of the following:
 
 1. a clean, reviewed implementation commit already published on `origin/main`;
 2. `npm run typecheck`, `npm test`, and `npm run cards:verify` passing at that commit;
-3. both Charter digests re-verified read-only, signed cards unchanged and current, current system-use decision and
-   hard conditions checked, the exact capture plan frozen, and no redecision trigger observed;
+3. the current Runtime specification and system-use companion digests verified in this repository, their
+   historical Charter provenance rows re-verified read-only, signed cards unchanged and current, current
+   system-use decision and hard conditions checked, the exact capture plan frozen, and no redecision trigger
+   observed;
 4. separate reviewed closure of the ADR-003 failed-push/rollback distinction and the known `reverse` disposition;
 5. explicit action-time maintainer approval naming the capture id, plan digest, both acting lanes, the screening
    role/provider, and the separate bounded request ceiling for each; and
@@ -282,11 +285,12 @@ after sanitization and exact-diff review. No capture command auto-stages, auto-c
 artifacts. A live-run approval is not publication approval, and publication approval is not permission to rewrite
 or sign a model card.
 
-The final README/spec review is cross-model and exact-SHA. The reviewer reads the pinned specification from the
-immutable Charter commit, treated read-only; this repository never copies or edits it. Any required specification
-change is proposed and published upstream under separate approval, after which this repository moves both
-provenance rows together in a separately reviewed commit. Maintainer-run results remain a method dry-run even when
-two model families review the text.
+The final README/spec review is cross-model and exact-SHA. The reviewer reads the current specification and
+system-use companion from this repository and independently verifies the historical provenance rows against the
+immutable Charter commit, treated read-only. Implementation-contract changes are proposed and reviewed here;
+changes to broader Charter obligations remain upstream. Adopting a later Charter source revision moves both
+historical provenance rows together in a separately reviewed commit. Maintainer-run results remain a method
+dry-run even when two model families review the text.
 
 ### 9. M6 is implemented and reviewed in bounded slices
 

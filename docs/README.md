@@ -28,6 +28,8 @@ attribution to Robert Schaub / Our AI Charter.
   M6 evidence/capture boundary in [ADR-016](adr/ADR-016-m6-evidence-capture.md), the reviewed M6.2 native
   commitment continuation in [ADR-018](adr/ADR-018-native-commitment-continuation.md), and the reviewed M6.3
   offline conformance/artifact definition in
-  [ADR-019](adr/ADR-019-m6-offline-conformance-and-capture-artifacts.md).
+  [ADR-019](adr/ADR-019-m6-offline-conformance-and-capture-artifacts.md). The M6.4 live-capture and publication
+  candidate is [ADR-020](adr/ADR-020-m6-live-capture-and-publication.md); its definition remains review-pending
+  and authorizes no live operation.
 - `cards/` — signed, version-pinned model cards (M3): the v0 evidence registry.
 - `m0-probe-memo.md` — the M0 endpoint decisions, filled from probe results.

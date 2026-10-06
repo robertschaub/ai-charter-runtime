@@ -10,10 +10,11 @@ implementation received GO at `5f51caa` with synthetic loopback providers only. 
 definition received GO at `d0b8cc6`; its implementation received GO at `b3a4992` with no blocking findings.
 ADR-019's corrected M6.3 definition received GO at `5952066` with no findings. Its bounded offline implementation
 received GO at `d24fe33` after exact-SHA corrections, with no remaining findings. M6.4 live capture has not started
-and remains separately approval- and review-gated. The separate amount and notification declaration-consistency
-correction received cross-model **GO — no blocking findings** at `4296e1e`. The post-relocation maintenance and
-current-clock test correction at `20fe6e9` received independent read-only **GO — no Critical or High findings**;
-its bounded review is recorded below.
+and remains separately approval- and review-gated. ADR-020 now carries the M6.4 definition candidate; its review
+is pending and it authorizes no implementation or live operation. The separate amount and notification
+declaration-consistency correction received cross-model **GO — no blocking findings** at `4296e1e`. The
+post-relocation maintenance and current-clock test correction at `20fe6e9` received independent read-only
+**GO — no Critical or High findings**; its bounded review is recorded below.
 
 This file tracks implementation status and sequencing in `ai-charter-runtime`. It does not replace or
 reinterpret the authoritative [runtime specification](spec/runtime-gates-poc-spec.md) or its
@@ -246,7 +247,7 @@ assessed, the Charter vocabulary and provenance pin are unchanged, and no M6.1 s
 | M3 — vertical slice | Implemented | Deterministic authorize → propose → rule → commit-verify → effect → receipt path, adapters, service ledger, and signed cards are present. |
 | M4 — escalation + governance console | **Complete** | Final exact-SHA review of `e326562` returned GO with no findings; the offline acceptance ledger preserves the remaining partial and not-assessed boundaries. |
 | M5 — screening + empathy + switching | **Complete within the bounded POC acceptance** | M5.1–M5.12 culminate in the authority-bearing baseline `5b27b0e`. ADR-015's zero-route M5.13 definition received GO at `a08fa98`; its fixture/test/acceptance implementation at `5251500` received GO with no findings. The acceptance ledger retains four partial and two not-assessed empathy red-line families. This is not assurance, semantic clearance, or deployment readiness. |
-| M6 — full pass + demo capture | **M6.3 reviewed; M6.4 not started** | [ADR-016](adr/ADR-016-m6-evidence-capture.md) received GO at `582eaeb`; M6.0a received GO at `be7f2ef`; M6.0b received GO at `36126fa`; M6.1 received GO at `5f51caa` using synthetic loopback providers only; M6.2 received GO at `b3a4992` using synthetic adapters and one local mock effect only. ADR-019's corrected M6.3 definition received GO at `5952066`, and its bounded offline implementation received GO at `d24fe33`. No live provider call, checkpoint push, public capture, or publication is authorized. |
+| M6 — full pass + demo capture | **M6.3 reviewed; M6.4 definition candidate** | [ADR-016](adr/ADR-016-m6-evidence-capture.md) received GO at `582eaeb`; M6.0a received GO at `be7f2ef`; M6.0b received GO at `36126fa`; M6.1 received GO at `5f51caa` using synthetic loopback providers only; M6.2 received GO at `b3a4992` using synthetic adapters and one local mock effect only. ADR-019's corrected M6.3 definition received GO at `5952066`, and its bounded offline implementation received GO at `d24fe33`. ADR-020 defines M6.4 but remains review-pending. No implementation, live provider call, checkpoint push, public capture, or publication is authorized. |
 | M7 — article | Not started | Publication claims follow a reviewed and explicitly published M6 artifact. |
 
 These labels describe repository implementation status, not assurance, certification, or independent
@@ -840,11 +841,14 @@ authorization route. The bounded handoff and session implementation was independ
 
 ## Ordered next slices
 
-1. **M6.4 — live capture and publication.** Freeze one plan, require M6.0a's current `remotely_acknowledged`
-   predicate, obtain action-time approval for its bounded acting and
-   screening-provider calls and separate approval for checkpoint pushes, capture through `runtime:start`, sanitize and review the
-   candidate artifact, then obtain separate commit/push approval. Only a published exact SHA and final cross-model
-   README/spec review permit a documentation-only M6 closure.
+1. **M6.4 definition review.** Review [ADR-020](adr/ADR-020-m6-live-capture-and-publication.md) at its exact SHA.
+   Definition review authorizes no code, provider request, checkpoint operation, system-use renewal, or publication.
+2. **M6.4 implementation slices.** After definition GO and separate approval, implement schemas/preflight,
+   successor/live entry point, and staging/publication mechanics as separately reviewed synthetic-only slices.
+3. **M6.4 approved execution and publication.** Only after implementation GO: review one successor and frozen plan,
+   obtain action-time approval for the bounded acting/screening requests, separately approve start/end checkpoint
+   commits and pushes, run, sanitize and review the artifact, then separately approve materialization, commit, and
+   push. Only a published exact SHA and final cross-model README/spec review permit M6 closure.
 
 Substantive tranches are committed and reviewed at bounded integration points. A documentation-only status
 acknowledgement does not trigger a recursive review round; changes to ADRs, gates, invariants, ACLs,

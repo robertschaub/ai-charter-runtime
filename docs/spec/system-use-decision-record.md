@@ -195,7 +195,7 @@ The slice is not complete unless tests show:
 ## Implementation order
 
 1. Finish and exact-SHA review M5.5 unchanged, then stop.
-2. Freeze the decision schema and lifecycle in an ADR in `ai-charter-runtime`; update that repository's immutable specification pin only after this upstream change is reviewed and published.
+2. Freeze the decision schema and lifecycle in an ADR in `ai-charter-runtime`. This companion is now maintained beside the Runtime code; changes to broader Charter obligations remain upstream, and adoption of a later Charter source revision moves the historical provenance rows only after separate review.
 3. Implement authorization-owned schema, WAL/replay, synthetic fixture, and read-only projection with no browser or provider release path.
 4. Add fail-closed checks at case creation, model-call begin/admission, ruling binding, and `commit-verify`.
 5. Add the scoped governance-console view only after the core state and negative tests pass.
