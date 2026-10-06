@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: CC-BY-SA-4.0 -->
 # Runtime implementation plan
 
-**Status date:** 2026-09-10
+**Status date:** 2026-10-06
 
 **Current milestone:** M4 and bounded M5 complete; the ADR-016 M6 definition received GO at `582eaeb`, and the
 separate M6.0a anchoring-flow prerequisite received GO at `be7f2ef`. The M6.0b unsupported-`reverse` implementation
@@ -11,7 +11,9 @@ definition received GO at `d0b8cc6`; its implementation received GO at `b3a4992`
 ADR-019's corrected M6.3 definition received GO at `5952066` with no findings. Its bounded offline implementation
 received GO at `d24fe33` after exact-SHA corrections, with no remaining findings. M6.4 live capture has not started
 and remains separately approval- and review-gated. The separate amount and notification declaration-consistency
-correction received cross-model **GO — no blocking findings** at `4296e1e`; its bounded review is recorded below.
+correction received cross-model **GO — no blocking findings** at `4296e1e`. The post-relocation maintenance and
+current-clock test correction at `20fe6e9` received independent read-only **GO — no Critical or High findings**;
+its bounded review is recorded below.
 
 This file tracks implementation status and sequencing in `ai-charter-runtime`. It does not replace or
 reinterpret the authoritative [runtime specification](spec/runtime-gates-poc-spec.md) or its
@@ -46,6 +48,30 @@ Charter commit. The canonical `main` URLs are moving references; reproducibility
 URLs, commit, paths, and digests above. A later upstream change does not silently move either pin.
 
 ## Reviewed implementation baseline
+
+The current reviewed maintenance baseline is
+`20fe6e96f6a391cb31ee1656bc53755ca92b6952` (`20fe6e9`). Independent read-only review on 2026-10-06 covered
+the documentation/instruction relocation and maintenance range since the same-tree publication at `cd39033`, plus
+the five-file current-clock process-test correction at `20fe6e9`, and returned **GO — no Critical or High
+findings**. The correction leaves the expired checked-in system-use fixture byte-identical and creates
+digest-correct current synthetic copies only in disposable test directories. It changes no production route,
+access control, authority decision, token, record, checkpoint, signed card, or live-provider path.
+
+Maintainer-run validation at `20fe6e9` passed `npm run typecheck`, 4/4 Git-safety tests, 430/430 Vitest tests
+across 45 files, `npm run m6:schemas`, and `npm run cards:verify` for both unchanged signed cards. The exact
+five-file commit diff is clean. The wider maintenance range retains six trailing-blank-line warnings in copied
+CC BY-SA licence texts; those warnings are outside the `20fe6e9` correction and do not change executable code.
+Current GitHub branch protection was read back on 2026-10-06 with force-pushes and deletion disabled and admin
+enforcement enabled. A historical non-fast-forward publication identified during review still requires private
+continuity recording before M6.4 relies on a remotely acknowledged capture boundary.
+
+The checked-in demo system-use decision expired on 2026-09-30 and remains expired. The test helper is not a
+renewal mechanism and cannot authorize M6.4. The next reviewed definition must specify the principal-approved
+successor or new-history decision, its production installation path, a separate live entry point, current remote
+acknowledgement, dependency/lockfile identity in capture evidence, and reconciliation of ADR-016's pre-relocation
+specification-location wording. The carried beat-7 wording and amount-equality guidance also remain in that slice.
+No provider call, probe, key operation, signing, checkpoint operation, capture, publication, or push was part of
+this maintenance correction or review.
 
 The latest bounded cross-model source review covers
 `dc40d7ec399a4a20109b44a4352238c2a633b5ca` through `4296e1e5b6601012713e9bd74c1f6725f7988196`:

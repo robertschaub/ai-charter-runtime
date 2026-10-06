@@ -4,9 +4,10 @@
 **Status:** definition reviewed at `582eaeb`, GO — no findings; M6.1 implementation reviewed at `5f51caa`, GO —
 no blocking findings, using synthetic loopback providers only. ADR-018's M6.2 implementation was reviewed at
 `b3a4992`, GO — no blocking findings, using synthetic adapters and one local mock effect only. Live provider use,
-M6.3 implementation, live capture, checkpoint push, and publication have not started and remain separately
-approval-gated. ADR-019's corrected M6.3 definition was reviewed at `5952066`, GO — no findings; it authorizes no
-code by itself.
+live capture, checkpoint push, and publication have not started and remain separately approval-gated. ADR-019's
+corrected M6.3 definition was reviewed at `5952066`, GO — no findings; its bounded offline implementation was
+reviewed at `d24fe33`, GO — no findings. Post-relocation maintenance and the current-clock process-test correction
+were reviewed at `20fe6e9`, GO — no Critical or High findings; neither authorizes M6.4 live work.
 The separate M6.0a anchoring prerequisite was reviewed at `be7f2ef`, and the M6.0b unsupported-`reverse` prerequisite
 was reviewed at `36126fa`.
 **Spec:** §§1, 3, 5, 6, 7, 9, and 10 (M6), especially the two-layer comparison rule in §7.
@@ -16,8 +17,9 @@ was reviewed at `36126fa`.
 
 The bounded M5 milestone is complete. The repository now contains the reviewed M6.1 authorization-owned live
 screening protocol and M6.2 native continuation from an authorization-owned verified proposal through Commit to
-the mock services host, exercised only with synthetic adapters and a local mock effect. It does not yet contain an
-M6 capture runner, public M6 artifact contract, or live-provider capture. The legacy headless action route remains
+the mock services host, exercised only with synthetic adapters and a local mock effect. M6.3 adds the reviewed
+offline runner, strict capture-plan and artifact schemas, deterministic catalog, and gitignored staging boundary.
+It does not contain a live-capture entry point or live-provider capture. The legacy headless action route remains
 only a synthetic HTTP-test seam and is barred from the native continuation.
 
 The authoritative specification requires two different kinds of M6 evidence. First, every scripted beat and the
@@ -305,7 +307,8 @@ is:
 4. **M6.3 offline full pass and capture contract:** ADR-019 freezes the strict plan/artifact schemas, closed atomic
    case catalog, genuinely executed two-lane twenty-two-beat/adversarial matrix, acceptance ledger, local staging
    boundary, sanitization checks, and offline/dry-run entry points. Its corrected definition received exact-SHA GO
-   at `5952066`; implementation remains separately approval-gated and no live-provider path is authorized.
+   at `5952066`; its bounded offline implementation received exact-SHA GO at `d24fe33`. No live-provider path is
+   authorized.
 5. **M6.4 approved live capture and publication:** freeze and review one plan, obtain action-time provider and push
    approvals, perform the bounded live run, sanitize without rewriting evidence, review the resulting artifact,
    then obtain separate commit/push approval. Only after the published exact SHA and final cross-model review may a
