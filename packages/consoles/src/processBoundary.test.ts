@@ -18,6 +18,7 @@ import {
   freezeProposal,
   verifyChain,
 } from 'gate-core';
+import { writeCurrentTestSystemUseFixture } from 'gate-core/test-support';
 import { afterEach, describe, expect, it } from 'vitest';
 
 const ROOT = fileURLToPath(new URL('../../..', import.meta.url));
@@ -188,6 +189,10 @@ describe('M4 native three-process boundary', () => {
     async () => {
       const recordsRoot = mkdtempSync(join(tmpdir(), 'runtime-process-boundary-'));
       roots.push(recordsRoot);
+      const systemUseFixture = writeCurrentTestSystemUseFixture(
+        join(ROOT, 'fixtures', 'demo', 'system-use-decision.json'),
+        recordsRoot,
+      );
       const policyRoot = mkdtempSync(join(tmpdir(), 'runtime-dialogue-policy-'));
       roots.push(policyRoot);
       const policyFile = join(policyRoot, 'v1.yaml');
@@ -246,6 +251,7 @@ describe('M4 native three-process boundary', () => {
         SERVICES_PORT: String(servicesPort),
         DEMO_WORLD_ID: 'w-demo',
         RUNTIME_RECORDS_ROOT: recordsRoot,
+        RUNTIME_SYSTEM_USE_FIXTURE: systemUseFixture,
       };
       const servicesEnvironment = {
         ...common,

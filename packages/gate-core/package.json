@@ -18,6 +18,10 @@
     "./m6-infrastructure": {
       "types": "./dist/m6Infrastructure.d.ts",
       "default": "./dist/m6Infrastructure.js"
+    },
+    "./test-support": {
+      "types": "./dist/testSupport.d.ts",
+      "default": "./dist/testSupport.js"
     }
   },
   "dependencies": {

@@ -7,6 +7,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { deriveAudienceToken, verifyChain } from 'gate-core';
+import { writeCurrentTestSystemUseFixture } from 'gate-core/test-support';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { parseBrowserSelectionPreparation } from './caseHandoffConsole.js';
@@ -141,6 +142,10 @@ describe('ADR-002 and ADR-010 real-listener browser boundary', () => {
     async () => {
       const recordsRoot = mkdtempSync(join(tmpdir(), 'case-session-boundary-'));
       roots.push(recordsRoot);
+      const systemUseFixture = writeCurrentTestSystemUseFixture(
+        join(ROOT, 'fixtures', 'demo', 'system-use-decision.json'),
+        recordsRoot,
+      );
       const [authzPort, orchestratorPort, servicesPort] = await Promise.all([freePort(), freePort(), freePort()]);
       const tokens = {
         principal: '1'.repeat(64),
@@ -161,6 +166,7 @@ describe('ADR-002 and ADR-010 real-listener browser boundary', () => {
         DEMO_WORLD_ID: 'w-demo',
         DEMO_CASE_ID: 'case_demo',
         RUNTIME_RECORDS_ROOT: recordsRoot,
+        RUNTIME_SYSTEM_USE_FIXTURE: systemUseFixture,
       };
       const servicesEnv = {
         ...common,

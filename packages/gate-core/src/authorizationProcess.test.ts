@@ -13,6 +13,7 @@ import { freezeProposal } from './authorizationCore.js';
 import { startAuthorizationProcess } from './authorizationProcess.js';
 import { writeCheckpoint } from './checkpoint.js';
 import { frozenProposal } from './schemas/index.js';
+import { writeCurrentTestSystemUseFixture } from './testSupport.js';
 import { WalStore } from './walStore.js';
 
 const ROOT = fileURLToPath(new URL('../../..', import.meta.url));
@@ -148,6 +149,10 @@ describe('authorization process fail-stop lifecycle', () => {
   it('binds native proposals to the selected lane and fails stale fixture hashes closed', async () => {
     const recordsRoot = mkdtempSync(join(tmpdir(), 'authorization-screening-fixture-'));
     roots.push(recordsRoot);
+    const systemUseFixture = writeCurrentTestSystemUseFixture(
+      join(ROOT, 'fixtures', 'demo', 'system-use-decision.json'),
+      recordsRoot,
+    );
     const checkpointsRoot = join(recordsRoot, 'checkpoints');
     const servicesPort = await startHealthyServices();
     const authorizationPort = await freePort();
@@ -164,6 +169,7 @@ describe('authorization process fail-stop lifecycle', () => {
       DEMO_WORLD_ID: 'w-demo',
       RUNTIME_RECORDS_ROOT: recordsRoot,
       RUNTIME_CHECKPOINTS_ROOT: checkpointsRoot,
+      RUNTIME_SYSTEM_USE_FIXTURE: systemUseFixture,
       CHECKPOINT_VERIFY_LOCAL: '1',
     });
     const post = (path: string, token: string, value: unknown) =>
