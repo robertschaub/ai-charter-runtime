@@ -56,7 +56,7 @@ enumerated recipients list. [§5's declaration-consistency paragraphs](#5-ceilin
 scope, the malformed-volume refusal, the existing-ruling invalidation limits, and the distinction from the closed
 M6.3 beat-7 executor.
 
-**Proposed amendment (M6.2 native commitment continuation, definition reviewed at `d0b8cc6`):** ADR-018 freezes a
+**Amendment (M6.2 native commitment continuation, definition reviewed at `d0b8cc6`, implementation reviewed at `b3a4992`, GO):** ADR-018 freezes a
 native execution preparation that lets `proc:services_host` compose one Commit ruling and, on allow only, perform this
 ADR's existing `commit-verify` transition in the same world-lock/WAL transaction. The preparation binds the exact
 effect-intent basis; the future Commit ruling id remains authorization-generated. No Commit allow is externally
