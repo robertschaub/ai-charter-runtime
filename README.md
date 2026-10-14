@@ -3,11 +3,17 @@
 
 **Check an AI agent's proposed action before it takes effect.**
 
-ai-charter-runtime is a TypeScript proof of concept that puts authorization checks outside the acting AI model. It explores how an agent can work within recorded permissions, stop when a decision needs human input, and leave a record of what was proposed, authorized, and done.
+Our AI Charter Runtime is a proof of concept for applying recorded rules and permissions while an AI agent works. It puts authorization checks outside the acting AI model, so the model cannot grant itself permission to act. Its control mechanisms are technical foundations intended for reuse in Evidence-Gated Agents (EGA).
 
-The working example is a **simulated public-grant assessment**. The agent can propose filing an assessment; a separate authorization service checks the proposal against the recorded mandate, and the executing service verifies permission again before producing a local test effect. A model's answer is never permission to act.
+The prototype has three responsibilities: **Check, Act and Record**.
 
-**Current stage:** a runnable local prototype with synthetic tests and browser consoles. The reviewed implementation reaches one local mock effect; live end-to-end capture is still pending. This is a maintainer-built demonstrator, not production-ready software or a certification artifact.
+- **Check:** a separate authorization service checks the proposed action against recorded mandates, permissions and rules, then allows it, blocks it or requests human input.
+- **Act:** the executing service verifies permission for the exact action again before carrying it out.
+- **Record:** tamper-evident records are created before and after the action, showing what was proposed, authorized and done so the sequence can be inspected later.
+
+The TypeScript implementation uses a **simulated public-grant assessment**: the agent can propose filing an assessment, but a proposal above the recorded amount ceiling is refused even if a case officer has approved it. An allowed proposal can produce a local test filing and a receipt. Enforcing recorded rules does not establish that those rules are legitimate or that the assessment's claims are true.
+
+**Current stage:** a local prototype with runnable offline tests and browser consoles. The reviewed implementation reaches one local mock effect; live end-to-end capture is still pending. The default interactive demo's recorded authority has expired; see [status and limits](#honest-limits--read-this-first). This is a maintainer-built demonstrator, not production-ready software or a certification artifact.
 
 [Explore the example](#what-you-can-explore) · [Run the offline checks](#start-here-offline) · [Read the documentation](docs/README.md) · [Contribute](#contribute)
 
